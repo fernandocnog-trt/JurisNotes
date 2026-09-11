@@ -85,7 +85,8 @@ window.JurisEditor = (function () {
 
     function _interceptarColagem(e) {
         e.preventDefault();
-        const texto = (e.originalEvent || e).clipboardData.getData('text/plain');
+        let texto = (e.originalEvent || e).clipboardData.getData('text/plain');
+        texto = window.JurisUtils.limparEscapeMarkdown(texto);
         const htmlSeguro = markdownParaHtml(texto);
         document.execCommand('insertHTML', false, htmlSeguro);
         _atualizarEstadoVazio();
@@ -162,10 +163,12 @@ window.JurisEditor = (function () {
     function markdownParaHtml(md) {
         if (!md) return '';
 
+        let mdLimpo = window.JurisUtils.limparEscapeMarkdown(md);
+
         // Escapa caracteres HTML perigosos ANTES de reinserir nossas próprias tags.
         // Sem isso, um "<" ou ">" literal no texto salvo (ex: citação de lei, comparação
         // numérica) seria interpretado como HTML ao ser injetado via innerHTML.
-        let html = md.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        let html = mdLimpo.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
         html = html.replace(/\*\*([\s\S]+?)\*\*/g, '<b>$1</b>');
         html = html.replace(/\*([\s\S]+?)\*/g, '<i>$1</i>');

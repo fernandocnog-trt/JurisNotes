@@ -72,7 +72,9 @@ function getIconeAcervoSVG(intencao) {
         'fundamentacao': `<svg viewBox="0 0 24 24" fill="none" stroke="#00695c" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path></svg>`,
         'refutacao': `<svg viewBox="0 0 24 24" fill="none" stroke="#8B4513" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path><line x1="9" y1="9" x2="15" y2="15"></line><line x1="15" y1="9" x2="9" y2="15"></line></svg>`,
         'preliminar': `<svg viewBox="0 0 24 24" fill="none" stroke="#5d4037" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>`,
-        'veredito': `<svg viewBox="0 0 24 24" fill="none" stroke="#e65100" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>`
+        'veredito': `<svg viewBox="0 0 24 24" fill="none" stroke="#e65100" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>`,
+        'jurisprudencia': `<svg viewBox="0 0 24 24" fill="none" stroke="#00838F" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path><path d="M12 10l-2-2m0 0l-2 2m2-2v6"></path></svg>`,
+        'degravacao': `<svg viewBox="0 0 24 24" fill="none" stroke="#BF360C" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line></svg>`
     };
     return map[intencao] || map['premissa'];
 }
@@ -758,7 +760,8 @@ window.abrirEdicaoModeloAcervo = async function(event, modeloId) {
         { val: 'premissa', label: 'Premissa Lógica' }, { val: 'comando', label: 'Comando Direto' },
         { val: 'texto', label: 'Texto Fixo' }, { val: 'nota', label: 'Nota Oculta' },
         { val: 'veredito', label: 'Veredito / Conclusão' }, { val: 'fundamentacao', label: 'Fundamentação Legal' },
-        { val: 'refutacao', label: 'Refutação (Mérito)' }, { val: 'preliminar', label: 'Filtro / Prejudicial' }
+        { val: 'refutacao', label: 'Refutação (Mérito)' }, { val: 'preliminar', label: 'Filtro / Prejudicial' },
+        { val: 'jurisprudencia', label: 'Jurisprudência Exata' }, { val: 'degravacao', label: 'Degravação Curada' }
     ];
 
     modelo.nos.forEach((no, index) => {
@@ -937,7 +940,13 @@ window.adicionarTagGlobal = async function() {
 
 window.editarTagGlobal = async function(idx) {
     const tagAntiga = _tagsGlobais[idx];
-    const novoNome = prompt('Renomear tag (atualizará todos os modelos):', tagAntiga);
+    const novoNome = await JurisPrompt.ask(
+        '️ Renomear Tag', 
+        'Renomear tag (Isso atualizará TODOS os modelos que utilizam esta tag):', 
+        'Novo nome da tag...', 
+        tagAntiga
+    );
+    
     if (!novoNome || novoNome.trim() === '' || novoNome.trim() === tagAntiga) return;
     
     const nomeLimpo = novoNome.trim();
@@ -1020,7 +1029,13 @@ window.acionarRenomearModeloAtual = async function() {
     if (!_modeloSelecionadoId) return exibirToast('Nenhum modelo selecionado.', 'erro');
     const nomeElemento = document.getElementById('edit-modelo-nome');
     const nomeAtual = nomeElemento.textContent;
-    const novoNome = prompt('Digite o novo nome para este modelo:', nomeAtual);
+    
+    const novoNome = await JurisPrompt.ask(
+        '️ Renomear Modelo', 
+        'Digite o novo título para este modelo do acervo:', 
+        'Novo título...', 
+        nomeAtual
+    );
     
     if (novoNome === null || novoNome.trim() === '' || novoNome.trim() === nomeAtual) return;
 
@@ -1028,7 +1043,9 @@ window.acionarRenomearModeloAtual = async function() {
         await AcervoManager.renomearModelo(_modeloSelecionadoId, novoNome.trim());
         exibirToast('Modelo renomeado com sucesso!', 'sucesso');
         nomeElemento.textContent = novoNome.trim();
-    } catch(e) { exibirToast('Erro ao renomear modelo na nuvem.', 'erro'); }
+    } catch(e) { 
+        exibirToast('Erro ao renomear modelo na nuvem.', 'erro'); 
+    }
 };
 
 window.acionarExcluirModeloAtual = async function() {

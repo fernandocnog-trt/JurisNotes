@@ -904,8 +904,10 @@ function _debounce(func, wait) {
 window.limparAreaInternaLGPD = function() {
     document.getElementById('ctx-teor-decisao').value = '';
     document.getElementById('ctx-teor-embargos').value = '';
+    document.getElementById('ctx-teor-confronto').value = '';
     sessionStorage.removeItem('juris_ed_ctx_decisao');
     sessionStorage.removeItem('juris_ed_ctx_embargos');
+    sessionStorage.removeItem('juris_ed_ctx_confronto');
     exibirToast('Área restrita limpa.', 'info');
 };
 
@@ -942,6 +944,7 @@ window.salvarRascunhoContextoDebounced = _debounce(function() {
         const rascunho = document.getElementById('ctx-rascunho-ia').value;
         const decisao = document.getElementById('ctx-teor-decisao').value;
         const embargos = document.getElementById('ctx-teor-embargos').value;
+        const confronto = document.getElementById('ctx-teor-confronto').value;
         
         // Captura o processo atual como ID de Segurança
         const tagProcesso = document.getElementById('tag-numero-processo');
@@ -953,6 +956,7 @@ window.salvarRascunhoContextoDebounced = _debounce(function() {
         // Só salva o sigilo se houver dados, amarrado ao ID do processo atual
         sessionStorage.setItem('juris_ed_ctx_decisao', decisao);
         sessionStorage.setItem('juris_ed_ctx_embargos', embargos);
+        sessionStorage.setItem('juris_ed_ctx_confronto', confronto);
         sessionStorage.setItem('juris_ed_ctx_processo_ref', numProcesso);
     } catch (e) {
         console.warn('Falha ao acessar sessionStorage:', e);
@@ -991,6 +995,7 @@ window.abrirModalGeradorContexto = async function() {
 
             let decisaoXML = "";
             let embargosXML = "";
+            let confrontoXML = "";
 
             for (const [docTipo, limites] of Object.entries(agrupados)) {
                 if (limites.inicio && limites.fim) {
@@ -1022,13 +1027,15 @@ window.abrirModalGeradorContexto = async function() {
                     const xml = `\n<${tagName}>\n${textoLimpo}\n</${tagName}>\n`;
 
                     if (docTipo === 'decisao') decisaoXML += xml;
-                    else embargosXML += xml;
+                    else if (docTipo === 'embargos') embargosXML += xml;
+                    else confrontoXML += xml;
                 }
             }
 
             // Injeta nas textareas protegidas por LGPD
             if (decisaoXML) sessionStorage.setItem('juris_ed_ctx_decisao', decisaoXML.trim());
             if (embargosXML) sessionStorage.setItem('juris_ed_ctx_embargos', embargosXML.trim());
+            if (confrontoXML) sessionStorage.setItem('juris_ed_ctx_confronto', confrontoXML.trim());
         }
 
         // 3. FLUXO ORIGINAL DE ABERTURA DO MODAL
@@ -1048,6 +1055,7 @@ window.abrirModalGeradorContexto = async function() {
         } else {
             document.getElementById('ctx-teor-decisao').value = sessionStorage.getItem('juris_ed_ctx_decisao') || '';
             document.getElementById('ctx-teor-embargos').value = sessionStorage.getItem('juris_ed_ctx_embargos') || '';
+            document.getElementById('ctx-teor-confronto').value = sessionStorage.getItem('juris_ed_ctx_confronto') || '';
         }
 
         const painelPdf = document.getElementById('pdf-container');
@@ -1110,8 +1118,9 @@ window.gerarECopiarContexto = function(modo = 'pro') {
     if (modo === 'interno') {
         const decisao = document.getElementById('ctx-teor-decisao').value.trim();
         const embargos = document.getElementById('ctx-teor-embargos').value.trim();
+        const confronto = document.getElementById('ctx-teor-confronto').value.trim();
 
-        if (decisao || embargos) {
+        if (decisao || embargos || confronto) {
             outputFinal += "<relatorio_do_conflito>\n";
             if (decisao) {
                 outputFinal += "  <inteiro_teor_decisao_embargada>\n";
@@ -1122,7 +1131,12 @@ window.gerarECopiarContexto = function(modo = 'pro') {
             if (embargos) {
                 outputFinal += "  <inteiro_teor_embargos>\n";
                 outputFinal += `    ${embargos.replace(/\n/g, '\n    ')}\n`;
-                outputFinal += "  </inteiro_teor_embargos>\n";
+                outputFinal += "  </inteiro_teor_embargos>\n\n";
+            }
+            if (confronto) {
+                outputFinal += "  <documentos_de_confronto>\n";
+                outputFinal += `    ${confronto.replace(/\n/g, '\n    ')}\n`;
+                outputFinal += "  </documentos_de_confronto>\n";
             }
             outputFinal += "</relatorio_do_conflito>\n";
         }
@@ -1200,9 +1214,8 @@ document.addEventListener('mouseover', (e) => {
     const docTipo = pin.dataset.tooltipDoc;
     const topicoNome = pin.dataset.tooltipTopico;
 
-    // Dicionário visual adaptado para o contexto de ED
-    const docNomes = { decisao: "Decisão Embargada", embargos: "Inteiro Teor dos Embargos" };
-    const nomeBonito = docNomes[docTipo] || (docTipo ? docTipo.toUpperCase() : 'DESCONHECIDO');
+    // Dicionário visual adaptado consumindo a SSOT
+    const nomeBonito = window.ExportManager ? window.ExportManager.getDocLabel(docTipo) : (docTipo ? docTipo.toUpperCase() : 'DESCONHECIDO');
     const corFronteira = fronteira === 'INÍCIO' ? '#34db98' : '#e74c3c';
 
     // 2. DOM MUTATION: Injeta o novo conteúdo e semântica de cores
