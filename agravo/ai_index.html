@@ -274,8 +274,18 @@
         
                 <div class="tool-separator"></div>
         
-                <!-- Módulo: Contrato de Trabalho -->
-                <div id="btn-contrato-trabalho" class="floating-pill-dark" role="button" tabindex="0" aria-label="Parâmetros do Contrato" style="display:none;" onclick="ContratoManager.abrirModal()" title="Adicionar Parâmetros do Contrato">
+                <!-- Nova Ferramenta: Toggle Diretrizes Globais -->
+        <button id="btn-toggle-globais" class="header-icon-btn" aria-pressed="false" aria-label="Alternar Diretrizes Globais" style="display:none;" onclick="TopicsManager.toggleDiretrizesGlobais()" title="Ativar/Ocultar Diretrizes Globais do Tópico">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+            </svg>
+        </button>
+
+        <!-- Separador Semântico -->
+        <div class="tool-separator"></div>
+
+        <!-- Módulo: Contrato de Trabalho -->
+        <div id="btn-contrato-trabalho" class="floating-pill-dark" role="button" tabindex="0" aria-label="Parâmetros do Contrato" style="display:none;" onclick="ContratoManager.abrirModal()" title="Adicionar Parâmetros do Contrato">
                     <div class="pill-icon">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <rect x="2" y="7" width="20" height="14" rx="2" ry="2"></rect>
@@ -982,11 +992,26 @@
     <!-- MODAL SMART SHORTCUTS -->
     <div id="shortcut-modal-backdrop" style="display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.40); z-index: 4004;" onclick="ShortcutManager.fecharModal()"></div>
     <div id="shortcut-modal" class="crop-wizard-popup" style="display:none; z-index: 4005;">
-        <div class="wizard-header">📍 Configurar Atalho</div>
+        <div class="wizard-header" id="shortcut-modal-header">📍 Configurar Atalho</div>
         <p class="popup-label" id="shortcut-modal-title">Página do documento:</p>
-        <p style="font-size: 0.8rem; color: #666; margin-bottom: 8px;">Deixe em branco para remover o atalho.</p>
         <input type="number" id="shortcut-page-input" class="topic-select" placeholder="Ex: 15" min="1">
-        <div class="wizard-actions">
+        
+        <!-- NOVOS CAMPOS PARA FAVORITO CUSTOMIZADO (Iniciam ocultos via JS) -->
+        <div id="shortcut-custom-fields" style="display: none; margin-top: 16px; border-top: 1px solid var(--border-color); padding-top: 16px;">
+            <p class="popup-label">Resumo do Favorito (Tooltip):</p>
+            <input type="text" id="shortcut-label-input" class="topic-select" placeholder="Ex: Laudo Pericial Médico..." maxlength="40">
+            
+            <p class="popup-label" style="margin-top: 12px;">Cor do Ícone:</p>
+            <div class="color-picker-grid" id="shortcut-color-picker">
+                <label class="color-swatch" style="background: #D500B5;"><input type="radio" name="shortcut_color" value="fuchsia" class="sr-only"></label>
+                <label class="color-swatch" style="background: #6a1b9a;"><input type="radio" name="shortcut_color" value="purple" class="sr-only"></label>
+                <label class="color-swatch" style="background: #00897B;"><input type="radio" name="shortcut_color" value="teal" class="sr-only"></label>
+                <label class="color-swatch" style="background: #E65100;"><input type="radio" name="shortcut_color" value="orange" class="sr-only"></label>
+                <label class="color-swatch" style="background: #0288D1;"><input type="radio" name="shortcut_color" value="cyan" class="sr-only"></label>
+            </div>
+        </div>
+        
+        <div class="wizard-actions" style="margin-top: 20px; display: flex; gap: 10px;">
             <button class="chip-btn chip-cancelar" onclick="ShortcutManager.fecharModal()">✕ Cancelar</button>
             <button class="chip-btn chip-autora" style="background: var(--trt-blue); color: white; border-color: var(--trt-blue);" onclick="ShortcutManager.salvarModal()">✔ Confirmar</button>
         </div>
@@ -1606,5 +1631,94 @@ Crie um sumário hierárquico enxuto com as Grandes Categorias e Subcategorias q
     <!-- SCRIPT DE AUTENTICAÇÃO E ACERVO -->
     <script type="module" src="js/ai_firebase-auth.js"></script>
     <script type="module" src="js/ai_firebase-acervo.js"></script>
+
+    <!-- ========================================== -->
+    <!-- MODAL DEDICADO: CRIAR TÓPICO AI            -->
+    <!-- ========================================== -->
+    <div id="ai-topico-backdrop" style="display: none; position: fixed; inset: 0; background: rgba(15, 23, 42, 0.6); backdrop-filter: blur(3px); z-index: 5000;" onclick="fecharModalTopicoAI()"></div>
+    
+    <div id="ai-topico-modal" class="crop-wizard-popup" style="display:none; z-index: 5001; max-width: 700px; width: 95vw; padding: 0; overflow: hidden;">
+        <div class="wizard-header" style="display: flex; justify-content: space-between; align-items: center; padding: 16px 24px; border-bottom: 1px solid var(--border-color); background: #ffffff; margin: 0;">
+            <span style="font-weight: 700; color: var(--trt-blue); display: flex; align-items: center; gap: 8px;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 20px; height: 20px;"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                Criar Tópico Recursal (Agravo de Instrumento)
+            </span>
+            <button style="background: none; border: none; font-size: 1.2rem; cursor: pointer; color: #64748b;" onclick="fecharModalTopicoAI()">✕</button>
+        </div>
+        
+        <div style="padding: 20px 24px;">
+            <p class="popup-label" style="font-size: 0.8rem; letter-spacing: 0.5px;">1. SELECIONE A HIPÓTESE NORMATIVA (CABIMENTO):</p>
+            
+            <div class="ai-radio-group">
+                <label class="ai-radio-card">
+                    <input type="radio" name="ai_obice" value="tempestividade" checked>
+                    <div class="ai-radio-content">
+                        <span class="ai-radio-title">Tempestividade</span>
+                        <span class="ai-radio-desc">Análise de prazos recursais e intempestividade do recurso trancado.</span>
+                    </div>
+                </label>
+                
+                <label class="ai-radio-card">
+                    <input type="radio" name="ai_obice" value="preparo">
+                    <div class="ai-radio-content">
+                        <span class="ai-radio-title">Preparo</span>
+                        <span class="ai-radio-desc">Custas processuais, depósito recursal, GFIP ou seguro garantia.</span>
+                    </div>
+                </label>
+                
+                <label class="ai-radio-card">
+                    <input type="radio" name="ai_obice" value="representacao">
+                    <div class="ai-radio-content">
+                        <span class="ai-radio-title">Representação</span>
+                        <span class="ai-radio-desc">Irregularidade de procuração, mandato ou substabelecimento.</span>
+                    </div>
+                </label>
+                
+                <label class="ai-radio-card">
+                    <input type="radio" name="ai_obice" value="adequacao">
+                    <div class="ai-radio-content">
+                        <span class="ai-radio-title">Adequação / Outros</span>
+                        <span class="ai-radio-desc">Cabimento do recurso, unirrecorribilidade ou deserção diversa.</span>
+                    </div>
+                </label>
+            </div>
+
+            <p class="popup-label" style="font-size: 0.8rem; letter-spacing: 0.5px; margin-top: 16px;">2. DEFINA O TEMA ESPECÍFICO (EX: SEGURO GARANTIA, CUSTAS):</p>
+            <input type="text" id="ai-topico-tema" class="juris-prompt-input" placeholder="Digite o tema alvo deste agravo..." style="margin-top: 8px;" autocomplete="off" onkeydown="if(event.key === 'Enter') confirmarCriacaoTopicoAI()">
+        </div>
+
+        <div class="wizard-actions" style="padding: 16px 24px; background: #f8f9fa; border-top: 1px solid var(--border-color); margin: 0; display: flex; gap: 12px; justify-content: space-between;">
+            <button class="chip-btn chip-cancelar" style="width: auto; padding: 10px 24px;" onclick="fecharModalTopicoAI()">Cancelar</button>
+            <button class="chip-btn chip-autora" style="width: auto; flex: 1; max-width: 300px; background: var(--trt-blue); color: white; border: none;" onclick="confirmarCriacaoTopicoAI()">✔ Iniciar Análise</button>
+        </div>
+    </div>
+
+    <!-- ========================================== -->
+    <!-- JURIS PROMPT UNIVERSAL (Substituto do Prompt)-->
+    <!-- ========================================== -->
+    <div id="juris-prompt-backdrop" class="juris-prompt-backdrop" role="dialog" aria-modal="true" aria-labelledby="juris-prompt-title-text">
+        <div class="juris-prompt-modal" id="juris-prompt-modal">
+            <div class="juris-prompt-header">
+                <span id="juris-prompt-title" class="juris-prompt-title">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 20px; height: 20px;">
+                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                    </svg>
+                    <span id="juris-prompt-title-text">Entrada de Dados</span>
+                </span>
+                <button class="icon-action-micro" data-action="cancel" aria-label="Fechar" style="background: none; border: none; font-size: 1.2rem; cursor: pointer; color: var(--text-dark);">✕</button>
+            </div>
+            
+            <div class="juris-prompt-body">
+                <p id="juris-prompt-message" class="juris-prompt-message">Mensagem do sistema</p>
+                <input type="text" id="juris-prompt-input" class="juris-prompt-input" autocomplete="off">
+                
+                <div class="juris-prompt-actions">
+                    <button type="button" class="chip-btn chip-cancelar" data-action="cancel">✕ Cancelar</button>
+                    <button type="button" class="chip-btn chip-autora" data-action="confirm" style="background: var(--trt-blue); color: white; border: none;">✔ Confirmar</button>
+                </div>
+            </div>
+        </div>
+    </div>
 </body>
 </html>

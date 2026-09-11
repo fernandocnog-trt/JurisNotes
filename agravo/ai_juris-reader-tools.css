@@ -247,7 +247,7 @@ button#btn-ferramenta-extrator.extrator-completo:not(:disabled) svg {
 .audio-history-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; background: white; border: 1px solid #eee; border-radius: 6px; margin-bottom: 6px; cursor: pointer; transition: background 0.2s; }
 .audio-history-item:hover { background: #fdfaf4; border-color: #f2e3c6; }
 .audio-history-item .hist-title { font-size: 0.8rem; font-weight: 600; color: var(--text-dark); }
-.audio-history-item .hist-time { font-size: 0.75rem; color: #d84315; background: #ffe082; padding: 2px 6px; border-radius: 12px; font-weight: bold; }
+.audio-history-item .hist-time { font-size: 0.75rem; color: #3f6212; background: #ecfccb; padding: 2px 6px; border-radius: 12px; font-weight: bold; } /* Paleta Verde Limão AI */
 
 /* ================================================
    5. BOTÕES FLUTUANTES, TOOLTIPS E HIGHLIGHTS (PDF)
@@ -539,6 +539,80 @@ button#btn-ferramenta-extrator.extrator-completo:not(:disabled) svg {
    HEADER TOOLS AREA (Slate Dark & Empty States)
    ================================================ */
 
+/* Variável Global para Ícones Inativos no Header */
+.header-tools-area {
+    --header-ghost-alpha: 0.45;
+    flex-shrink: 0;
+}
+
+/* Expansão Total das Abas Principais (Processo/Anotações) */
+.tabs-nav {
+    flex: 1;
+    display: flex;
+    gap: 4px;
+    align-self: stretch; /* Encosta no teto e piso */
+    margin-right: 12px; /* Margem de respiro para a ilha de ferramentas */
+}
+
+.tabs-nav .tab-btn {
+    flex: 1;
+    max-width: none;
+    height: 100%;
+    margin: 0;
+    padding: 0 16px;
+    font-size: 0.95rem;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Separador Físico da Ilha de Ferramentas */
+.tool-separator {
+    width: 1px;
+    height: 18px;
+    background-color: rgba(255, 255, 255, 0.15);
+    margin: 0 6px;
+    flex-shrink: 0;
+}
+
+/* Base do Botão de Ícone */
+.header-tools-area .header-icon-btn {
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.header-tools-area .header-icon-btn svg { width: 16px; height: 16px; }
+
+.header-tools-area .header-icon-btn:not(.is-active) {
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, var(--header-ghost-alpha));
+}
+.header-tools-area .header-icon-btn:not(.is-active):hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.8);
+}
+
+.header-tools-area .header-icon-btn.is-active {
+    background-color: #A3E635; /* Verde Limão característico do Agravo (AI) */
+    color: #1a1a1a; 
+    box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+}
+.header-tools-area .header-icon-btn.is-active:hover {
+    background-color: #8ce015; /* Verde Limão escurecido no hover */
+    transform: scale(1.08);
+}
+
 /* 0. Estilos do Berço Fantasma (Microfone) */
 .header-tools-area .ghost-mic-wrapper {
     position: relative;
@@ -555,7 +629,7 @@ button#btn-ferramenta-extrator.extrator-completo:not(:disabled) svg {
 .header-tools-area .ghost-mic-wrapper .ghost-svg {
     width: 16px;
     height: 16px;
-    color: rgba(255, 255, 255, 0.2);
+    color: rgba(255, 255, 255, var(--header-ghost-alpha)) !important;
     position: absolute;
 }
 
@@ -1033,4 +1107,195 @@ button#btn-ferramenta-extrator.extrator-completo:not(:disabled) svg {
         /* Dá um feedback visual sutil de opacidade ao invés de giro brusco */
         opacity: 0.6; 
     }
+}
+
+/* ================================================
+MINI PLAYER DE ÁUDIO — MODAL FOCADO (AI CONTEXT)
+================================================ */
+.mini-audio-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.55);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    z-index: calc(var(--z-audio-player) - 1);
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.22s ease, visibility 0.22s ease;
+}
+
+.mini-audio-backdrop.is-visible {
+    opacity: 1;
+    visibility: visible;
+}
+
+.mini-audio-modal {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) scale(0.98);
+    width: min(420px, calc(100vw - 32px));
+    background: #ffffff;
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    box-shadow:
+        var(--shadow-md),
+        0 24px 64px rgba(0, 0, 0, 0.28);
+    z-index: var(--z-audio-player);
+    opacity: 0;
+    visibility: hidden;
+    transition:
+        opacity 0.22s ease,
+        transform 0.22s ease,
+        visibility 0.22s ease;
+}
+
+.mini-audio-modal.is-visible {
+    opacity: 1;
+    visibility: visible;
+    transform: translate(-50%, -50%) scale(1);
+}
+
+.mini-audio-modal__header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 16px 16px 10px 16px;
+    border-bottom: 1px solid #eee;
+}
+
+.mini-audio-modal__title {
+    font-size: 0.95rem;
+    font-weight: 800;
+    color: var(--trt-blue);
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+}
+
+.mini-audio-modal__close {
+    background: transparent;
+    border: none;
+    color: #64748b;
+    font-size: 1.1rem;
+    line-height: 1;
+    cursor: pointer;
+    padding: 4px 6px;
+    border-radius: 6px;
+    flex-shrink: 0;
+    transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.mini-audio-modal__close:hover {
+    background: #ffebee;
+    color: #d32f2f;
+}
+
+.mini-audio-modal__close:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(26, 58, 92, 0.25);
+}
+
+.mini-audio-modal__body {
+    padding: 16px;
+}
+
+.mini-audio-modal__body audio {
+    width: 100%;
+    height: 44px;
+    outline: none;
+}
+
+@supports not ((backdrop-filter: blur(4px)) or (-webkit-backdrop-filter: blur(4px))) {
+    .mini-audio-backdrop {
+        background: rgba(15, 23, 42, 0.72);
+    }
+}
+
+@media (max-width: 480px) {
+    .mini-audio-modal {
+        width: calc(100vw - 24px);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .mini-audio-backdrop,
+    .mini-audio-modal {
+        transition: none;
+    }
+    .mini-audio-modal, .mini-audio-modal.is-visible {
+        transform: translate(-50%, -50%);
+    }
+}
+
+/* ================================================
+   MODO ESTÚDIO: TRANSCRIÇÃO NO MINI PLAYER
+   ================================================ */
+
+/* Transição suave para a expansão da largura do modal */
+.mini-audio-modal {
+    transition:
+        opacity 0.22s ease,
+        transform 0.22s ease,
+        visibility 0.22s ease,
+        width 0.25s ease; 
+}
+
+/* Modificador de expansão do modal (Ativado via JS quando há texto) */
+.mini-audio-modal.has-transcript {
+    width: min(600px, calc(100vw - 32px));
+    max-height: calc(100vh - 32px);
+    overflow-y: auto; /* Proteção de segurança para telas muito pequenas */
+}
+
+/* Ajuste do container pai para permitir espaçamento reativo */
+.mini-audio-modal__body {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    transition: gap 0.25s ease;
+}
+
+.mini-audio-modal.has-transcript .mini-audio-modal__body {
+    gap: 16px; 
+}
+
+/* Classe exclusiva da área de leitura */
+.mini-audio-transcript {
+    display: none; /* Oculta por padrão */
+    
+    /* Limita altura para focar no scroll interno */
+    max-height: min(280px, 45vh); 
+    overflow-y: auto;
+    contain: layout style;
+    
+    background: #f8fafc;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    padding: 12px 16px;
+    
+    font-size: 0.95rem;
+    line-height: 1.6;
+    color: #334155;
+    
+    /* A REGRA MESTRE: Preserva parágrafos e quebras de linha nativas */
+    white-space: pre-wrap; 
+    overflow-wrap: break-word;
+}
+
+/* Ativa a exibição via modificador do modal pai */
+.mini-audio-modal.has-transcript .mini-audio-transcript {
+    display: block;
+}
+
+/* Scrollbar refinada para a área de leitura */
+.mini-audio-transcript::-webkit-scrollbar { width: 6px; }
+.mini-audio-transcript::-webkit-scrollbar-track { background: transparent; }
+.mini-audio-transcript::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+.mini-audio-transcript::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+/* Proteção para acessibilidade (foco de teclado sem borda intrusiva) */
+.mini-audio-transcript:focus-visible {
+    outline: 2px solid var(--trt-blue, #1a3a5c);
+    outline-offset: -2px;
 }
