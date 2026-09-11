@@ -45,6 +45,8 @@
     /* NOVAS VARIÁVEIS DO OUTLINE */
     --z-outline-backdrop: 4050;
     --z-outline-modal: 4051;
+    /* NOVO: Hierarquia do JurisPrompt - Acima dos modais de conteúdo */
+    --z-juris-prompt: 5000;
     --z-splash: 9999;
     
     /* Variável da Espinha Dorsal (Vermelho sólido primário) */
@@ -823,4 +825,96 @@ body.theme-processo-jasmine {
 .sr-only {
     position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; 
     overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
+
+/* ================================================
+   JURIS PROMPT - SISTEMA UNIVERSAL DE ENTRADA
+   ================================================ */
+.juris-prompt-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.6);
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
+    z-index: var(--z-juris-prompt);
+    
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.25s ease, visibility 0.25s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.juris-prompt-backdrop.is-active {
+    opacity: 1;
+    visibility: visible;
+}
+
+.juris-prompt-modal {
+    background: #ffffff;
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.35);
+    min-width: 400px;
+    max-width: 90vw;
+    overflow: hidden;
+    
+    transform: translateY(20px) scale(0.98);
+    transition: transform 0.25s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+.juris-prompt-backdrop.is-active .juris-prompt-modal {
+    transform: translateY(0) scale(1);
+}
+
+.juris-prompt-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid var(--border-color);
+    padding: 16px 20px;
+}
+
+.juris-prompt-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 700;
+    color: var(--trt-blue);
+}
+
+.juris-prompt-body {
+    padding: 16px 20px;
+}
+
+.juris-prompt-message {
+    white-space: pre-line;
+    line-height: 1.5;
+    margin-bottom: 12px;
+}
+
+.juris-prompt-input {
+    width: 100%;
+    padding: 10px 14px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    font-size: 0.95rem;
+    color: var(--text-dark);
+    background: #fafafa;
+    transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
+    outline: none;
+}
+
+.juris-prompt-input:focus {
+    border-color: var(--trt-blue);
+    background: #ffffff;
+    box-shadow: 0 0 0 3px rgba(0, 102, 204, 0.12);
+}
+
+.juris-prompt-actions {
+    margin-top: 24px;
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
 }

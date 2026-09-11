@@ -449,6 +449,16 @@
             <span style="font-size: 0.8rem; color: #1565c0;">Texto Fixo</span>
         </button>
         
+        <button class="ann-action-btn btn-intent" data-intent="jurisprudencia" style="justify-content: flex-start; gap: 8px; width: 100%;" title="Citação de Julgado" onclick="definirIntencaoSubAnotacao('jurisprudencia')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="#00838F" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path><path d="M12 10l-2-2m0 0l-2 2m2-2v6"></path></svg>
+            <span style="font-size: 0.8rem; color: #00838F;">Jurisprudência Exata</span>
+        </button>
+        
+        <button class="ann-action-btn btn-intent" data-intent="degravacao" style="justify-content: flex-start; gap: 8px; width: 100%;" title="Trecho Falado" onclick="definirIntencaoSubAnotacao('degravacao')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="#BF360C" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line></svg>
+            <span style="font-size: 0.8rem; color: #BF360C;">Degravação Curada</span>
+        </button>
+        
         <button class="ann-action-btn btn-intent" data-intent="nota" style="justify-content: flex-start; gap: 8px; width: 100%;" title="Ocultar da IA" onclick="definirIntencaoSubAnotacao('nota')">
             <svg viewBox="0 0 24 24" fill="none" stroke="#616161" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
             <span style="font-size: 0.8rem; color: #616161;">Nota Interna (Ocultar)</span>
@@ -541,11 +551,14 @@
         </div>
     </div>
     
-    <!-- BACKDROP DEDICADO PARA EDIÇÃO DE TEXTO -->
-    <div id="text-edit-backdrop" style="display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.40); z-index: 4000;" onclick="fecharModalEdicao()"></div>
-    
-    <!-- MODAL DE EDIÇÃO DE TEXTO -->
-    <div id="text-edit-modal" class="text-edit-modal" style="display:none;">
+    <!-- 1. Backdrop Modernizado (Transição via CSS, sem display:none) -->
+    <div id="text-edit-backdrop" class="modal-backdrop-modern" onclick="fecharModalEdicaoSeguro()"></div>
+
+    <!-- 2. Modal com Acessibilidade (ARIA) e Atalhos de Teclado -->
+    <div id="text-edit-modal" class="text-edit-modal" style="display:none;" 
+         role="dialog" aria-modal="true" aria-labelledby="edit-modal-title" 
+         onkeydown="handleModalEditorKeydown(event)">
+        
         <div class="edit-header" id="edit-modal-title">✏️ Editar Texto</div>
         
         <div class="edit-toolbar" id="edit-toolbar">
@@ -955,6 +968,7 @@
     
     <script src="js/ed_backup-manager.js"></script>
     <script src="js/ed_topics-manager.js?v=3.1.1"></script>
+    <script src="js/ed_document-views.js"></script>
     <script src="js/ed_balanca-manager.js"></script>
     <script src="js/ed_interaction-tools.js"></script>
     <script src="js/ed_audio-manager.js"></script>
@@ -1340,6 +1354,10 @@
                     <p class="popup-label" style="color: #e65100;">Inteiro Teor dos Embargos:</p>
                     <textarea id="ctx-teor-embargos" class="popup-textarea" style="display: block; min-height: 100px; border-color: #ffcc80;" placeholder="Cole os embargos aqui..." oninput="window.salvarRascunhoContextoDebounced()"></textarea>
                 </div>
+                <div style="grid-column: span 2;">
+                    <label class="popup-label" for="ctx-teor-confronto" style="color: #e65100;">Documentos de Confronto (Peças de Origem e Provas):</label>
+                    <textarea id="ctx-teor-confronto" class="popup-textarea" style="display: block; min-height: 100px; border-color: #ffcc80;" placeholder="Petição Inicial, Laudos, Sentença de 1º Grau, etc." oninput="window.salvarRascunhoContextoDebounced()"></textarea>
+                </div>
             </div>
 
             <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 14px;">
@@ -1441,8 +1459,24 @@ Crie um sumário hierárquico enxuto com as Grandes Categorias e Subcategorias q
             <div>
                 <p class="popup-label">Peça Processual:</p>
                 <select id="extrator-doc-select" class="topic-select">
-                    <option value="decisao">Decisão Embargada (Sentença/Acórdão)</option>
-                    <option value="embargos">Inteiro Teor dos Embargos</option>
+                    <optgroup label="Alvos Principais do ED">
+                        <option value="decisao">Decisão Embargada (Sentença/Acórdão)</option>
+                        <option value="embargos">Inteiro Teor dos Embargos</option>
+                    </optgroup>
+                    <optgroup label="Peças de Confronto / Origem">
+                        <option value="recurso_ordinario">Recurso Ordinário</option>
+                        <option value="contrarrazoes">Contrarrazões ao RO</option>
+                        <option value="contraminuta">Contraminuta aos EDs</option>
+                        <option value="peticao_inicial">Petição Inicial</option>
+                        <option value="contestacao">Contestação</option>
+                        <option value="impugnacao_contestacao">Impugnação à Contestação</option>
+                    </optgroup>
+                    <optgroup label="Provas e Atos">
+                        <option value="audiencia_instrucao">Audiência de Instrução</option>
+                        <option value="sentenca_primeiro_grau">Sentença de 1º Grau (Origem)</option>
+                        <option value="laudo_pericial">Laudo Pericial</option>
+                        <option value="atos_secretaria">Atos da Secretaria / Certidões</option>
+                    </optgroup>
                 </select>
             </div>
             <div>
@@ -1666,5 +1700,33 @@ Crie um sumário hierárquico enxuto com as Grandes Categorias e Subcategorias q
     <!-- SCRIPT DE AUTENTICAÇÃO E ACERVO -->
     <script type="module" src="js/ed_firebase-auth.js"></script>
     <script type="module" src="js/ed_firebase-acervo.js"></script>
+
+    <!-- ========================================== -->
+    <!-- JURIS PROMPT UNIVERSAL (Substituto do Prompt)-->
+    <!-- ========================================== -->
+    <div id="juris-prompt-backdrop" class="juris-prompt-backdrop" role="dialog" aria-modal="true" aria-labelledby="juris-prompt-title-text">
+        <div class="juris-prompt-modal" id="juris-prompt-modal">
+            <div class="juris-prompt-header">
+                <span id="juris-prompt-title" class="juris-prompt-title">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 20px; height: 20px;">
+                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                    </svg>
+                    <span id="juris-prompt-title-text">Entrada de Dados</span>
+                </span>
+                <button class="icon-action-micro" data-action="cancel" aria-label="Fechar" style="background: none; border: none; font-size: 1.2rem; cursor: pointer; color: var(--text-dark);">✕</button>
+            </div>
+            
+            <div class="juris-prompt-body">
+                <p id="juris-prompt-message" class="juris-prompt-message">Mensagem do sistema</p>
+                <input type="text" id="juris-prompt-input" class="juris-prompt-input" autocomplete="off">
+                
+                <div class="juris-prompt-actions">
+                    <button type="button" class="chip-btn chip-cancelar" data-action="cancel">✕ Cancelar</button>
+                    <button type="button" class="chip-btn chip-autora" data-action="confirm" style="background: var(--trt-blue); color: white; border: none;">✔ Confirmar</button>
+                </div>
+            </div>
+        </div>
+    </div>
 </body>
 </html>
