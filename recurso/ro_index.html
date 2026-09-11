@@ -480,6 +480,16 @@
             <span style="font-size: 0.8rem; color: #1565c0;">Texto Fixo</span>
         </button>
         
+        <button class="ann-action-btn btn-intent" data-intent="jurisprudencia" style="justify-content: flex-start; gap: 8px; width: 100%;" title="Citação de Julgado" onclick="definirIntencaoSubAnotacao('jurisprudencia')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="#00838F" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path><path d="M12 10l-2-2m0 0l-2 2m2-2v6"></path></svg>
+            <span style="font-size: 0.8rem; color: #00838F;">Jurisprudência Exata</span>
+        </button>
+        
+        <button class="ann-action-btn btn-intent" data-intent="degravacao" style="justify-content: flex-start; gap: 8px; width: 100%;" title="Trecho Falado" onclick="definirIntencaoSubAnotacao('degravacao')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="#BF360C" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line></svg>
+            <span style="font-size: 0.8rem; color: #BF360C;">Degravação Curada</span>
+        </button>
+        
         <button class="ann-action-btn btn-intent" data-intent="nota" style="justify-content: flex-start; gap: 8px; width: 100%;" title="Ocultar da IA" onclick="definirIntencaoSubAnotacao('nota')">
             <svg viewBox="0 0 24 24" fill="none" stroke="#616161" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
             <span style="font-size: 0.8rem; color: #616161;">Nota Interna (Ocultar)</span>
@@ -1471,6 +1481,24 @@
                 <p class="popup-label">4. Rascunho da IA (Opcional):</p>
                 <textarea id="ctx-rascunho-ia" class="popup-textarea" style="display: block; min-height: 80px;" placeholder="Cole aqui respostas prévias da IA..." oninput="window.salvarRascunhoContextoDebounced()"></textarea>
             </div>
+
+            <hr class="prompt-separator">
+
+            <div class="prompt-assistant-box">
+                <div class="prompt-assistant-header">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="prompt-icon"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"></path></svg>
+                    <span>Assistente de Criação de Diretriz (Prompt Mestre)</span>
+                </div>
+                <p class="prompt-assistant-desc">
+                    Tem uma ideia bruta? Digite-a abaixo. O sistema a envelopará com o Prompt Mestre e o estado atual das provas.
+                </p>
+                <textarea id="ctx-ideia-bruta" class="popup-textarea prompt-textarea" placeholder="Ex: Quero afastar a insalubridade porque o EPI era neutro..."></textarea>
+                
+                <button type="button" id="btn-gerar-prompt-mestre" class="chip-btn chip-autora prompt-action-btn" onclick="ExportManager.gerarPromptMestre()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="btn-icon-micro"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                    <span class="btn-text">Gerar e Copiar Prompt Mestre</span>
+                </button>
+            </div>
             
         </div>
 
@@ -1769,5 +1797,33 @@ Crie um sumário hierárquico enxuto com as Grandes Categorias e Subcategorias q
     <!-- SCRIPT DE AUTENTICAÇÃO E ACERVO -->
     <script type="module" src="js/firebase-auth.js"></script>
     <script type="module" src="js/firebase-acervo.js"></script>
+
+    <!-- ========================================== -->
+    <!-- JURIS PROMPT UNIVERSAL (Substituto do Prompt)-->
+    <!-- ========================================== -->
+    <div id="juris-prompt-backdrop" class="juris-prompt-backdrop" role="dialog" aria-modal="true" aria-labelledby="juris-prompt-title-text">
+        <div class="juris-prompt-modal" id="juris-prompt-modal">
+            <div class="juris-prompt-header">
+                <span id="juris-prompt-title" class="juris-prompt-title">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 20px; height: 20px;">
+                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                    </svg>
+                    <span id="juris-prompt-title-text">Entrada de Dados</span>
+                </span>
+                <button class="icon-action-micro" data-action="cancel" aria-label="Fechar" style="background: none; border: none; font-size: 1.2rem; cursor: pointer; color: var(--text-dark);">✕</button>
+            </div>
+            
+            <div class="juris-prompt-body">
+                <p id="juris-prompt-message" class="juris-prompt-message">Mensagem do sistema</p>
+                <input type="text" id="juris-prompt-input" class="juris-prompt-input" autocomplete="off">
+                
+                <div class="juris-prompt-actions">
+                    <button type="button" class="chip-btn chip-cancelar" data-action="cancel">✕ Cancelar</button>
+                    <button type="button" class="chip-btn chip-autora" data-action="confirm" style="background: var(--trt-blue); color: white; border: none;">✔ Confirmar</button>
+                </div>
+            </div>
+        </div>
+    </div>
 </body>
 </html>

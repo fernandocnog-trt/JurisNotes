@@ -371,6 +371,8 @@
 .sub-badge svg.intencao-icon { width: 14px; height: 14px; pointer-events: none; }
 .sub-badge.intencao-comando { background-color: #c62828; border: 2px solid #ffcdd2; color: #fff; }
 .sub-badge.intencao-texto { background-color: #1565c0; border: 2px solid #bbdefb; color: #fff; }
+.sub-badge.intencao-jurisprudencia { background-color: #00838F; border: 2px solid #B2EBF2; color: #fff; }
+.sub-badge.intencao-degravacao { background-color: #BF360C; border: 2px solid #FFCCBC; color: #fff; }
 .sub-badge.intencao-nota { background-color: #616161; border: 2px solid #e0e0e0; color: #fff; }
 .sub-badge.intencao-premissa { background-color: #7b1fa2; border: 2px solid #e1bee7; color: #fff; }
 .sub-badge.intencao-fundamentacao { background-color: #00695c; border: 2px solid #b2dfdb; color: #fff; }
@@ -1331,6 +1333,8 @@
 
 .outline-intent-chip.intent-comando { background-color: #ffebee; color: #c62828; border: 1px solid #ffcdd2; }
 .outline-intent-chip.intent-texto { background-color: #e3f2fd; color: #1565c0; border: 1px solid #bbdefb; }
+.outline-intent-chip.intent-jurisprudencia { background-color: #E0F7FA; color: #00838F; border: 1px solid #B2EBF2; }
+.outline-intent-chip.intent-degravacao { background-color: #FBE9E7; color: #BF360C; border: 1px solid #FFCCBC; }
 .outline-intent-chip.intent-premissa { background-color: #f3e5f5; color: #7b1fa2; border: 1px solid #e1bee7; }
 .outline-intent-chip.intent-fundamentacao { background-color: #e0f2f1; color: #00695c; border: 1px solid #b2dfdb; }
 .outline-intent-chip.intent-refutacao { background-color: #efebe9; color: #8B4513; border: 1px solid #d7ccc8; }
@@ -1624,4 +1628,49 @@ BOTÃO DE PLAY DO CARD DE ÁUDIO — REFINAMENTO
     .audio-icon-box.clickable-audio {
         transition: none;
     }
+}
+
+/* ================================================
+   BLOCOS SEMÂNTICOS: VISÃO DE MINUTA
+   ================================================ */
+.minuta-juris-block {
+    background-color: #F4FBFC;
+    border-left: 4px solid #00838F;
+    padding: 12px 16px;
+    margin: 12px 0;
+    font-size: 0.95rem;
+    color: #334155;
+    font-style: italic;
+    border-radius: 0 6px 6px 0;
+}
+.minuta-juris-block::before {
+    content: "📖 Jurisprudência:";
+    display: block;
+    font-weight: 700;
+    font-size: 0.8rem;
+    color: #00838F;
+    margin-bottom: 6px;
+    font-style: normal;
+    text-transform: uppercase;
+}
+
+.minuta-audio-block {
+    background-color: #FFF9F7;
+    border-left: 4px solid #BF360C;
+    padding: 12px 16px;
+    margin: 12px 0;
+    font-size: 0.95rem;
+    color: #475569;
+    font-family: Georgia, serif;
+    border-radius: 0 6px 6px 0;
+}
+.minuta-audio-block::before {
+    content: "🎙️ Destaque da Prova Oral:";
+    display: block;
+    font-weight: 700;
+    font-family: sans-serif;
+    font-size: 0.8rem;
+    color: #BF360C;
+    margin-bottom: 6px;
+    text-transform: uppercase;
 }
