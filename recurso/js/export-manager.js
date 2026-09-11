@@ -362,6 +362,12 @@ window.ExportManager = (function () {
                     if (intencao === 'texto') {
                         const textoExato = _stripInternalTags(sub.texto);
                         localNodesBuffer += `\n[INSTRUÇÃO DE CÓPIA EXATA${refContexto}]\nTranscreva o bloco de texto abaixo exatamente como ele está escrito, palavra por palavra. Não altere a formatação e não parafraseie.\n<texto_verbatim>\n${textoExato}\n</texto_verbatim>\n\n`;
+                    } else if (intencao === 'jurisprudencia') {
+                        const textoExato = _stripInternalTags(sub.texto);
+                        localNodesBuffer += `\n[INSTRUÇÃO: APLICAÇÃO DE JURISPRUDÊNCIA${refContexto}]\nTranscreva a ementa/julgado abaixo exatamente como fornecida (cópia literal). Em seguida, obrigatoriamente crie um parágrafo conectivo explicando de forma sucinta por que este julgado se amolda perfeitamente aos fatos incontroversos deste tópico.\n<texto_verbatim>\n${textoExato}\n</texto_verbatim>\n\n`;
+                    } else if (intencao === 'degravacao') {
+                        const textoExato = _stripInternalTags(sub.texto);
+                        localNodesBuffer += `\n[INSTRUÇÃO: ANCORAGEM DE DEPOIMENTO ORAL${refContexto}]\nATENÇÃO: O trecho abaixo é um recorte curado pelo assessor extraído da transcrição da audiência já fornecida. Utilize este trecho exato entre aspas como a "prova cabal" (bala de prata) para sustentar a tese, atribuindo a fala ao orador correspondente.\n<texto_verbatim>\n${textoExato}\n</texto_verbatim>\n\n`;
                     } else {
                         // Para os demais, aplica sanitização normal com quebra de linha.
                         const textoSanitizado = _safeMD(sub.texto, '\n');
@@ -530,12 +536,10 @@ window.ExportManager = (function () {
             return;
         }
 
-        // --- CÓDIGO REFATORADO (Substitui o bloco antigo de BalancaManager) ---
-        if (window.BalancaManager && !window.BalancaManager.executarGuardrailDeTarefas('gerar o pacote de exportação para a IA')) {
-            _deps.exibirToast('Exportação interrompida pelo usuário.', 'aviso');
-            return; // Aborta a exportação
+        // INJETAR O ALERTA AQUI: Dispara a notificação de tarefas em paralelo com a exportação
+        if (window.TaskManager && typeof window.TaskManager.sinalizarTarefasPendentes === 'function') {
+            window.TaskManager.sinalizarTarefasPendentes();
         }
-        // --- FIM DA REFATORAÇÃO ---
 
         try {
             // ── Passo 1: Gerar e baixar o Markdown ──────────────────────────
@@ -630,11 +634,6 @@ window.ExportManager = (function () {
         if (!topico || topico.anotacoes.length === 0) {
             _deps.exibirToast('O tópico está vazio ou inválido.', 'aviso');
             return;
-        }
-
-        if (window.BalancaManager && !window.BalancaManager.executarGuardrailDeTarefas('gerar o pacote de exportação para a IA')) {
-            _deps.exibirToast('Exportação interrompida pelo usuário.', 'aviso');
-            return; 
         }
 
         const container = document.getElementById('export-options-container');
@@ -830,6 +829,12 @@ window.ExportManager = (function () {
         
         // UX: Fecha o modal IMEDIATAMENTE para liberar a tela para o usuário
         fecharPainelExportacao();
+        
+        // INJETAR O ALERTA AQUI: Após o modal fechar, garantindo visibilidade total
+        if (window.TaskManager && typeof window.TaskManager.sinalizarTarefasPendentes === 'function') {
+            window.TaskManager.sinalizarTarefasPendentes();
+        }
+
         _deps.exibirToast('⏳ Iniciando extração de dados em segundo plano...', 'info');
 
         try {
@@ -991,6 +996,96 @@ window.ExportManager = (function () {
         return textoProcessado;
     }
 
+    /**
+     * Helper Privado: Fallback de clipboard robusto (Anti-HTTP/Localhost)
+     */
+    async function _copiarParaAreaDeTransferencia(texto) {
+        try {
+            if (navigator.clipboard && window.isSecureContext) {
+                await navigator.clipboard.writeText(texto);
+                return true;
+            } else {
+                throw new Error("Clipboard API indisponível ou contexto inseguro");
+            }
+        } catch (err) {
+            // Fallback síncrono para navegadores legados ou ambientes sem HTTPS (file://)
+            const textArea = document.createElement("textarea");
+            textArea.value = texto;
+            textArea.style.position = "fixed";
+            textArea.style.left = "-999999px";
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+            try {
+                document.execCommand('copy');
+                textArea.remove();
+                return true;
+            } catch (fallbackErr) {
+                textArea.remove();
+                return false;
+            }
+        }
+    }
+
+    /**
+     * NOVA FUNCIONALIDADE: Orquestra a geração do Prompt Mestre com Contexto
+     */
+    async function gerarPromptMestre() {
+        const btn = document.getElementById('btn-gerar-prompt-mestre');
+        const ideiaInput = document.getElementById('ctx-ideia-bruta');
+        
+        // Guardrail de Concorrência (Evita duplo clique e race conditions)
+        if (btn) { btn.disabled = true; }
+
+        try {
+            let ideiaBruta = ideiaInput ? ideiaInput.value.trim() : '';
+
+            if (!ideiaBruta) {
+                _deps.exibirToast('Por favor, digite sua ideia ou raciocínio bruto primeiro.', 'aviso');
+                return;
+            }
+
+            // Sanitização de Prompt Injection (Protege o LLM de jailbreak)
+            ideiaBruta = _sanitizarContraInjecao(ideiaBruta);
+
+            _deps.exibirToast('Montando arquitetura do prompt...', 'info');
+
+            // Usa a Single Source of Truth (já sanitiza o texto do PDF internamente)
+            const dadosTopico = obterDadosDoTopicoAtivo();
+            let contextoEstruturado = "";
+            
+            if (dadosTopico && dadosTopico.markdown) {
+                contextoEstruturado = dadosTopico.markdown;
+            } else {
+                contextoEstruturado = "[AVISO DE SISTEMA: A matriz probatória está vazia no momento. Gere a diretriz usando variáveis genéricas baseadas apenas na SITUAÇÃO FÁTICA.]";
+            }
+
+            // Guardrail de Limite de Tokens (Avisa, mas não bloqueia a ação do usuário)
+            const limiteCaracteresAviso = 35000;
+            if (contextoEstruturado.length > limiteCaracteresAviso) {
+                _deps.exibirToast('Aviso: O processo é muito extenso. A IA pode truncar a resposta final.', 'aviso');
+            }
+
+            const promptFinal = `# PERSONA E CONTEXTO DE SISTEMA\nAtue como um Arquiteto de Conhecimento Jurídico especialista na plataforma "Juris Notes". Minha rotina consiste em analisar processos judiciais e salvar "Modelos de Diretrizes" no Acervo. Fornecerei a você uma [SITUAÇÃO FÁTICA/IDEIA DO ASSESSOR] e o [CONTEXTO ATUAL DO SISTEMA] em formato XML. \n\nSua missão é gerar uma Diretriz Estruturada cruzando a minha ideia com a matriz probatória do sistema.\n\n# INSTRUÇÕES DE LEITURA DO CONTEXTO\n- Leia atentamente as tags <matriz_dialetica_e_provas>, <analise_da_prova> e <contexto_processual> fornecidas abaixo.\n- Utilize a nomenclatura exata das partes e provas encontradas nas tags para dar precisão máxima à sua resposta.\n\n# REGRAS DO SISTEMA (Classificação Obrigatória)\n1. ESCOPOS POSSÍVEIS (Escolha um):\n- GLOBAL: Afeta todo o texto.\n- TESE: Regras para um grupo temático.\n- PROVA: Comando pontual sobre prova específica.\n\n2. INTENÇÕES POSSÍVEIS (Escolha uma):\nCOMANDO DIRETO, PREMISSA LÓGICA, REFUTAÇÃO, FUNDAMENTAÇÃO, PRELIMINAR / PREJUDICIAL, VEREDITO, TEXTO FIXO.\n\n# REGRAS DE REDAÇÃO\n- Redação concisa, enxuta e cirúrgica.\n- Use **negrito** (formatação \`**palavra**\`) APENAS para destacar o núcleo lógico da ideia.\n- Para informações variáveis, crie Fantasmas de Preenchimento: [NOME_DA_TESTEMUNHA].\n\n# FORMATO DE SAÍDA OBRIGATÓRIO (Exclusivo)\n**TÍTULO DO MODELO:** [Tema - Subtema - Especificidade]\n**TAGS:** [Exatamente 3 palavras-chave]\n**ESCOPO IDEAL:** [Sua escolha]\n**INTENÇÃO SUGERIDA:** [Sua escolha]\n**CONTEÚDO DA DIRETRIZ:** [Seu texto estruturado final]\n\n---\n### [SITUAÇÃO FÁTICA / IDEIA DO ASSESSOR]\n${ideiaBruta}\n\n### [CONTEXTO ATUAL DO SISTEMA]\n${contextoEstruturado}`;
+
+            // Execução assíncrona da cópia com Fallback
+            const copiadoComSucesso = await _copiarParaAreaDeTransferencia(promptFinal);
+            
+            if (copiadoComSucesso) {
+                _deps.exibirToast('✅ Prompt Mestre copiado! Cole no seu LLM.', 'sucesso');
+                if (ideiaInput) ideiaInput.value = ''; // Limpeza de UX
+            } else {
+                _deps.exibirToast('Erro ao acessar a área de transferência. Tente novamente.', 'erro');
+            }
+        } catch (error) {
+            console.error('[ExportManager] Erro ao gerar Prompt Mestre:', error);
+            _deps.exibirToast('Erro crítico ao montar o prompt.', 'erro');
+        } finally {
+            // Libera o botão em qualquer cenário (sucesso ou falha)
+            if (btn) { btn.disabled = false; }
+        }
+    }
+
     return { 
         init, 
         exportarTopicoAtivo, 
@@ -1003,7 +1098,8 @@ window.ExportManager = (function () {
         validarTamanhoFiltro,
         salvarFiltro,
         limparFiltro,
-        aplicarFiltrosAvancados
+        aplicarFiltrosAvancados,
+        gerarPromptMestre
     };
 
 })();

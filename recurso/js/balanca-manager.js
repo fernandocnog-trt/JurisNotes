@@ -278,22 +278,6 @@ window.BalancaManager = (function() {
         atualizarInterface();
     }
 
-    /**
-     * Valida tarefas pendentes e emite um alerta nativo síncrono se houver pendências.
-     * @param {string} acaoDesejada - Texto descritivo da ação (ex: "copiar o pacote para a IA").
-     * @returns {boolean} - Retorna true se puder prosseguir (sem tarefas ou usuário confirmou), false se abortado.
-     */
-    function executarGuardrailDeTarefas(acaoDesejada) {
-        // PERFOMANCE: Chamada única ao DOM para evitar layout thrashing
-        const count = avaliarTarefasPendentes(); 
-        
-        if (count > 0) {
-            const msg = `ATENÇÃO: Existem ${count} tarefa(s) pendente(s) não concluídas no Painel da Balança.\n\nTem certeza de que deseja ${acaoDesejada} mesmo assim?`;
-            return confirm(msg); // Bloqueia a thread e retorna a decisão do usuário
-        }
-        return true; // Passe livre se não houver tarefas
-    }
-
     return { 
         abrirPainel, 
         fecharPainel, 
@@ -303,7 +287,6 @@ window.BalancaManager = (function() {
         resetarEstado,
         resetToGenerator,
         getPendingTasks: avaliarTarefasPendentes,
-        executarGuardrailDeTarefas, 
         sincronizarTopicos: sincronizarContextoDossie 
     };
 })();

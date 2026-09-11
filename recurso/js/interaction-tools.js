@@ -1113,10 +1113,9 @@ window.fecharModalGeradorContexto = function() {
 window.gerarECopiarContexto = function(modo = 'pro') {
     const nomeAcao = modo === 'interno' ? 'copiar DADOS COMPLETOS para ChatJT' : 'copiar DADOS SEGUROS para Gemini PRO';
     
-    // Guardrail context-aware
-    if (window.BalancaManager && !window.BalancaManager.executarGuardrailDeTarefas(nomeAcao)) {
-        exibirToast('Cópia interrompida pelo usuário.', 'aviso');
-        return; 
+    // Notificação Assíncrona de Tarefas
+    if (window.TaskManager && typeof window.TaskManager.sinalizarTarefasPendentes === 'function') {
+        window.TaskManager.sinalizarTarefasPendentes();
     }
 
     const btnId = modo === 'interno' ? 'btn-copiar-contexto-interno' : 'btn-copiar-contexto-pro';

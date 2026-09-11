@@ -50,7 +50,9 @@ window.OutlineViewManager = (function() {
             'fundamentacao': 'Base Legal',
             'refutacao': 'Refutação',
             'preliminar': 'Prejudicial',
-            'veredito': 'Veredito'
+            'veredito': 'Veredito',
+            'jurisprudencia': 'Jurisprudência',
+            'degravacao': 'Degravação'
         };
         return mapa[intencao] || 'Diretriz';
     }
@@ -295,7 +297,7 @@ window.OutlineViewManager = (function() {
    ================================================ */
 window.MinutaViewManager = (function() {
     'use strict';
-    const INTENCOES_PERMITIDAS = ['comando', 'texto', 'premissa', 'preliminar', 'refutacao'];
+    const INTENCOES_PERMITIDAS = ['comando', 'texto', 'premissa', 'preliminar', 'refutacao', 'jurisprudencia', 'degravacao'];
 
     function abrir() {
         const activeId = TopicsManager.getActiveTabId();
@@ -328,9 +330,12 @@ window.MinutaViewManager = (function() {
         const intencao = noItem.intencao || 'premissa';
         if (!INTENCOES_PERMITIDAS.includes(intencao)) return '';
         const textoHTML = _render(noItem.texto);
-        return intencao === 'comando' 
-            ? `<div class="minuta-comando-card">${textoHTML}</div>` 
-            : `<div class="minuta-text-block">${textoHTML}</div>`;
+        
+        if (intencao === 'comando') return `<div class="minuta-comando-card">${textoHTML}</div>`;
+        if (intencao === 'jurisprudencia') return `<div class="minuta-juris-block">${textoHTML}</div>`;
+        if (intencao === 'degravacao') return `<div class="minuta-audio-block">"${textoHTML}"</div>`;
+        
+        return `<div class="minuta-text-block">${textoHTML}</div>`;
     }
 
     function _construirHTML(topico) {
@@ -422,6 +427,12 @@ window.MinutaViewManager = (function() {
             let texto = noItem.texto.trim();
             if (intencao === 'comando') {
                 return `> **COMANDO / INSTRUÇÃO:**\n> ${texto}\n\n`;
+            }
+            if (intencao === 'jurisprudencia') {
+                return `> **JURISPRUDÊNCIA:**\n> ${texto}\n\n`;
+            }
+            if (intencao === 'degravacao') {
+                return `> **DESTAQUE DE PROVA ORAL:**\n> "${texto}"\n\n`;
             }
             return `${texto}\n\n`;
         }
