@@ -40,8 +40,7 @@ body {
   box-shadow: 0 4px 10px rgba(0,0,0,0.05); 
   overflow: visible !important; 
   margin: 0 auto;
-  /* AUMENTO DA MARGEM INFERIOR: Cria zona de escape para o menu suspenso */
-  padding-bottom: 280px; 
+  padding-bottom: 60px; 
   display: none; 
   margin-bottom: 40px;
 }
@@ -776,66 +775,34 @@ header {
     transform: scale(1.15);
 }
 
-/* =========================================
-   MENU SUSPENSO DE SELECAO - SMART POPOVER
-   (comentarios em linha propria: imuniza
-   contra truncamento no copiar-e-colar)
-   ========================================= */
 .obs-topic-selector-menu {
-    position: fixed; /* MUDANÇA ARQUITETURAL: de 'absolute/estático' para 'fixed' */
-    z-index: 999999; /* Sobreposição máxima dentro do Iframe */
+    position: absolute;
+    z-index: 9999;
     background: #ffffff;
     border: 1px solid #e2e8f0;
     border-radius: 8px;
-    box-shadow: 0 10px 30px rgba(0,0,0,0.25);
-    min-width: 220px;
-    max-width: calc(100vw - 20px);
+    box-shadow: 0 10px 25px rgba(0,0,0,0.15);
+    min-width: 200px;
     max-height: 250px;
     overflow-y: auto;
     padding: 6px;
-    box-sizing: border-box;
-    visibility: hidden;
-    scrollbar-width: thin;
-    scrollbar-color: #cbd5e1 #ffffff;
-}
-
-/* A animação de entrada só roda no reveal, evitando flicker de opacidade */
-.obs-topic-selector-menu.is-visible {
     animation: fadeInMenu 0.15s ease-out;
-}
-
-.obs-topic-selector-menu::-webkit-scrollbar { 
-    width: 6px; 
-}
-
-.obs-topic-selector-menu::-webkit-scrollbar-thumb {
-    background: #cbd5e1;
-    border-radius: 4px;
-}
-
-@keyframes fadeInMenu {
-    from { opacity: 0; transform: translateY(-4px); }
-    to { opacity: 1; transform: translateY(0); }
 }
 
 .obs-topic-option {
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 10px 12px; /* Maior área de toque */
+    padding: 8px 12px;
     font-size: 0.8rem;
     color: #334155;
     cursor: pointer;
     border-radius: 4px;
-    transition: background-color 0.2s ease, transform 0.1s ease;
+    transition: background-color 0.2s ease;
 }
 
 .obs-topic-option:hover {
     background-color: #f1f5f9;
-}
-
-.obs-topic-option:active {
-    transform: scale(0.98); /* Feedback tátil de clique */
 }
 
 .obs-topic-divider {
@@ -850,16 +817,30 @@ header {
     border-radius: 50%;
 }
 
-/* Gambiarra legada de overflow: visible removida. Menu opera nativamente em portal flutuante. */
+@keyframes fadeInMenu {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* Abra o arquivo style.css do Dossiê e adicione este bloco NO FINAL do arquivo: */
 
 /* =========================================
-   BLINDAGEM DE EXPORTAÇÃO E IMPRESSÃO
+   CORREÇÃO DE MENU FLUTUANTE (OBSERVAÇÕES)
    ========================================= */
-@media print {
-    .container {
-        /* Restaura o tamanho original na hora de salvar o PDF, 
-           removendo o espaço em branco do final da página gerado pela zona de escape */
-        padding-bottom: 60px !important;
-        margin-bottom: 0 !important;
-    }
+
+/* 1. Remove a 'guilhotina' do contêiner de observações permitindo que o menu vaze */
+#obs-list {
+    overflow: visible !important;
+}
+
+/* 2. Mantém o recorte arredondado estético no primeiro e último item 
+      para não vazar a cor cinza quando você passa o mouse por cima (hover) */
+#obs-list .checklist-item:first-child {
+    border-top-left-radius: 8px;
+    border-top-right-radius: 8px;
+}
+
+#obs-list .checklist-item:last-child {
+    border-bottom-left-radius: 8px;
+    border-bottom-right-radius: 8px;
 }

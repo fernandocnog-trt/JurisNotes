@@ -260,12 +260,9 @@ let windowAvailableTopics = [];
 
 // 1. OUVINTE DE MENSAGENS GLOBAL
 window.addEventListener('message', function(event) {
-    // Validação de origem — mesma política já usada em balanca-manager.js
-    const allowedOrigins = [window.location.origin, 'http://localhost', 'http://127.0.0.1'];
-    if (!allowedOrigins.some(origin => event.origin.startsWith(origin))) return;
-
     if (event.data && event.data.type === 'SYNC_TOPICS') {
         windowAvailableTopics = event.data.topicos || [];
+        hydrateReminders(); // Hidrata lembretes antigos garantindo a nova UI
         
         // MOTOR DE AUTO-CURA POR ID (Resolução de Bug de Renomeação)
         const circles = document.querySelectorAll('.topic-circle-indicator');
@@ -297,28 +294,19 @@ window.addEventListener('message', function(event) {
         });
     }
     
-    if (event.data && event.data.type === 'SCROLL_TO_TRILHA') {
-        // ESTRATÉGIA 1 (preferencial): ID fixo já presente no template atual
-        let alvo = document.getElementById('secao-trilha-julgamento');
-
-        // ESTRATÉGIA 2 (fallback): busca textual para dossiês legados sem o ID
-        if (!alvo) {
-            const candidatos = Array.from(document.querySelectorAll('h1, h2, h3, h4, div.section-title'));
-            alvo = candidatos.find(el =>
-                el.textContent.trim().toLowerCase().startsWith('trilha de julgamento')
-            );
-        }
-
-        if (alvo) {
-            alvo.scrollIntoView({ behavior: 'smooth', block: 'start' });
-
-            // Destaque visual aplicado diretamente via inline style —
-            // não depende de nenhuma classe CSS pré-definida no dossiê.
-            const trilhaContainer = document.getElementById('sortable-list');
-            if (trilhaContainer) {
-                trilhaContainer.style.transition = 'box-shadow 0.3s ease';
-                trilhaContainer.style.boxShadow = '0 0 0 2px #f97316'; // Laranja — tema da Trilha
-                setTimeout(() => trilhaContainer.style.boxShadow = 'none', 1000);
+    if (event.data && event.data.type === 'SCROLL_TO_TASKS') {
+        // Busca resiliente pelo título da seção
+        const headers = Array.from(document.querySelectorAll('.section-title'));
+        const obsTitle = headers.find(el => el.textContent.toLowerCase().includes('observações gerais'));
+        
+        if (obsTitle) {
+            obsTitle.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            // Feedback visual sutil (pisca o bloco para guiar o olhar)
+            const obsContainer = document.getElementById('obs-list');
+            if (obsContainer) {
+                obsContainer.style.transition = 'box-shadow 0.3s ease';
+                obsContainer.style.boxShadow = '0 0 0 2px #3b82f6'; // Azul destaque
+                setTimeout(() => obsContainer.style.boxShadow = 'none', 1000);
             }
         }
     }
@@ -332,6 +320,8 @@ document.addEventListener('DOMContentLoaded', () => {
         updateTreeLines();
     }
     window.addEventListener('resize', updateTreeLines);
+    
+    updateTaskCounters();
 });
 
 function updateTreeLines() {
@@ -432,6 +422,8 @@ function rotateBadge(el) {
 function toggleRow(chk) {
     const item = chk.closest('.checklist-item') || chk.closest('.tempestividade-wrapper');
     if(item) chk.checked ? item.classList.add('completed') : item.classList.remove('completed');
+    
+    if(item && item.closest('#obs-list')) updateTaskCounters();
 }
 
 // Função moderna de controle de estado visual via classe
@@ -499,6 +491,129 @@ function toggleSubtopic(btn) {
     updateTreeLines();
 }
 
+// 2. HIDRATAÇÃO DE DOM (Retrocompatibilidade)
+function hydrateReminders() {
+    const obsList = document.getElementById('obs-list');
+    if (!obsList) return;
+
+    const items = obsList.querySelectorAll('.checklist-item');
+    items.forEach(item => {
+        // Se já tem o indicador, ignora
+        if (item.querySelector('.topic-circle-indicator')) return;
+        
+        item.style.position = 'relative'; // Garante contexto para o menu absoluto
+
+        // Cria e injeta o indicador antes do input de texto
+        const circle = document.createElement('div');
+        circle.className = 'topic-circle-indicator';
+        circle.title = 'Global (Todo o Processo)';
+        circle.setAttribute('style', 'background-color: #ffffff; border: 2px solid #cbd5e1;');
+        circle.onclick = function() { window.openObsTopicSelector(this); };
+
+        // Localiza a div que contém o input text
+        const textWrapper = item.querySelector('div[style*="flex:1"]');
+        if (textWrapper) {
+            item.insertBefore(circle, textWrapper);
+        }
+    });
+}
+
+// 3. ALTERAÇÃO DA CRIAÇÃO DE NOVOS LEMBRETES
+function addNewObs() {
+    const container = document.getElementById('obs-list');
+    const div = document.createElement('div');
+    div.className = 'checklist-item';
+    div.style.position = 'relative'; 
+    
+    div.innerHTML = `
+        <input type="checkbox" class="chk-input" onchange="toggleRow(this);">
+        <div class="topic-circle-indicator" title="Global (Todo o Processo)" style="background-color: #ffffff; border: 2px solid #cbd5e1;" onclick="window.openObsTopicSelector(this)"></div>
+        <div style="flex:1;">
+            <input type="text" class="input-details" placeholder="Escreva o lembrete aqui..." oninput="this.setAttribute('value', this.value);" style="width:100%">
+        </div>
+        <button onclick="this.parentElement.remove(); updateTaskCounters();" 
+                style="border:none; background:none; cursor:pointer; color:#cbd5e1;">✕</button>
+    `;
+    container.appendChild(div);
+    updateTaskCounters();
+}
+
+// 4. LÓGICA DO MENU FLUTUANTE DE SELEÇÃO
+window.openObsTopicSelector = function(circleEl) {
+    // BLINDAGEM 1: Impede que o clique atual vaze e feche o menu instantaneamente
+    if (window.event) {
+        window.event.stopPropagation();
+    }
+    
+    closeAllObsTopicSelectors();
+
+    const menu = document.createElement('div');
+    menu.className = 'obs-topic-selector-menu';
+    
+    const optionGlobal = document.createElement('div');
+    optionGlobal.className = 'obs-topic-option';
+    optionGlobal.innerHTML = `<div class="color-dot" style="background: #ffffff; border: 1px solid #ccc;"></div> Global`;
+    optionGlobal.addEventListener('click', () => {
+        window.applyObsTopic(circleEl, 'global', 'Global (Todo o Processo)', '#ffffff');
+    });
+    menu.appendChild(optionGlobal);
+
+    if (windowAvailableTopics.length > 0) {
+        const divider = document.createElement('div');
+        divider.className = 'obs-topic-divider';
+        menu.appendChild(divider);
+
+        windowAvailableTopics.forEach(t => {
+            const option = document.createElement('div');
+            option.className = 'obs-topic-option';
+            const safeName = t.nome.replace(/'/g, "\\'");
+            option.innerHTML = `<div class="color-dot" style="background: ${t.cor};"></div> ${safeName}`;
+            
+            option.addEventListener('click', () => {
+                window.applyObsTopic(circleEl, t.id, t.nome, t.cor);
+            });
+            menu.appendChild(option);
+        });
+    }
+
+    document.body.appendChild(menu);
+    
+    const rect = circleEl.getBoundingClientRect();
+    menu.style.top = (rect.bottom + window.scrollY + 8) + 'px';
+    menu.style.left = (rect.left + window.scrollX) + 'px';
+    
+    // BLINDAGEM 2: Espera 50 milissegundos (imperceptível) antes de ativar a armadilha de fechar
+    setTimeout(() => {
+        document.addEventListener('click', closeAllObsTopicSelectors);
+    }, 50);
+};
+
+window.applyObsTopic = function(circleEl, topicId, topicName, topicColor) {
+    if (!circleEl) return;
+    
+    circleEl.dataset.topicId = topicId;
+    circleEl.setAttribute('data-topic-id', topicId); 
+    
+    circleEl.style.backgroundColor = topicColor;
+    circleEl.setAttribute('title', topicName);
+    
+    if (topicId === 'global') {
+        circleEl.style.border = '2px solid #cbd5e1';
+        circleEl.style.boxShadow = 'none';
+    } else {
+        circleEl.style.border = '2px solid transparent';
+        circleEl.style.boxShadow = `0 0 6px ${topicColor}40`;
+    }
+    
+    circleEl.setAttribute('style', circleEl.style.cssText);
+};
+
+window.closeAllObsTopicSelectors = function() {
+    const menus = document.querySelectorAll('.obs-topic-selector-menu');
+    menus.forEach(menu => menu.remove());
+    document.removeEventListener('click', closeAllObsTopicSelectors);
+};
+
 function addNewTopic() {
     const container = document.getElementById('sortable-list');
     if (!container) return;
@@ -532,7 +647,9 @@ function addNewTopic() {
 
 // --- 5. EXPORTAÇÃO COMPLETA ---
 async function downloadBundledHTML(isInternalGenerator = false) {
-    document.querySelectorAll('input[type="checkbox"]').forEach(c => c.checked ? c.checked = true : null); // force prop
+    // NOVA LINHA DE SEGURANÇA (Pre-Flight Cleanup)
+    if (typeof closeAllObsTopicSelectors === 'function') closeAllObsTopicSelectors();
+    
     document.querySelectorAll('input[type="checkbox"]').forEach(c => c.checked ? c.setAttribute('checked', 'checked') : c.removeAttribute('checked'));
     document.querySelectorAll('input[type="text"]').forEach(i => i.setAttribute('value', i.value));
     
@@ -889,7 +1006,27 @@ window.triggerSave = async function(btn) {
     setTimeout(() => btn.classList.remove('save-success'), 2500);
 };
 
-// updateTaskCounters transferido para a aplicação nativa
+window.updateTaskCounters = function() {
+    const obsList = document.getElementById('obs-list');
+    if (!obsList) return;
+    
+    let pending = 0;
+    let done = 0;
+    obsList.querySelectorAll('.chk-input').forEach(chk => chk.checked ? done++ : pending++);
+    
+    const pBadge = document.getElementById('task-pending');
+    const dBadge = document.getElementById('task-done');
+    
+    if (pBadge) {
+        pBadge.innerText = pending;
+        pBadge.style.display = pending > 0 ? 'flex' : 'none'; // Previne poluição visual de zeros
+    }
+    
+    if (dBadge) {
+        dBadge.innerText = done;
+        dBadge.style.display = done > 0 ? 'flex' : 'none';
+    }
+};
 
 function rotateSimNaoBadge(el) {
     const states = ['badge-sim', 'badge-nao'];
