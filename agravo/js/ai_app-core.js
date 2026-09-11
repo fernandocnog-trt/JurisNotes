@@ -62,6 +62,117 @@ window.SplashScreenManager = (function() {
 })();
 
 /* ================================================
+   JURIS PROMPT: MOTOR UNIVERSAL DE INPUT (V2 - Produção)
+   ================================================ */
+window.JurisPrompt = (function() {
+    let _resolvePromise = null;
+    let _isBusy = false;
+    let _elementos = {};
+
+    function _cacheDOM() {
+        if (_elementos.backdrop) return true;
+        const backdrop = document.getElementById('juris-prompt-backdrop');
+        if (!backdrop) return false;
+
+        _elementos = {
+            backdrop: backdrop,
+            modal: document.getElementById('juris-prompt-modal'),
+            title: document.getElementById('juris-prompt-title-text'),
+            message: document.getElementById('juris-prompt-message'),
+            input: document.getElementById('juris-prompt-input')
+        };
+        return true;
+    }
+
+    function _handleKeydown(e) {
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            _fechar(null);
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            _fechar(_elementos.input.value);
+        } else if (e.key === 'Tab') {
+            _trapFocus(e);
+        }
+    }
+
+    function _handleClick(e) {
+        const action = e.target.closest('[data-action]')?.dataset.action;
+        if (e.target === _elementos.backdrop || action === 'cancel') {
+            _fechar(null);
+        } else if (action === 'confirm') {
+            _fechar(_elementos.input.value);
+        }
+    }
+
+    function _trapFocus(e) {
+        const focusables = _elementos.modal.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+        if (focusables.length === 0) return;
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+
+        if (e.shiftKey && document.activeElement === first) {
+            e.preventDefault();
+            last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+            e.preventDefault();
+            first.focus();
+        }
+    }
+
+    function ask(titulo, mensagem, placeholder = '', valorInicial = '') {
+        return new Promise((resolve) => {
+            if (_isBusy) {
+                console.warn('[JurisPrompt] Requisição ignorada: Prompt já está em uso.');
+                return resolve(null);
+            }
+            if (!_cacheDOM()) {
+                console.error('[JurisPrompt] Elementos ausentes no DOM.');
+                return resolve(null);
+            }
+
+            _isBusy = true;
+            _resolvePromise = resolve;
+
+            _elementos.title.innerHTML = titulo;
+            _elementos.message.textContent = mensagem;
+            _elementos.input.placeholder = placeholder;
+            _elementos.input.value = valorInicial || '';
+
+            _elementos.backdrop.addEventListener('mousedown', _handleClick);
+            document.addEventListener('keydown', _handleKeydown);
+
+            _elementos.backdrop.classList.add('is-active');
+
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                    _elementos.input.focus();
+                    _elementos.input.select();
+                });
+            });
+        });
+    }
+
+    function _fechar(valor) {
+        if (!_isBusy) return;
+        
+        _elementos.backdrop.classList.remove('is-active');
+        _elementos.backdrop.removeEventListener('mousedown', _handleClick);
+        document.removeEventListener('keydown', _handleKeydown);
+        _isBusy = false;
+
+        setTimeout(() => {
+            if (_resolvePromise) {
+                _resolvePromise(valor);
+                _resolvePromise = null;
+            }
+        }, 300); 
+    }
+
+    return { ask };
+})();
+
+/* ================================================
    ESTADO GLOBAL DA APLICAÇÃO (ORQUESTRADOR)
    ================================================ */
 let topicos              = [];     
@@ -205,48 +316,104 @@ window.toggleLoginMenu = function(event) {
 };
 
 /* ================================================
-   MÓDULO DE ATALHOS FLUTUANTES (SHORTCUT MANAGER)
+   MÓDULO DE ATALHOS FLUTUANTES (SHORTCUT MANAGER V2.1 - SMART FABS AI)
    ================================================ */
 window.ShortcutManager = (function() {
-    // Novo formato de estado para o Módulo de Embargos de Declaração / AI
+    // Estado Rico: Suporta objetos { page, isCustom, label, color }
     let state = { fav1: null, fav2: null, fav3: null, embargosAutora: null, embargosReu: null, embargosReu2: null, acordao: null };
     let currentEditingType = null;
+    let isCustomizing = false;
+    let hoveredType = null;
     
-    // Mapeamento das novas classes CSS criadas no arquivo core.css
-    const colors = { 
-        fav1: 'is-active-fav1', 
-        fav2: 'is-active-fav2', 
-        fav3: 'is-active-fav3', 
-        embargosAutora: 'is-active-alvo-autora', 
-        embargosReu: 'is-active-alvo-re', 
-        embargosReu2: 'is-active-alvo-re2',
-        acordao: 'is-active-acordao' 
+    // IconRegistry: Blindagem contra State Leak
+    const originalIcons = {};
+
+    const baseColors = { 
+        fav1: 'is-active-fav1', fav2: 'is-active-fav2', fav3: 'is-active-fav3', 
+        embargosAutora: 'is-active-alvo-autora', embargosReu: 'is-active-alvo-re', 
+        embargosReu2: 'is-active-alvo-re2', acordao: 'is-active-acordao' 
     };
     
-    // Nomenclatura atualizada
-    const rotulos = { 
-        fav1: 'Favorito 1 (Ouro)', 
-        fav2: 'Favorito 2 (Fúcsia)', 
-        fav3: 'Favorito 3 (Pastel)', 
-        embargosAutora: 'Agravo (Recorrente)', 
-        embargosReu: 'Agravo (Recorrido 1)', 
-        embargosReu2: 'Agravo (Recorrido 2)',
-        acordao: 'Decisão Denegatória' 
+    const baseRotulos = { 
+        fav1: 'Favorito 1 (Ouro)', fav2: 'Favorito 2 (Fúcsia)', fav3: 'Favorito 3 (Pastel)', 
+        embargosAutora: 'Agravo (Recorrente)', embargosReu: 'Agravo (Recorrido 1)', 
+        embargosReu2: 'Agravo (Recorrido 2)', acordao: 'Decisão Denegatória' 
     };
 
-    // NOVA ARQUITETURA: Centralizador de Mutação de Estado e Persistência
-    async function _commitShortcut(type, pageNum) {
-        state[type] = pageNum;
-        updateUI();
+    const STAR_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>`;
+
+    function init() {
+        Object.keys(state).forEach(type => {
+            const btn = document.getElementById(getFabId(type));
+            if (btn && !originalIcons[type]) {
+                originalIcons[type] = btn.innerHTML;
+            }
+        });
         
-        // Mensagem semântica dependendo se é inclusão ou exclusão
-        if (pageNum === null) {
-            exibirToast('Atalho removido.', 'sucesso');
-        } else {
-            exibirToast(`${rotulos[type]} atualizado para fl. ${pageNum}!`, 'sucesso');
-        }
+        bindSmartFabEvents();
+        updateUI();
+    }
+    
+    function getTypeFromFabId(id) {
+        const map = {
+            fav1: 'fab-fav1', fav2: 'fab-fav2', fav3: 'fab-fav3',
+            embargosAutora: 'fab-embargos-autora', embargosReu: 'fab-embargos-reu',
+            embargosReu2: 'fab-embargos-reu2', acordao: 'fab-acordao'
+        };
+        return Object.keys(map).find(type => map[type] === id) || null;
+    }
+    
+    function bindSmartFabEvents() {
+        Object.keys(state).forEach(type => {
+            const btn = document.getElementById(getFabId(type));
+            if (!btn) return;
 
-        // Desacoplamento seguro (Call by string check)
+            btn.addEventListener('mouseenter', () => { hoveredType = type; });
+            btn.addEventListener('mouseleave', () => { if (hoveredType === type) hoveredType = null; });
+
+            btn.addEventListener('contextmenu', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                abrirCustomizacao(type);
+            });
+        });
+
+        document.addEventListener('keydown', (event) => {
+            if (!event.ctrlKey || !event.shiftKey || event.code !== 'KeyK') return;
+
+            const activeEl = document.activeElement;
+            if (activeEl && (
+                activeEl.tagName === 'INPUT' ||
+                activeEl.tagName === 'TEXTAREA' ||
+                activeEl.tagName === 'SELECT' ||
+                activeEl.isContentEditable
+            )) { return; }
+
+            const modal = document.getElementById('shortcut-modal');
+            if (modal && modal.style.display === 'flex') return;
+
+            let targetType = hoveredType;
+            if (!targetType && activeEl && activeEl.classList.contains('fab-shortcut')) {
+                targetType = getTypeFromFabId(activeEl.id);
+            }
+
+            if (!targetType) {
+                exibirToast('Passe o mouse sobre o botão que deseja customizar.', 'aviso');
+                return;
+            }
+
+            event.preventDefault();
+            event.stopPropagation();
+            abrirCustomizacao(targetType);
+        });
+    }
+
+    async function _commitShortcut(type, payload) {
+        state[type] = payload;
+        updateUI();
+        const pageNum = payload ? payload.page : null;
+        const msg = pageNum === null ? 'Atalho removido.' : `Atalho atualizado para fl. ${pageNum}!`;
+        exibirToast(msg, 'sucesso');
         if (typeof salvarBackupAutomatico === 'function') await salvarBackupAutomatico();
     }
 
@@ -255,104 +422,159 @@ window.ShortcutManager = (function() {
             const btn = document.getElementById(getFabId(type));
             if (!btn) return;
             
-            // Limpa classes antigas do botão (Mantido do contexto AI)
-            btn.className = 'fab-btn fab-shortcut';
+            if (!originalIcons[type]) originalIcons[type] = btn.innerHTML;
+
+            btn.className = 'fab-btn fab-shortcut'; 
+            btn.removeAttribute('data-tooltip');
+            btn.title = ''; 
             
-            // Single Source of Truth para Tooltips (UX dinâmica)
-            if (state[type] === null) {
+            const data = state[type];
+            const config = (typeof data === 'number') ? { page: data } : data;
+
+            if (!config || !config.page) {
                 btn.classList.add('is-empty');
-                btn.title = `Marcar página: ${rotulos[type]}\n[Ctrl + Clique] p/ capturar a página atual`;
+                btn.setAttribute(
+                    'data-tooltip', 
+                    `${baseRotulos[type]} — sem página\n[Ctrl+Clique] Capturar página atual\n[Botão direito] ou [Ctrl+Shift+K] Customizar`
+                );
+                btn.innerHTML = originalIcons[type];
             } else {
-                btn.classList.add(colors[type]);
-                btn.title = `${rotulos[type]} (Pág. ${state[type]})\n[Shift + Clique] p/ editar\n[Ctrl + Clique] p/ capturar a página atual`;
+                const isCustom = config.isCustom;
+                const corClass = isCustom ? `is-active-${config.color}` : baseColors[type];
+                const rotulo = isCustom ? (config.label || 'Favorito') : baseRotulos[type];
+
+                btn.classList.add(corClass);
+                btn.setAttribute(
+                    'data-tooltip', 
+                    `⭐ ${rotulo} (fl. ${config.page})\n[Shift+Clique] Editar\n[Botão direito] ou [Ctrl+Shift+K] Customizar/Remover`
+                );
+                btn.innerHTML = isCustom ? STAR_SVG : originalIcons[type];
             }
         });
     }
+    
+    function abrirCustomizacao(type) {
+        if (!window.PdfEngine || !PdfEngine.getPdfDoc()) {
+            exibirToast('Carregue um documento primeiro.', 'aviso');
+            return;
+        }
+        const currentPage = PdfEngine.getCurrentPage();
+        const dadoAtual = state[type];
+        const paginaAtualDoAtalho = dadoAtual === null || dadoAtual === undefined
+            ? currentPage
+            : (typeof dadoAtual === 'number' ? dadoAtual : dadoAtual.page);
+
+        abrirModal(type, true, paginaAtualDoAtalho || currentPage);
+    }
 
     async function handleClick(type, event) {
-        if (!window.PdfEngine || !PdfEngine.getPdfDoc()) {
-            exibirToast('Carregue um documento primeiro.', 'aviso'); return;
+        if (!window.PdfEngine || !PdfEngine.getPdfDoc()) { 
+            exibirToast('Carregue um documento primeiro.', 'aviso'); 
+            return; 
         }
 
-        // FLUXO DE CAPTURA RÁPIDA (Early Return com Isolamento de Evento)
-        // Utilizando apenas Ctrl estrito (evitando falsos positivos com AltGr/Shift)
+        const currentPage = PdfEngine.getCurrentPage();
+
         if (event.ctrlKey && !event.shiftKey && !event.altKey) {
-            event.preventDefault();
-            event.stopPropagation(); // Impede o "Event Bubbling" que fecha modais
-            
-            const currentPage = PdfEngine.getCurrentPage();
-            
-            // Validação defensiva rápida
+            event.preventDefault(); 
+            event.stopPropagation();
             if (currentPage > 0) {
-                await _commitShortcut(type, currentPage);
-            } else {
-                exibirToast('Não foi possível identificar a página atual.', 'erro');
+                await _commitShortcut(type, { page: currentPage });
             }
             return; 
         }
 
-        // FLUXO ORIGINAL (Modal de Edição ou Navegação)
         if (state[type] === null || event.shiftKey) {
-            abrirModal(type);
+            const paginaExistente = state[type] === null
+                ? ''
+                : (typeof state[type] === 'number' ? state[type] : state[type].page);
+            abrirModal(type, false, paginaExistente);
         } else {
-            PdfEngine.goToPage(state[type]);
+            const targetPage = typeof state[type] === 'number' ? state[type] : state[type].page;
+            PdfEngine.goToPage(targetPage);
         }
     }
 
-    function abrirModal(type) {
+    function abrirModal(type, customMode = false, suggestedPage = '') {
         currentEditingType = type;
-        document.getElementById('shortcut-modal-title').textContent = `Página para: ${rotulos[type]}`;
-        const input = document.getElementById('shortcut-page-input');
-        input.value = state[type] || '';
+        isCustomizing = customMode || (state[type] && state[type].isCustom);
+
+        const titleEl = document.getElementById('shortcut-modal-title');
+        if(titleEl) titleEl.textContent = isCustomizing ? 'Customizar Favorito - Página:' : `Página para: ${baseRotulos[type]}`;
+        
+        const inputEl = document.getElementById('shortcut-page-input');
+        if(inputEl) inputEl.value = suggestedPage;
+        
+        const customFields = document.getElementById('shortcut-custom-fields');
+        if(customFields) customFields.style.display = isCustomizing ? 'block' : 'none';
+        
+        if (isCustomizing && state[type] && state[type].isCustom) {
+            const labelInput = document.getElementById('shortcut-label-input');
+            if(labelInput) labelInput.value = state[type].label || '';
+            
+            const radio = document.querySelector(`input[name="shortcut_color"][value="${state[type].color}"]`);
+            if(radio) radio.checked = true;
+        } else {
+            const labelInput = document.getElementById('shortcut-label-input');
+            if(labelInput) labelInput.value = '';
+            const firstRadio = document.querySelector('input[name="shortcut_color"]');
+            if(firstRadio) firstRadio.checked = true;
+        }
         
         document.getElementById('shortcut-modal-backdrop').style.display = 'block';
         document.getElementById('shortcut-modal').style.display = 'flex';
-        setTimeout(() => input.focus(), 50);
+        setTimeout(() => inputEl?.focus(), 50);
     }
 
+    async function salvarModal() {
+        if (!currentEditingType) return;
+        const pageVal = document.getElementById('shortcut-page-input').value.trim();
+        const parsedPage = parseInt(pageVal, 10);
+        
+        if (pageVal === '') {
+            await _commitShortcut(currentEditingType, null);
+        } else if (!isNaN(parsedPage) && parsedPage > 0) {
+            let payload = { page: parsedPage };
+            
+            if (isCustomizing) {
+                const label = document.getElementById('shortcut-label-input').value.trim() || 'Favorito';
+                const colorRadio = document.querySelector('input[name="shortcut_color"]:checked');
+                const color = colorRadio ? colorRadio.value : 'fuchsia';
+                payload = { page: parsedPage, isCustom: true, label, color };
+            }
+            
+            await _commitShortcut(currentEditingType, payload);
+        } else {
+            exibirToast('Número de página inválido.', 'erro'); 
+            return;
+        }
+        fecharModal();
+    }
+    
     function fecharModal() {
         currentEditingType = null;
         document.getElementById('shortcut-modal-backdrop').style.display = 'none';
         document.getElementById('shortcut-modal').style.display = 'none';
     }
 
-    async function salvarModal() {
-        if (!currentEditingType) return;
-        const val = document.getElementById('shortcut-page-input').value.trim();
-        const parsed = parseInt(val, 10);
-        
-        // Delegação de mutação para o orquestrador
-        if (val === '') {
-            await _commitShortcut(currentEditingType, null);
-        } else if (!isNaN(parsed) && parsed > 0) {
-            await _commitShortcut(currentEditingType, parsed);
-        } else {
-            exibirToast('Número de página inválido.', 'erro');
-            return;
-        }
-        
-        fecharModal();
-    }
-
     function getFabId(type) {
-        const map = { 
-            fav1: 'fab-fav1', 
-            fav2: 'fab-fav2', 
-            fav3: 'fab-fav3', 
-            embargosAutora: 'fab-embargos-autora', 
-            embargosReu: 'fab-embargos-reu', 
-            embargosReu2: 'fab-embargos-reu2',
-            acordao: 'fab-acordao' 
+        const map = {
+            fav1: 'fab-fav1', fav2: 'fab-fav2', fav3: 'fab-fav3',
+            embargosAutora: 'fab-embargos-autora', embargosReu: 'fab-embargos-reu',
+            embargosReu2: 'fab-embargos-reu2', acordao: 'fab-acordao'
         };
         return map[type];
     }
 
     return { 
-        handleClick, updateUI, fecharModal, salvarModal,
+        init, handleClick, updateUI, fecharModal, salvarModal,
         getState: () => state,
         setState: (newState) => { if (newState) { state = { ...state, ...newState }; updateUI(); } },
-        reset: () => { state = { fav1: null, fav2: null, fav3: null, embargosAutora: null, embargosReu: null, embargosReu2: null, acordao: null }; updateUI(); },
-        toggleVisibility: (show) => {
+        reset: () => { 
+            state = { fav1: null, fav2: null, fav3: null, embargosAutora: null, embargosReu: null, embargosReu2: null, acordao: null }; 
+            updateUI(); 
+        },
+        toggleVisibility: (show) => { 
             Object.keys(state).forEach(type => {
                 const btn = document.getElementById(getFabId(type));
                 if (btn) btn.style.display = show ? 'flex' : 'none';
@@ -466,6 +688,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     if (window.AudioManager) AudioManager.init({ getTopicos: () => topicos, exibirToast, salvarAnotacao });
     if (window.ExportManager) ExportManager.init({ getTopicos: () => topicos, exibirToast, getActiveTabId: () => TopicsManager.getActiveTabId() });
+    if (window.ShortcutManager) window.ShortcutManager.init(); // <-- INICIALIZA O ICON REGISTRY DOS FABS NO AI
 
     const historyContainer = document.getElementById('history-container');
     if (historyContainer) historyContainer.addEventListener('scroll', checkScrollFabState, { passive: true });
@@ -539,6 +762,9 @@ function trocarAba(aba) {
     
     const btnAcervo = document.getElementById('btn-acervo-modelos');
     if (btnAcervo) btnAcervo.style.display = isAnotacoes ? 'flex' : 'none';
+
+    const btnGlobais = document.getElementById('btn-toggle-globais');
+    if (btnGlobais) btnGlobais.style.display = isAnotacoes ? 'flex' : 'none';
 
     const btnTexto = document.getElementById('btn-ferramenta-texto');
     if (btnTexto) btnTexto.style.display = isLeitura ? 'flex' : 'none';
@@ -665,6 +891,10 @@ function encerrarSessao() {
     topicos      = [];
     modoRetomada = false;
     sessionStorage.removeItem('juris_active_session');
+
+    if (window.TopicsManager && typeof window.TopicsManager.resetVisibilidadeGlobais === 'function') {
+        window.TopicsManager.resetVisibilidadeGlobais();
+    }
     
     if (window.PdfEngine) window.PdfEngine.encerrar();
     BackupManager.encerrar();
@@ -846,33 +1076,61 @@ function verificarAcervoEmSegundoPlano(nomeTopico) {
     }, { timeout: 5000 });
 }
 
+// --- NOVO FLUXO DE CRIAÇÃO DE TÓPICO AI (VIA MODAL CARDS) ---
+
 function criarTopicoPrompt() {
-    const obiceInput = prompt('Agravo de Instrumento - Selecione o Óbice/Pressuposto:\n1 - Tempestividade\n2 - Preparo (Custas/GFIP)\n3 - Representação\n4 - Adequação');
-    if (!obiceInput) return;
+    // Apenas abre o modal
+    document.getElementById('ai-topico-backdrop').style.display = 'block';
+    document.getElementById('ai-topico-modal').style.display = 'flex';
     
-    const mapaObices = { '1': 'tempestividade', '2': 'preparo', '3': 'representacao', '4': 'adequacao' };
-    const obiceTipado = mapaObices[obiceInput.trim()];
+    // Reset do input
+    const inputTema = document.getElementById('ai-topico-tema');
+    inputTema.value = '';
     
-    if (!obiceTipado) {
-        exibirToast('Opção inválida. Digite 1, 2, 3 ou 4.', 'erro');
+    // Foco automático no input para agilizar digitação
+    setTimeout(() => {
+        inputTema.focus();
+    }, 100);
+}
+
+window.fecharModalTopicoAI = function() {
+    document.getElementById('ai-topico-backdrop').style.display = 'none';
+    document.getElementById('ai-topico-modal').style.display = 'none';
+};
+
+window.confirmarCriacaoTopicoAI = function() {
+    const radioSelecionado = document.querySelector('input[name="ai_obice"]:checked');
+    const inputTema = document.getElementById('ai-topico-tema');
+    
+    if (!radioSelecionado) {
+        exibirToast('Selecione uma hipótese normativa.', 'aviso');
+        return;
+    }
+    
+    const obiceTipado = radioSelecionado.value;
+    const nomeEspecifico = inputTema.value.trim();
+    
+    if (!nomeEspecifico) {
+        exibirToast('Defina o tema específico.', 'aviso');
+        inputTema.focus();
         return;
     }
 
-    const nomeEspecifico = prompt('Descreva o tema (Ex: Intempestividade do RO):');
-    if (!nomeEspecifico || !nomeEspecifico.trim()) return;
-
-    const nomeCompleto = `${obiceTipado.toUpperCase()} — ${nomeEspecifico.trim()}`;
+    const nomeCompleto = `${obiceTipado.toUpperCase()} — ${nomeEspecifico}`;
     
     const duplicado = topicos.some(t => t.nome.toLowerCase() === nomeCompleto.toLowerCase());
-    if (duplicado) return exibirToast(`Já existe análise para "${nomeCompleto}".`, 'aviso');
+    if (duplicado) {
+        exibirToast(`Já existe análise para "${nomeCompleto}".`, 'aviso');
+        return;
+    }
 
     const cor = TopicsManager.obterCor(topicos.length);
     
     topicos.push({ 
         id: 'topico-' + Date.now(), 
         nome: nomeCompleto, 
-        matrizCalculo: 'admissibilidade', // NOVO: Flag para o Dashboard de Maturidade
-        tipoObice: obiceTipado,           // NOVO: Dado estruturado do AI
+        matrizCalculo: 'admissibilidade', 
+        tipoObice: obiceTipado,           
         cor, 
         anotacoes: [] 
     });
@@ -880,11 +1138,11 @@ function criarTopicoPrompt() {
     renderizarTopicos();
     salvarBackupAutomatico();
     trocarAba('historico');
+    fecharModalTopicoAI();
     exibirToast(`Auditoria de ${obiceTipado} iniciada.`, 'sucesso');
     
-    // Dispara a verificação de acervo de forma não bloqueante
     verificarAcervoEmSegundoPlano(nomeCompleto);
-}
+};
 
 function renderizarTopicos() {
     TopicsManager.renderizarFichario(topicos);
@@ -1278,11 +1536,18 @@ function fecharModalGerenciarAbas() {
     document.getElementById('modal-gerenciar-abas').style.display = 'none';
 }
 
-function renomearAba(id) {
+async function renomearAba(id) {
     const topico = topicos.find(t => t.id === id);
     if (!topico) return;
-    const novoNome = prompt('Digite o novo nome para a aba:', topico.nome);
-    if (novoNome && novoNome.trim() !== '') {
+    
+    const novoNome = await JurisPrompt.ask(
+        '✏️ Renomear Aba', 
+        'Digite o novo nome para a aba:', 
+        'Novo nome...', 
+        topico.nome
+    );
+    
+    if (novoNome && novoNome.trim() !== '' && novoNome.trim() !== topico.nome) {
         topico.nome = novoNome.trim();
         renderizarTopicos();
         salvarBackupAutomatico();
@@ -1317,7 +1582,7 @@ function solicitarExclusaoAba(btnEl, id) {
     }
 }
 
-window.handleMetaClick = function(event, topicoId, index, isCorrelated = false, cIdx = null) {
+window.handleMetaClick = async function(event, topicoId, index, isCorrelated = false, cIdx = null) {
     const topico = topicos.find(t => t.id === topicoId);
     if (!topico) return;
 
@@ -1326,7 +1591,13 @@ window.handleMetaClick = function(event, topicoId, index, isCorrelated = false, 
         : topico.anotacoes[index];
 
     if (event.shiftKey) {
-        const novaPagina = prompt(`Editar folha (Atual: ${anotacao.pagina || 'vazio'}):`, anotacao.pagina || '');
+        const novaPagina = await JurisPrompt.ask(
+            '📄 Editar Âncora de Página', 
+            `Editar folha (Atual: ${anotacao.pagina || 'vazio'}):`, 
+            'Nº da folha (ex: 302)', 
+            anotacao.pagina || ''
+        );
+        
         if (novaPagina !== null) {
             anotacao.pagina = novaPagina;
             renderizarTopicos();

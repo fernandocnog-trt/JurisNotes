@@ -25,6 +25,68 @@ window.TopicsManager = (function () {
     };
 
     let _activeTopicoCor = '#ffffff';
+    const _topicosComGlobaisAbertas = new Set();
+
+    // OTIMIZAÇÃO DE MEMÓRIA: Função Içada (Prevenção de GC Thrashing)
+    function _sincronizarBtnGlobais(temDados, aberto) {
+        const btn = document.getElementById('btn-toggle-globais');
+        if (!btn) return;
+        
+        const isAtivo = temDados || aberto;
+        btn.classList.toggle('is-active', isAtivo);
+        btn.setAttribute('aria-pressed', isAtivo ? 'true' : 'false');
+        
+        if (temDados) {
+            btn.title = "Diretrizes Globais estão em uso (Trancado)";
+        } else if (aberto) {
+            btn.title = "Ocultar Diretrizes Globais (Vazio)";
+        } else {
+            btn.title = "Ativar Card de Diretrizes Globais";
+        }
+    }
+
+    function toggleDiretrizesGlobais() {
+        const activeId = activeTabId;
+        if (!activeId) return;
+        const topico = topicos.find(t => t.id === activeId);
+        if (!topico) return;
+
+        const temDiretrizes = topico.diretrizesGlobais && topico.diretrizesGlobais.length > 0;
+        
+        if (temDiretrizes) {
+            if(window.exibirToast) exibirToast('Não é possível ocultar: existem diretrizes cadastradas. Remova-as primeiro.', 'aviso');
+            return;
+        }
+
+        const ativando = !_topicosComGlobaisAbertas.has(activeId);
+        
+        if (ativando) {
+            _topicosComGlobaisAbertas.add(activeId);
+        } else {
+            _topicosComGlobaisAbertas.delete(activeId);
+        }
+        
+        renderizarFichario(topicos); 
+
+        if (ativando) {
+            requestAnimationFrame(() => {
+                const globalCard = document.querySelector('.nivel-global .annotation-card');
+                if (globalCard) {
+                    const scrollContainer = document.getElementById('history-container');
+                    const offset = (globalCard.getBoundingClientRect().top - scrollContainer.getBoundingClientRect().top) + scrollContainer.scrollTop - 40;
+                    scrollContainer.scrollTo({ top: offset, behavior: 'smooth' });
+                    
+                    globalCard.classList.remove('card-flash-focus');
+                    void globalCard.offsetWidth;
+                    globalCard.classList.add('card-flash-focus');
+                }
+            });
+        }
+    }
+    
+    function resetVisibilidadeGlobais() {
+        _topicosComGlobaisAbertas.clear();
+    }
 
     function obterCorContraste(hex) {
         if (!hex || !hex.startsWith('#')) return '#ffffff';
@@ -329,16 +391,38 @@ window.TopicsManager = (function () {
             }
 
             // Garante extração segura de tempos matemáticos (fallback para 0)
-            const inicioNum = dadosAudio.inicio || 0;
-            const fimNum = dadosAudio.fim || 0;
+            const inicioNum = Number(dadosAudio.inicio || 0);
+            const fimNum = Number(dadosAudio.fim || 0);
+            const trechoValido = Number.isFinite(inicioNum) && Number.isFinite(fimNum) && fimNum > inicioNum;
             
+            if (!trechoValido) {
+                return {
+                    htmlConteudo: `<p class="card-texto" style="color:#c62828;">[Erro: intervalo do áudio inválido]</p>`,
+                    htmlComentario: ''
+                };
+            }
+
+            const tituloMini = `Oitiva: ${nomePapel}`;
+            const tituloMiniAttr = escaparHTML(tituloMini).replace(/'/g, '&apos;');
+
             const safeFormatTime = (sec) => window.AudioManager?.formatTime ? window.AudioManager.formatTime(sec) : `${Math.floor(sec/60)}' ${Math.floor(sec%60)}''`;
 
-            // Renderiza o cabeçalho com o botão Clickable e Ícone de Play
+            // Injeção condicional: só cria o atributo se houver transcrição
+            const degravacaoAttr = dadosAudio.transcricao ? `data-audio-degravacao="${escaparHTML(dadosAudio.transcricao).replace(/'/g, '&apos;')}"` : '';
+
+            // Renderiza o cabeçalho com o botão Clickable e Ícone de Play (Delegação Global)
             htmlConteudo = `
                 <div class="card-audio">
-                    <div class="audio-icon-box clickable-audio" title="Ouvir este trecho específico" onclick="AudioManager.tocarTrecho(${inicioNum}, ${fimNum})">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <div class="audio-icon-box clickable-audio" 
+                         role="button" 
+                         tabindex="0" 
+                         title="Ouvir este trecho em player focado"
+                         aria-label="${tituloMiniAttr}"
+                         data-audio-inicio="${inicioNum}" 
+                         data-audio-fim="${fimNum}" 
+                         data-audio-titulo="${tituloMiniAttr}"
+                         ${degravacaoAttr}>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                             <polygon points="5 3 19 12 5 21 5 3"></polygon>
                         </svg>
                     </div>
@@ -351,7 +435,14 @@ window.TopicsManager = (function () {
             // PRESERVAÇÃO CRÍTICA: Lógica de Comentários e Degravações
             let comentarios = [];
             if (anotacao.comentario) comentarios.push(`<strong>Contexto:</strong> ${escaparHTML(anotacao.comentario)}`);
-            if (dadosAudio.transcricao) comentarios.push(`<strong>Degravação:</strong> <em>"${escaparHTML(dadosAudio.transcricao)}"</em>`);
+            if (dadosAudio.transcricao) {
+                // A MÁGICA DA QUEBRA DE LINHA ACONTECE NO STYLE ABAIXO (white-space: pre-wrap)
+                comentarios.push(`
+                    <div style="display:flex; align-items:flex-start; gap:4px;">
+                        <div style="flex: 1; white-space: pre-wrap; overflow-wrap: break-word;"><strong>Degravação:</strong> <em>"${escaparHTML(dadosAudio.transcricao)}"</em></div>
+                    </div>
+                `);
+            }
             
             if (comentarios.length > 0) {
                 htmlComentario = `<div class="card-comentario" style="display:flex; flex-direction:column; gap:6px;">${comentarios.join('<br>')}</div>`;
@@ -896,16 +987,12 @@ window.TopicsManager = (function () {
         </div>`;
     }
 
-    /**
-     * Re-renderiza o fichário inteiro.
-     */
     function renderizarFichario(topicosArray) {
         const headerEl  = document.getElementById('topics-tabs-header');
         const contentEl = document.getElementById('topics-tab-content');
 
         if (!headerEl || !contentEl) return;
 
-        // Estado vazio: nenhum tópico criado ainda
         if (topicosArray.length === 0) {
             headerEl.innerHTML = '';
             contentEl.innerHTML = `
@@ -918,16 +1005,13 @@ window.TopicsManager = (function () {
             return;
         }
 
-        // Resiliência: garante que sempre há uma aba ativa válida
         if (!activeTabId || !topicosArray.some(t => t.id === activeTabId)) {
             activeTabId = topicosArray[0].id;
         }
 
-        // Cache do scroll atual antes da destruição
         const scrollAnterior = headerEl.scrollLeft;
         let abaAtivaNode = null;
 
-        // 1. Construir as abas do fichário (Mais recentes à esquerda)
         headerEl.innerHTML = '';
         [...topicosArray].reverse().forEach(topico => {
             const isActive = topico.id === activeTabId;
@@ -936,12 +1020,10 @@ window.TopicsManager = (function () {
             btn.className        = `topic-tab-btn ${isActive ? 'active' : ''}`;
             btn.title            = topico.nome; 
             
-            // Injeção declarativa de variáveis CSS (Aba ganha inteligência via CSS)
             const corContraste = obterCorContraste(topico.cor);
             btn.style.setProperty('--tab-bg', topico.cor);
             btn.style.setProperty('--tab-color', corContraste);
 
-            // Encapsulamento da label para o ellipsis funcionar perfeitamente
             const labelSpan = document.createElement('span');
             labelSpan.className = 'tab-label';
             labelSpan.textContent = topico.nome;
@@ -953,22 +1035,16 @@ window.TopicsManager = (function () {
             };
 
             headerEl.appendChild(btn);
-            
-            // Captura o node para centralizar a visão nele após o render
             if (isActive) abaAtivaNode = btn;
         });
 
-        // 2. Construir o conteúdo do tópico ativo
         const topicoAtivo = topicosArray.find(t => t.id === activeTabId);
         if (!topicoAtivo) return;
 
         _activeTopicoCor = topicoAtivo.cor;
         const corTextoTese = obterCorContraste(_activeTopicoCor);
-        
-        // Transmite a cor da aba ativa para a borda superior do conteúdo (escurecendo levemente)
         contentEl.style.setProperty('--active-tab-color', escurecerCor(_activeTopicoCor));
 
-        // Restauração do estado de scroll após o paint do DOM
         requestAnimationFrame(() => {
             headerEl.scrollLeft = scrollAnterior;
             if (abaAtivaNode) {
@@ -976,7 +1052,6 @@ window.TopicsManager = (function () {
             }
         });
 
-        // NOVO: Painel Preâmbulo Estático gerado incondicionalmente
         const preambleHtml = `
             <div class="topic-preamble-panel">
                 <div class="preamble-card preamble-alegacao ${!topicoAtivo.alegacoes ? 'is-empty' : ''}" onclick="abrirEdicaoPreambulo('${activeTabId}', 'alegacoes')">
@@ -1013,133 +1088,139 @@ window.TopicsManager = (function () {
                 </div>
             </div>`;
 
-        // =========================================================
-        // RENDERIZAÇÃO LIMPA: DIRETRIZES E CARDS (Padrão RO adaptado para AI)
-        // =========================================================
-
         let conteudoCentralHtml = '';
 
-        if (topicoAtivo.anotacoes.length === 0) {
+        const temAnotacoes = topicoAtivo.anotacoes && topicoAtivo.anotacoes.length > 0;
+        const temGlobais = topicoAtivo.diretrizesGlobais && topicoAtivo.diretrizesGlobais.length > 0;
+        const forcadoAberto = _topicosComGlobaisAbertas.has(activeTabId);
+
+        if (!temAnotacoes && !temGlobais && !forcadoAberto) {
             conteudoCentralHtml = `
                 <p class="empty-state" style="margin-top: 20px;">
-                    A Matriz Dialética está vazia. Adicione extrações das provas.
+                    A Matriz Dialética está vazia. Adicione extrações das provas ou clique no Globo no cabeçalho para inserir Diretrizes Globais.
                 </p>`;
-        } else {
-            let sumarioHtml = '';
-            const tesesValidas = topicoAtivo.anotacoes.filter(an => an.tese && an.tese.trim() !== '');
-            if (tesesValidas.length > 0) {
-                sumarioHtml = `<div class="thesis-summary-panel">`;
-
-                topicoAtivo.anotacoes.forEach((an, idx) => {
-                    if (an.tese && an.tese.trim() !== '') {
-                        const fasesPresentes = new Set();
-                        
-                        fasesPresentes.add(typeof identificarFaseMetodologica === 'function' ? identificarFaseMetodologica(an.documento) : 4);
-                        
-                        if (an.itensCorrelacionados?.length) {
-                            an.itensCorrelacionados.forEach(ic => fasesPresentes.add(typeof identificarFaseMetodologica === 'function' ? identificarFaseMetodologica(ic.documento) : 4));
-                        }
-
-                        if (an.itensCorrelacionados?.length) {
-                            an.itensCorrelacionados.forEach(ic => {
-                                if (ic.subAnotacoes && ic.subAnotacoes.length > 0) {
-                                    fasesPresentes.add(typeof identificarFaseMetodologica === 'function' ? identificarFaseMetodologica(ic.documento) : 4);
-                                }
-                            });
-                        }
-
-                        const cores = [];
-                        if(fasesPresentes.has(1)) cores.push('var(--fase-1-bg)');
-                        if(fasesPresentes.has(2)) cores.push('var(--fase-2-bg)');
-                        if(fasesPresentes.has(3)) cores.push('var(--fase-3-bg)');
-                        if(fasesPresentes.has(4)) cores.push('var(--fase-4-bg)');
-                        
-                        let bgStyle = '';
-                        if(cores.length > 0) {
-                            const step = 100 / cores.length;
-                            const gradients = cores.map((cor, i) => `${cor} ${i * step}%, ${cor} ${(i + 1) * step}%`);
-                            bgStyle = `style="background: linear-gradient(to right, ${gradients.join(', ')}), #ffffff;"`; 
-                        }
-
-                        const matrizCalculo = topicoAtivo.matrizCalculo || 'omissao';
-                        let isMature = false;
-
-                        if (matrizCalculo === 'admissibilidade') {
-                            isMature = fasesPresentes.has(1) && fasesPresentes.has(3) && fasesPresentes.has(4);
-                        } else if (matrizCalculo === 'omissao') {
-                            isMature = fasesPresentes.has(1) && fasesPresentes.has(2) && fasesPresentes.has(3);
-                        } else if (matrizCalculo === 'contradicao') {
-                            let contadorRoxo = (typeof identificarFaseMetodologica === 'function' && identificarFaseMetodologica(an.documento) === 3) ? 1 : 0;
-                            if (an.itensCorrelacionados) {
-                                contadorRoxo += an.itensCorrelacionados.filter(ic => typeof identificarFaseMetodologica === 'function' && identificarFaseMetodologica(ic.documento) === 3).length;
-                            }
-                            isMature = fasesPresentes.has(1) && fasesPresentes.has(3) && (contadorRoxo >= 2);
-                        } else if (matrizCalculo === 'erro') {
-                            isMature = fasesPresentes.has(1) && fasesPresentes.has(3) && fasesPresentes.has(4);
-                        }
-
-                        const matureClass = isMature ? 'mature' : '';
-                        const txt = escaparHTML(an.tese);
-
-                        sumarioHtml += `
-                            <div class="thesis-badge ${matureClass}" onclick="abrirModalTese('${activeTabId}', ${idx})">
-                                <div class="thesis-badge-inner" ${bgStyle}>
-                                    <span class="num" style="background-color: ${_activeTopicoCor}; color: ${corTextoTese};">${idx + 1}</span> 
-                                    <span class="texto-tese">${txt}</span>
-                                </div>
-                            </div>`;
+            const novoHtml = preambleHtml + conteudoCentralHtml;
+            
+            if (typeof resizeObserver !== 'undefined') resizeObserver.disconnect();
+            if (typeof morphdom !== 'undefined') {
+                morphdom(contentEl, `<div id="topics-tab-content" class="topics-content-area" style="${contentEl.style.cssText}">${novoHtml}</div>`, {
+                    childrenOnly: true,
+                    getNodeKey: function(node) {
+                        if (node.id) return node.id;
                     }
                 });
-                sumarioHtml += '</div>';
+            } else {
+                contentEl.innerHTML = novoHtml;
             }
-
-            let cardsHTML = '';
-            let ultimaTeseRenderizada = null;
-
-            // Injeta o contexto de renderização isolado para a aba
-            const renderContext = {
-                romanCounter: 0,
-                romanMap: new Map() // Mapeia grupoId -> Numeral Romano
-            };
-
-            // 1. LOOP DE PROVAS E DIRETRIZES POR ÓBICE (TESE) - Ocultação Segura
-            topicoAtivo.anotacoes.forEach((an, index) => {
-                // 1. Busca os dados de forma segura (preserva notas já criadas)
-                const chaveObiceCrua = an.tese || "Óbice Não Nomeado"; 
-                const diretrizes = (topicoAtivo.diretrizesPorObice && topicoAtivo.diretrizesPorObice[chaveObiceCrua]) 
-                                    ? topicoAtivo.diretrizesPorObice[chaveObiceCrua] 
-                                    : [];
-                
-                // 2. Verifica se o usuário de fato escreveu um óbice/tese
-                const isObicePreenchido = (an.tese && an.tese.trim() !== '');
-
-                // 3. Se houver quebra de grupo (novo grupo de provas)
-                if (chaveObiceCrua !== ultimaTeseRenderizada) {
-                    
-                    // 4. Ocultação Segura: Só desenha o card se o óbice tiver nome OU se houver notas salvas nele
-                    if (isObicePreenchido || diretrizes.length > 0) {
-                        const tituloExibicao = isObicePreenchido ? an.tese : "Óbice Não Nomeado";
-                        cardsHTML += _gerarHtmlObiceGroup(tituloExibicao, diretrizes, activeTabId, _activeTopicoCor, index, renderContext);
-                    }
-                    
-                    // Atualiza a referência do agrupamento atual
-                    ultimaTeseRenderizada = chaveObiceCrua;
-                }
-                
-                // Desenha o card da prova e o número colorido exatamente como antes (Intocado)
-                cardsHTML += criarCard(an, index, topicoAtivo.anotacoes, renderContext);
-            });
             
-            // 2. RENDERIZAÇÃO INCONDICIONAL: DIRETRIZES GLOBAIS (TOPO)
-            let htmlDiretrizesGlobais = '';
-            let globaisHtml = ''; 
+            _sincronizarBtnGlobais(false, false);
+            return;
+        }
 
-            if (topicoAtivo.diretrizesGlobais && topicoAtivo.diretrizesGlobais.length > 0) {
+        let sumarioHtml = '';
+        const tesesValidas = topicoAtivo.anotacoes.filter(an => an.tese && an.tese.trim() !== '');
+        if (tesesValidas.length > 0) {
+            sumarioHtml = `<div class="thesis-summary-panel">`;
+
+            topicoAtivo.anotacoes.forEach((an, idx) => {
+                if (an.tese && an.tese.trim() !== '') {
+                    const fasesPresentes = new Set();
+                    
+                    fasesPresentes.add(typeof identificarFaseMetodologica === 'function' ? identificarFaseMetodologica(an.documento) : 4);
+                    
+                    if (an.itensCorrelacionados?.length) {
+                        an.itensCorrelacionados.forEach(ic => fasesPresentes.add(typeof identificarFaseMetodologica === 'function' ? identificarFaseMetodologica(ic.documento) : 4));
+                    }
+
+                    if (an.itensCorrelacionados?.length) {
+                        an.itensCorrelacionados.forEach(ic => {
+                            if (ic.subAnotacoes && ic.subAnotacoes.length > 0) {
+                                fasesPresentes.add(typeof identificarFaseMetodologica === 'function' ? identificarFaseMetodologica(ic.documento) : 4);
+                            }
+                        });
+                    }
+
+                    const cores = [];
+                    if(fasesPresentes.has(1)) cores.push('var(--fase-1-bg)');
+                    if(fasesPresentes.has(2)) cores.push('var(--fase-2-bg)');
+                    if(fasesPresentes.has(3)) cores.push('var(--fase-3-bg)');
+                    if(fasesPresentes.has(4)) cores.push('var(--fase-4-bg)');
+                    
+                    let bgStyle = '';
+                    if(cores.length > 0) {
+                        const step = 100 / cores.length;
+                        const gradients = cores.map((cor, i) => `${cor} ${i * step}%, ${cor} ${(i + 1) * step}%`);
+                        bgStyle = `style="background: linear-gradient(to right, ${gradients.join(', ')}), #ffffff;"`; 
+                    }
+
+                    const matrizCalculo = topicoAtivo.matrizCalculo || 'omissao';
+                    let isMature = false;
+
+                    if (matrizCalculo === 'admissibilidade') {
+                        isMature = fasesPresentes.has(1) && fasesPresentes.has(3) && fasesPresentes.has(4);
+                    } else if (matrizCalculo === 'omissao') {
+                        isMature = fasesPresentes.has(1) && fasesPresentes.has(2) && fasesPresentes.has(3);
+                    } else if (matrizCalculo === 'contradicao') {
+                        let contadorRoxo = (typeof identificarFaseMetodologica === 'function' && identificarFaseMetodologica(an.documento) === 3) ? 1 : 0;
+                        if (an.itensCorrelacionados) {
+                            contadorRoxo += an.itensCorrelacionados.filter(ic => typeof identificarFaseMetodologica === 'function' && identificarFaseMetodologica(ic.documento) === 3).length;
+                        }
+                        isMature = fasesPresentes.has(1) && fasesPresentes.has(3) && (contadorRoxo >= 2);
+                    } else if (matrizCalculo === 'erro') {
+                        isMature = fasesPresentes.has(1) && fasesPresentes.has(3) && fasesPresentes.has(4);
+                    }
+
+                    const matureClass = isMature ? 'mature' : '';
+                    const txt = escaparHTML(an.tese);
+
+                    sumarioHtml += `
+                        <div class="thesis-badge ${matureClass}" onclick="abrirModalTese('${activeTabId}', ${idx})">
+                            <div class="thesis-badge-inner" ${bgStyle}>
+                                <span class="num" style="background-color: ${_activeTopicoCor}; color: ${corTextoTese};">${idx + 1}</span> 
+                                <span class="texto-tese">${txt}</span>
+                            </div>
+                        </div>`;
+                }
+            });
+            sumarioHtml += '</div>';
+        }
+
+        let cardsHTML = '';
+        let ultimaTeseRenderizada = null;
+
+        const renderContext = {
+            romanCounter: 0,
+            romanMap: new Map() 
+        };
+
+        topicoAtivo.anotacoes.forEach((an, index) => {
+            const chaveObiceCrua = an.tese || "Óbice Não Nomeado"; 
+            const diretrizes = (topicoAtivo.diretrizesPorObice && topicoAtivo.diretrizesPorObice[chaveObiceCrua]) 
+                                ? topicoAtivo.diretrizesPorObice[chaveObiceCrua] 
+                                : [];
+            
+            const isObicePreenchido = (an.tese && an.tese.trim() !== '');
+
+            if (chaveObiceCrua !== ultimaTeseRenderizada) {
+                if (isObicePreenchido || diretrizes.length > 0) {
+                    const tituloExibicao = isObicePreenchido ? an.tese : "Óbice Não Nomeado";
+                    cardsHTML += _gerarHtmlObiceGroup(tituloExibicao, diretrizes, activeTabId, _activeTopicoCor, index, renderContext);
+                }
+                ultimaTeseRenderizada = chaveObiceCrua;
+            }
+            
+            cardsHTML += criarCard(an, index, topicoAtivo.anotacoes, renderContext);
+        });
+        
+        let htmlDiretrizesGlobais = '';
+        let globaisHtml = ''; 
+
+        if (temGlobais || forcadoAberto) {
+            if (temGlobais) {
                 const globaisArray = [];
                 const gruposGProcessados = new Set();
                 
                 topicoAtivo.diretrizesGlobais.forEach((d, sIdx) => {
-                    // Shallow Copy
                     const dRender = { ...d, viewSource: 'global', localIndex: sIdx };
                     
                     if (!dRender.grupoId) {
@@ -1166,12 +1247,10 @@ window.TopicsManager = (function () {
             <div class="timeline-item-master align-left nivel-hierarquico nivel-global" id="timeline-wrapper-global">
                 <div class="main-card-wrapper" data-cidx="main">
                     <div class="annotation-number-area">
-                        <!-- ÍCONE GLOBAL -->
-                        <div class="timeline-icon-box" title="Diretrizes Globais de Admissibilidade">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+                            <div class="timeline-icon-box" title="Diretrizes Globais de Admissibilidade">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+                            </div>
                         </div>
-                    </div>
-                    <!-- CARD GLOBAL ESCURO -->
                     <div class="annotation-card">
                             <div class="card-header" style="justify-content: space-between; margin-bottom: 0;">
                                 <div class="hierarquia-titulo">Diretrizes Globais de Admissibilidade</div>
@@ -1187,21 +1266,19 @@ window.TopicsManager = (function () {
                     ${globaisHtml}
                 </div>
             </div>`;
-
-            conteudoCentralHtml = sumarioHtml + `
-                <div class="timeline-container" id="timeline-container">
-                    <svg id="connections-canvas"></svg>
-                    ${htmlDiretrizesGlobais}
-                    ${cardsHTML}
-                </div>`;
         }
+
+        conteudoCentralHtml = sumarioHtml + `
+            <div class="timeline-container" id="timeline-container">
+                <svg id="connections-canvas"></svg>
+                ${htmlDiretrizesGlobais}
+                ${cardsHTML}
+            </div>`;
 
         const novoHtml = preambleHtml + conteudoCentralHtml;
             
-        // Desconecta o observer antes da árvore antiga ser destruída para evitar memory leaks!
-        resizeObserver.disconnect();
+        if (typeof resizeObserver !== 'undefined') resizeObserver.disconnect();
 
-        // KEYED MORPHING
         if (typeof morphdom !== 'undefined') {
             morphdom(contentEl, `<div id="topics-tab-content" class="topics-content-area" style="${contentEl.style.cssText}">${novoHtml}</div>`, {
                 childrenOnly: true,
@@ -1223,22 +1300,19 @@ window.TopicsManager = (function () {
 
             requestAnimationFrame(() => {
                 measurements.forEach(m => {
-                    // Observa APENAS as caixas de texto que podem expandir
-                    resizeObserver.observe(m.el);
+                    if (typeof resizeObserver !== 'undefined') resizeObserver.observe(m.el);
                     
                     if (m.isOverflowing) {
-                        // Exibe o botão e aplica a classe do fade-out
                         if (m.btn) m.btn.style.display = 'inline-flex';
                         m.el.classList.add('is-truncated');
                     } else {
-                        // Garante a limpeza do estado
                         if (m.btn) m.btn.style.display = 'none';
                         m.el.classList.remove('is-truncated');
                     }
                 });
                 
                 const historyContainer = document.getElementById('history-container');
-                if(historyContainer) resizeObserver.observe(historyContainer);
+                if(historyContainer && typeof resizeObserver !== 'undefined') resizeObserver.observe(historyContainer);
                 
                 document.querySelectorAll('.image-resize-wrapper').forEach(wrapper => {
                     wrapper.addEventListener('mouseup', () => desenharConexoes());
@@ -1257,6 +1331,8 @@ window.TopicsManager = (function () {
                 atualizarContadorNotasOcultas();
             });
         });
+        
+        _sincronizarBtnGlobais(temGlobais, forcadoAberto);
     }
 
     /**
@@ -1481,8 +1557,8 @@ window.TopicsManager = (function () {
             
             const cardInterno = notaAlvo.querySelector('.sub-annotation-card');
             cardInterno.style.transition = 'box-shadow 0.2s, border-color 0.2s';
-            cardInterno.style.borderColor = '#ffb300';
-            cardInterno.style.boxShadow = '0 0 0 4px rgba(255, 179, 0, 0.3), 4px 4px 0px rgba(0, 0, 0, 0.15)';
+            cardInterno.style.borderColor = '#A3E635'; /* Verde Limão AI */
+            cardInterno.style.boxShadow = '0 0 0 4px rgba(163, 230, 53, 0.3), 4px 4px 0px rgba(0, 0, 0, 0.15)';
             
             setTimeout(() => {
                 cardInterno.style.borderColor = ''; 
@@ -1823,6 +1899,8 @@ window.TopicsManager = (function () {
 
     // API pública do módulo
     return {
+        toggleDiretrizesGlobais,
+        resetVisibilidadeGlobais,
         abrirModalPilha,
         fecharModalPilha,
         salvarEdicaoPilha,
@@ -1919,7 +1997,10 @@ window.OutlineViewManager = (function() {
                 const role = TopicsManager.escaparHTML(ad.role || ad.oradorStr || 'Orador Desconhecido');
                 const safeFormatTime = (sec) => window.AudioManager?.formatTime ? window.AudioManager.formatTime(sec) : `${Math.floor(sec/60)}' ${Math.floor(sec%60)}''`;
                 const tempoStr = `${safeFormatTime(ad.inicio)} a ${safeFormatTime(ad.fim)}`;
-                const transcricao = ad.transcricao ? `<strong>Degravação:</strong> "${_render(ad.transcricao)}"` : '<em>Sem degravação cadastrada.</em>';
+                // Adicionado .replace(/\n/g, '<br>') para respeitar quebras na Visão Estruturada
+                const transcricao = ad.transcricao 
+                    ? `<strong>Degravação:</strong> "${_render(ad.transcricao).replace(/\n/g, '<br>')}"` 
+                    : '<em>Sem degravação cadastrada.</em>';
                 return `<div class="outline-audio-box"><div>🎙️ <strong>Oitiva de Audiência:</strong> ${role} (⏱️ ${tempoStr})</div><div style="margin-top:4px;">${transcricao}</div></div>`;
             } catch (e) {
                 return `<div class="outline-audio-box" style="color:#d32f2f;">Erro na leitura do áudio.</div>`;

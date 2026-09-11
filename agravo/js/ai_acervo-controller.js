@@ -813,7 +813,13 @@ window.adicionarTagGlobal = async function() {
 
 window.editarTagGlobal = async function(idx) {
     const tagAntiga = _tagsGlobais[idx];
-    const novoNome = prompt('Renomear tag (atualizará todos os modelos):', tagAntiga);
+    const novoNome = await JurisPrompt.ask(
+        '️ Renomear Tag', 
+        'Renomear tag (Isso atualizará TODOS os modelos que utilizam esta tag):', 
+        'Novo nome da tag...', 
+        tagAntiga
+    );
+    
     if (!novoNome || novoNome.trim() === '' || novoNome.trim() === tagAntiga) return;
     
     const nomeLimpo = novoNome.trim();
@@ -896,7 +902,13 @@ window.acionarRenomearModeloAtual = async function() {
     if (!_modeloSelecionadoId) return exibirToast('Nenhum modelo selecionado.', 'erro');
     const nomeElemento = document.getElementById('edit-modelo-nome');
     const nomeAtual = nomeElemento.textContent;
-    const novoNome = prompt('Digite o novo nome para este modelo:', nomeAtual);
+    
+    const novoNome = await JurisPrompt.ask(
+        '️ Renomear Modelo', 
+        'Digite o novo título para este modelo do acervo:', 
+        'Novo título...', 
+        nomeAtual
+    );
     
     if (novoNome === null || novoNome.trim() === '' || novoNome.trim() === nomeAtual) return;
 

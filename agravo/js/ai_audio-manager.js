@@ -14,16 +14,48 @@ window.AudioManager = (function() {
     let _isInternalNavigation = false; // Flag para prevenir loop infinito
     let _eventosAudioRegistrados = false; // Flag para padrão Idempotent
 
+    // ================================================
+    // ESTADO ENCAPSULADO DO MINI PLAYER
+    // ================================================
+    const _mini = {
+        backdrop: null,
+        modal: null,
+        audio: null,
+        titulo: null,
+        closeBtn: null,
+        modo: null, // 'mini' | null
+        pending: null,
+        ultimoFoco: null,
+        seekLock: false,
+        handlers: {
+            loaded: null,
+            timeupdate: null,
+            seeked: null,
+            play: null,
+            pause: null,
+            ended: null,
+            keydown: null
+        }
+    };
+
     /**
      * Máquina de Estado Visual do Ícone de Áudio
      */
     function syncIndicatorState() {
-        const audio = document.getElementById('main-audio-player');
+        const mainAudio = document.getElementById('main-audio-player');
+        const miniAudio = _mini.audio;
         const indicator = document.getElementById('active-audio-indicator');
-        if (!indicator || !audio) return;
 
-        const isPanelOpen = isPlayerVisivel();
-        const isPlaying = !audio.paused && !audio.ended;
+        if (!indicator) return;
+
+        // Determina qual áudio está "no comando" no momento
+        const audioAtivo = (_mini.modo === 'mini' && miniAudio) ? miniAudio : mainAudio;
+        const isPanelOpen = isPlayerVisivel() || (_mini.modal && _mini.modal.classList.contains('is-visible'));
+        
+        let isPlaying = false;
+        if (audioAtivo) {
+            isPlaying = !audioAtivo.paused && !audioAtivo.ended;
+        }
 
         indicator.classList.remove('playing-audio', 'is-spinning');
 
@@ -100,6 +132,9 @@ window.AudioManager = (function() {
     }
 
     function abrirPlayer() { 
+        if (_mini.modal && _mini.modal.classList.contains('is-visible')) {
+            fecharMiniPlayer();
+        }
         document.getElementById('audio-player-panel').style.display = 'flex'; 
         
         if (window.toggleModoFoco) window.toggleModoFoco(true);
@@ -160,6 +195,11 @@ window.AudioManager = (function() {
 
     function onTabChange(aba) {
         if (_isInternalNavigation) return;
+        
+        if (_mini.modal && _mini.modal.classList.contains('is-visible')) {
+            fecharMiniPlayer();
+        }
+
         if (aba !== 'leitura' && isPlayerVisivel()) {
             fecharPlayer();
         }
@@ -305,6 +345,7 @@ window.AudioManager = (function() {
             audio.pause();
         }
         
+        fecharMiniPlayer();
         fecharPlayer();     // Força o player a minimizar e aciona syncIndicatorState
         atualizarHistoricoAudio(); // Mitiga falha de sincronização apontada no relatório
         _deps.exibirToast('Trecho da oitiva salvo!', 'sucesso');
@@ -327,6 +368,8 @@ window.AudioManager = (function() {
     }
 
     function encerrar() {
+        fecharMiniPlayer(); // Garante teardown do modal
+
         if (_audioUrl) {
             URL.revokeObjectURL(_audioUrl);
             _audioUrl = null;
@@ -345,8 +388,15 @@ window.AudioManager = (function() {
         _timeEnd = null;
     }
 
-    async function solicitarMp3Retomada() {
+    async function solicitarMp3Retomada(modo = 'full') {
+        if (typeof window.showOpenFilePicker !== 'function') {
+            _deps.exibirToast('Este navegador não suporta a abertura de arquivos locais.', 'erro');
+            _mini.pending = null;
+            return;
+        }
+
         _deps.exibirToast('Anotações de audiência detectadas. Localize o arquivo MP3 correspondente.', 'aviso');
+
         try {
             const [fileHandle] = await window.showOpenFilePicker({
                 types: [{
@@ -354,20 +404,35 @@ window.AudioManager = (function() {
                     accept: { 'audio/mpeg': ['.mp3'], 'audio/wav': ['.wav'] }
                 }]
             });
+
             const file = await fileHandle.getFile();
+
             if (_audioUrl) URL.revokeObjectURL(_audioUrl);
             _audioUrl = URL.createObjectURL(file);
-            document.getElementById('main-audio-player').src = _audioUrl;
-            
+
+            const mainAudio = document.getElementById('main-audio-player');
+            if (mainAudio) mainAudio.src = _audioUrl;
+
             registrarEventosAudio();
 
             const activeIndicator = document.getElementById('active-audio-indicator');
             if (activeIndicator) activeIndicator.style.display = 'flex';
 
-            abrirPlayer();
+            if (modo === 'mini' && _mini.pending) {
+                const pendente = _mini.pending;
+                _mini.pending = null;
+                // Repassa o quarto parâmetro (degravacao) restaurado do cache
+                _abrirMiniPlayer(pendente.inicio, pendente.fim, pendente.titulo, pendente.degravacao);
+            } else {
+                abrirPlayer();
+            }
+
             _deps.exibirToast('Áudio restaurado com sucesso!', 'sucesso');
         } catch (err) {
-            if (err.name !== 'AbortError') _deps.exibirToast('Erro ao carregar o arquivo MP3.', 'erro');
+            _mini.pending = null;
+            if (err.name !== 'AbortError') {
+                _deps.exibirToast('Erro ao carregar o arquivo MP3.', 'erro');
+            }
         }
     }
 
@@ -521,11 +586,286 @@ window.AudioManager = (function() {
         listaEl.innerHTML = html;
     }
 
+    /* ================================================
+    MINI PLAYER DE TRECHO — INFRAESTRUTURA E DELEGAÇÃO
+    ================================================ */
+
+    function _criarMiniPlayerDom() {
+        if (_mini.modal && document.body.contains(_mini.modal)) return;
+
+        _mini.backdrop = document.createElement('div');
+        _mini.backdrop.className = 'mini-audio-backdrop';
+        _mini.backdrop.addEventListener('click', fecharMiniPlayer);
+
+        _mini.modal = document.createElement('div');
+        _mini.modal.className = 'mini-audio-modal';
+        _mini.modal.setAttribute('role', 'dialog');
+        _mini.modal.setAttribute('aria-modal', 'true');
+        _mini.modal.setAttribute('aria-labelledby', 'mini-audio-title');
+
+        _mini.modal.innerHTML = `
+            <div class="mini-audio-modal__header">
+                <div class="mini-audio-modal__title" id="mini-audio-title"></div>
+                <button type="button" class="mini-audio-modal__close" aria-label="Fechar player de áudio">✕</button>
+            </div>
+            <div class="mini-audio-modal__body">
+                <audio controls preload="metadata"></audio>
+                <div id="mini-audio-transcription" class="mini-audio-transcript" role="region" aria-label="Texto da degravação" tabindex="0"></div>
+            </div>
+        `;
+
+        _mini.titulo = _mini.modal.querySelector('#mini-audio-title');
+        _mini.closeBtn = _mini.modal.querySelector('.mini-audio-modal__close');
+        _mini.audio = _mini.modal.querySelector('audio');
+        _mini.transcricao = _mini.modal.querySelector('#mini-audio-transcription');
+
+        _mini.closeBtn.addEventListener('click', fecharMiniPlayer);
+
+        document.body.appendChild(_mini.backdrop);
+        document.body.appendChild(_mini.modal);
+    }
+
+    function _pararMonitorMini() {
+        if (!_mini.audio) return;
+        const a = _mini.audio;
+        const h = _mini.handlers;
+
+        if (h.timeupdate) a.removeEventListener('timeupdate', h.timeupdate);
+        if (h.seeked) a.removeEventListener('seeked', h.seeked);
+        if (h.play) a.removeEventListener('play', h.play);
+        if (h.pause) a.removeEventListener('pause', h.pause);
+        if (h.ended) a.removeEventListener('ended', h.ended);
+        if (h.loaded) a.removeEventListener('loadedmetadata', h.loaded);
+
+        h.timeupdate = null; h.seeked = null; h.play = null; 
+        h.pause = null; h.ended = null; h.loaded = null;
+        _mini.seekLock = false;
+    }
+
+    function _ativarMonitorMini(inicio, fim) {
+        if (!_mini.audio) return;
+        _pararMonitorMini();
+
+        const a = _mini.audio;
+
+        _mini.handlers.timeupdate = function() {
+            if (a.paused) return;
+            const limite = Math.min(fim, a.duration || fim);
+            if (a.currentTime >= limite - 0.1) {
+                a.pause();
+                try { a.currentTime = limite; } catch(e) {}
+                _deps.exibirToast('Reprodução do trecho finalizada.', 'sucesso');
+            }
+        };
+
+        _mini.handlers.seeked = function() {
+            if (_mini.seekLock) return;
+            const limite = Math.min(fim, a.duration || fim);
+            
+            if (a.currentTime < inicio) {
+                _mini.seekLock = true;
+                try { a.currentTime = inicio; } catch(e) {}
+                setTimeout(() => { _mini.seekLock = false; }, 100);
+            } else if (a.currentTime > limite) {
+                _mini.seekLock = true;
+                try { a.currentTime = limite; } catch(e) {}
+                a.pause(); 
+                setTimeout(() => { _mini.seekLock = false; }, 100);
+            }
+            syncIndicatorState();
+        };
+
+        _mini.handlers.play = syncIndicatorState;
+        _mini.handlers.pause = syncIndicatorState;
+        _mini.handlers.ended = syncIndicatorState;
+
+        a.addEventListener('timeupdate', _mini.handlers.timeupdate);
+        a.addEventListener('seeked', _mini.handlers.seeked);
+        a.addEventListener('play', _mini.handlers.play);
+        a.addEventListener('pause', _mini.handlers.pause);
+        a.addEventListener('ended', _mini.handlers.ended);
+    }
+
+    function _abrirMiniPlayer(inicio, fim, titulo, degravacao = '') {
+        if (!_audioUrl) {
+            _deps.exibirToast('Áudio não carregado.', 'erro');
+            return;
+        }
+
+        inicio = Number(inicio);
+        fim = Number(fim);
+
+        if (!Number.isFinite(inicio) || !Number.isFinite(fim) || fim <= inicio) {
+            _deps.exibirToast('Trecho de áudio inválido.', 'erro');
+            return;
+        }
+
+        if (isPlayerVisivel()) fecharPlayer();
+        _criarMiniPlayerDom();
+
+        if (!_mini.modal || !_mini.audio) return;
+
+        _mini.ultimoFoco = document.activeElement;
+        _mini.modo = 'mini';
+
+        _pararMonitorMini();
+        _mini.titulo.textContent = titulo || 'Oitiva';
+
+        // Data-Driven Layout: O JS apenas declara o estado, o CSS assume a geometria
+        const temDegravacao = degravacao && degravacao.trim() !== '';
+        if (temDegravacao) {
+            _mini.transcricao.textContent = degravacao; // Proteção estrita contra XSS
+        } else {
+            _mini.transcricao.textContent = '';
+        }
+        _mini.modal.classList.toggle('has-transcript', temDegravacao);
+
+        if (_mini.audio.src !== _audioUrl) {
+            _mini.audio.src = _audioUrl;
+            _mini.audio.load();
+        }
+
+        _mini.backdrop.classList.add('is-visible');
+        _mini.modal.classList.add('is-visible');
+
+        if (_mini.handlers.keydown) {
+            document.removeEventListener('keydown', _mini.handlers.keydown, true);
+        }
+        _mini.handlers.keydown = function(e) {
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                fecharMiniPlayer();
+                return;
+            }
+            if (e.key === 'Tab') {
+                if (!_mini.modal.contains(document.activeElement)) {
+                    e.preventDefault();
+                    _mini.closeBtn.focus();
+                }
+            }
+        };
+        document.addEventListener('keydown', _mini.handlers.keydown, true);
+
+        const prepararEIniciar = function() {
+            _mini.handlers.loaded = null;
+            if (!_mini.modal || !_mini.modal.classList.contains('is-visible')) return;
+
+            let limiteFim = fim;
+            if (Number.isFinite(_mini.audio.duration) && _mini.audio.duration > 0) {
+                if (inicio >= _mini.audio.duration) {
+                    _deps.exibirToast('Início do trecho fora da duração do áudio.', 'erro');
+                    fecharMiniPlayer();
+                    return;
+                }
+                limiteFim = Math.min(fim, _mini.audio.duration);
+            }
+
+            try { _mini.audio.currentTime = inicio; } catch(e) {}
+            _ativarMonitorMini(inicio, limiteFim);
+
+            _mini.audio.play()
+                .then(() => syncIndicatorState())
+                .catch(() => {
+                    syncIndicatorState();
+                    _deps.exibirToast('Navegador bloqueou reprodução automática. Use o play.', 'aviso');
+                });
+        };
+
+        if (_mini.audio.readyState >= 1) {
+            prepararEIniciar();
+        } else {
+            _mini.handlers.loaded = prepararEIniciar;
+            _mini.audio.addEventListener('loadedmetadata', _mini.handlers.loaded, { once: true });
+        }
+
+        _mini.closeBtn.focus();
+        syncIndicatorState();
+    }
+
+    function fecharMiniPlayer() {
+        if (!_mini.modal) return;
+
+        if (_mini.audio) {
+            _mini.audio.pause();
+            _pararMonitorMini();
+        }
+
+        if (_mini.handlers.keydown) {
+            document.removeEventListener('keydown', _mini.handlers.keydown, true);
+            _mini.handlers.keydown = null;
+        }
+
+        if (_mini.backdrop) _mini.backdrop.classList.remove('is-visible');
+        if (_mini.modal) _mini.modal.classList.remove('is-visible');
+
+        _mini.modo = null;
+        _mini.pending = null;
+        syncIndicatorState();
+
+        if (_mini.ultimoFoco && document.contains(_mini.ultimoFoco)) {
+            _mini.ultimoFoco.focus();
+        }
+        _mini.ultimoFoco = null;
+    }
+
+    async function tocarTrechoEmModal(inicio, fim, titulo, degravacao = '') {
+        inicio = Number(inicio);
+        fim = Number(fim);
+
+        if (!Number.isFinite(inicio) || !Number.isFinite(fim) || fim <= inicio) {
+            _deps.exibirToast('Trecho de áudio inválido.', 'erro');
+            return;
+        }
+
+        if (isPlayerVisivel()) fecharPlayer();
+
+        if (!_audioUrl) {
+            // CORREÇÃO CRÍTICA: Salva a degravação no cache assíncrono
+            _mini.pending = { inicio, fim, titulo, degravacao };
+            _deps.exibirToast('Carregue o arquivo MP3 da audiência para ouvir o trecho.', 'aviso');
+            await solicitarMp3Retomada('mini');
+            return;
+        }
+
+        _abrirMiniPlayer(inicio, fim, titulo, degravacao);
+    }
+
+    /* ================================================
+    DELEGAÇÃO DE EVENTOS GLOBAL (CLICK & KEYBOARD)
+    ================================================ */
+    document.addEventListener('click', (e) => {
+        const btn = e.target.closest('.clickable-audio[data-audio-inicio]');
+        if (btn) {
+            tocarTrechoEmModal(
+                parseFloat(btn.dataset.audioInicio),
+                parseFloat(btn.dataset.audioFim),
+                btn.dataset.audioTitulo,
+                btn.dataset.audioDegravacao || ''
+            );
+        }
+    });
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+            const btn = e.target.closest('.clickable-audio[data-audio-inicio]');
+            if (btn) {
+                e.preventDefault();
+                tocarTrechoEmModal(
+                    parseFloat(btn.dataset.audioInicio),
+                    parseFloat(btn.dataset.audioFim),
+                    btn.dataset.audioTitulo,
+                    btn.dataset.audioDegravacao || ''
+                );
+            }
+        }
+    });
+
     return {
         init, iniciarSessao, abrirPlayer, fecharPlayer, alternarPlayer,
         marcarInicio, marcarFim, onRoleChange, toggleAgrupar,
         salvarRecorte, cancelarAnotacao, encerrar, solicitarMp3Retomada,
-        tocarTrecho, pularParaTempo, handleJumpKey, atualizarHistoricoAudio,
+        tocarTrecho, tocarTrechoEmModal, fecharMiniPlayer,
+        pularParaTempo, handleJumpKey, atualizarHistoricoAudio,
         prepararRetomada, formatTime, onTabChange
     };
 })();
