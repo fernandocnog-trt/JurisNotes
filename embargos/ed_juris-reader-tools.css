@@ -885,6 +885,41 @@ MINI PLAYER DE ÁUDIO — MODAL FOCADO (ED)
 .pin-missing { background-color: #e0e0e0; cursor: not-allowed; pointer-events: none; }
 .pin-missing svg { stroke: #9e9e9e; }
 
+/* Botão Borracha Inteligente no Hub de Exportação */
+.pin-eraser-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px; 
+    height: 32px;
+    border-radius: 50%;
+    background-color: #f5f7f9;
+    border: 1px solid #cfd8dc;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    margin-right: 6px;
+}
+
+.pin-eraser-btn svg { 
+    width: 16px; 
+    height: 16px; 
+    stroke: #607d8b; 
+    pointer-events: none; 
+}
+
+.pin-eraser-btn:hover { 
+    background-color: #e3f2fd; 
+    border-color: #2196f3; 
+}
+.pin-eraser-btn:hover svg { stroke: #2196f3; }
+
+.pin-eraser-btn.is-active {
+    background-color: #e8f5e9;
+    border-color: #4caf50;
+    box-shadow: 0 2px 4px rgba(76, 175, 80, 0.25);
+}
+.pin-eraser-btn.is-active svg { stroke: #2e7d32; }
+
 /* Estilo para que o card de Vício atue como um Radio Button bonito */
 .vicio-radio-card {
     border: 2px solid var(--border-color);
@@ -1383,4 +1418,26 @@ MINI PLAYER DE ÁUDIO — MODAL FOCADO (ED)
 .mini-audio-transcript:focus-visible {
     outline: 2px solid var(--trt-blue, #1a3a5c);
     outline-offset: -2px;
+}
+
+/* ================================================
+   REVELAÇÃO DO CAMPO CUSTOMIZADO (EXTRATOR)
+   ================================================ */
+.extrator-custom-reveal[hidden] {
+    display: none !important;
+}
+
+.extrator-custom-reveal:not([hidden]) {
+    display: block;
+    margin-top: 8px;
+    animation: slideDownFade 0.2s ease-out forwards;
+}
+
+@keyframes slideDownFade {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .extrator-custom-reveal:not([hidden]) { animation: none; }
 }

@@ -744,17 +744,17 @@
 
     <!-- MENU FLUTUANTE DA LOGO -->
     <div id="juris-menu" class="annotation-context-menu" style="flex-direction: column; min-width: 150px; padding: 8px;">
-        <!-- NOVO: Toggle do Cronômetro -->
+        <!-- NOVO: Toggle do Cronômetro Automático (Limpo de regras de negócio) -->
         <div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 12px; margin-bottom: 4px;">
-            <span style="display: flex; align-items: center; gap: 6px; font-size: 0.8rem; color: #555; font-weight: 600;">
+            <span style="display: flex; align-items: center; gap: 6px; font-size: 0.8rem; color: #555; font-weight: 600;" title="Inicia a contagem automaticamente ao criar um tópico">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px; height:14px; flex-shrink:0;">
                     <circle cx="12" cy="12" r="10"></circle>
                     <polyline points="12 6 12 12 16 14"></polyline>
                 </svg>
-                Cronômetro
+                Cronômetro Auto
             </span>
             <label class="toggle-switch-minimal">
-                <input type="checkbox" id="toggle-cronometro" checked onchange="TimeTrackerManager.toggleVisibility(true)">
+                <input type="checkbox" id="toggle-auto-cronometro">
                 <span class="toggle-slider"></span>
             </label>
         </div>
@@ -1477,7 +1477,9 @@ Crie um sumário hierárquico enxuto com as Grandes Categorias e Subcategorias q
                         <option value="laudo_pericial">Laudo Pericial</option>
                         <option value="atos_secretaria">Atos da Secretaria / Certidões</option>
                     </optgroup>
+                    <option value="custom">Outro (Digitar manualmente)...</option>
                 </select>
+                <input type="text" id="extrator-doc-custom" class="topic-select extrator-custom-reveal" hidden placeholder="Ex: Laudo Pericial..." maxlength="60" aria-label="Nome personalizado da peça">
             </div>
             <div>
                 <p class="popup-label">Este clique representa o:</p>
@@ -1514,6 +1516,41 @@ Crie um sumário hierárquico enxuto com as Grandes Categorias e Subcategorias q
             <button class="chip-btn chip-cancelar" onclick="ExportManager.fecharPainelExportacao()">Cancelar</button>
             <button id="btn-gerar-arquivo-exportacao" class="chip-btn chip-autora" style="background: var(--trt-blue); color: white; border: none; padding-left: 24px; padding-right: 24px;" onclick="ExportManager.gerarExportacaoPersonalizada()">
                 📥 Gerar Arquivo Exportação
+            </button>
+        </div>
+    </div>
+
+    <!-- BACKDROP E MODAL: FILTRO INTELIGENTE DE REPETIÇÃO (BORRACHA) - ED -->
+    <div id="filtro-repeticao-backdrop" style="display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.50); z-index: 4020;" onclick="ExportManager.fecharModalFiltro()"></div>
+
+    <div id="modal-filtro-repeticao" class="crop-wizard-popup" style="display:none; z-index: 4021; max-width: 550px; width: 90vw;">
+        <div class="wizard-header" style="display: flex; justify-content: space-between; align-items: center;">
+            <span style="display: flex; align-items: center; gap: 8px;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 20px; height: 20px;">
+                    <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line>
+                </svg>
+                Borracha Inteligente
+            </span>
+            <button style="background: none; border: none; font-size: 1.2rem; cursor: pointer; color: #64748b;" onclick="ExportManager.fecharModalFiltro()">✕</button>
+        </div>
+        
+        <p class="popup-label" style="margin-top: 12px;">Documento: <span id="label-doc-filtro" style="color: var(--trt-blue); font-weight: bold;"></span></p>
+        
+        <div style="background: #fff3e0; border-left: 3px solid #ff9800; padding: 8px; margin-bottom: 12px; border-radius: 4px;">
+            <p style="font-size: 0.75rem; color: #e65100; margin: 0;"><strong>⚠️ Regra de Segurança:</strong> Cole um trecho longo o suficiente (mínimo de 20 caracteres) contendo palavras fixas (ex: nome da rua, e-mail). Evite colar apenas números ou palavras curtas para não apagar o mérito do processo.</p>
+        </div>
+        
+        <textarea id="textarea-filtro-repeticao" class="popup-textarea" style="display: block; min-height: 120px;" placeholder="Ex: Rua Moreira Cabral, n. 468... Página | 17..." oninput="ExportManager.validarTamanhoFiltro()"></textarea>
+        <p id="aviso-tamanho-filtro" style="font-size: 0.7rem; color: #d32f2f; margin-top: 4px; display: none;">O trecho é muito curto e inseguro. Digite mais texto.</p>
+        
+        <input type="hidden" id="hidden-doc-tipo-filtro">
+
+        <div class="wizard-actions" style="margin-top: 16px;">
+            <button class="chip-btn chip-cancelar" style="color: #d32f2f;" onclick="ExportManager.limparFiltro()">🧹 Limpar Regra</button>
+            <div style="flex-grow: 1;"></div>
+            <button class="chip-btn chip-cancelar" onclick="ExportManager.fecharModalFiltro()">Cancelar</button>
+            <button id="btn-salvar-filtro" class="chip-btn chip-autora" style="background: var(--trt-blue); color: white; border: none;" onclick="ExportManager.salvarFiltro()">
+                ✔ Salvar Regra
             </button>
         </div>
     </div>
