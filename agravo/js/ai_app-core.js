@@ -273,6 +273,33 @@ window.JurisUtils.descobrirRuidosEstruturais = function(textoPagA, textoPagB) {
     return ruidos;
 };
 
+window.JurisUtils.criarRegexDeRepeticao = function(textoExemplo) {
+    if (!textoExemplo || typeof textoExemplo !== 'string') return null;
+
+    // 1. PRÉ-LIMPEZA ESTRATÉGICA
+    let snippet = (typeof this.limparTextoPDF === 'function') 
+        ? this.limparTextoPDF(textoExemplo) 
+        : textoExemplo.trim();
+    
+    // Tolerância levemente ajustada para 20 caracteres para facilitar o uso
+    if (snippet.length < 20) return null; 
+
+    // 2. Escapa caracteres sensíveis de Regex (., /, (, ), etc)
+    let pattern = snippet.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    
+    // 3. TOLERÂNCIA NUMÉRICA (Fuzzy Digits)
+    pattern = pattern.replace(/\d+/g, '[\\d\\s]+');
+
+    // 4. TOLERÂNCIA DE PONTUAÇÃO (Fuzzy Punctuation)
+    pattern = pattern.replace(/[-–—_]/g, '[-–—_\\s]*');
+    
+    // 5. TOLERÂNCIA DE ESPAÇAMENTO 
+    pattern = pattern.replace(/\s+/g, '\\s+');
+    
+    // 6. Retorna a regra com uma "gordura" nas bordas
+    return new RegExp('\\s*' + pattern + '\\s*', 'gi');
+};
+
 window.JurisUtils.limparTextoPDF = function(texto) {
         if (!texto || typeof texto !== 'string') return '';
         return texto
@@ -1125,9 +1152,10 @@ window.confirmarCriacaoTopicoAI = function() {
     }
 
     const cor = TopicsManager.obterCor(topicos.length);
+    const novoTopicoId = 'topico-' + Date.now();
     
     topicos.push({ 
-        id: 'topico-' + Date.now(), 
+        id: novoTopicoId, 
         nome: nomeCompleto, 
         matrizCalculo: 'admissibilidade', 
         tipoObice: obiceTipado,           
@@ -1142,6 +1170,10 @@ window.confirmarCriacaoTopicoAI = function() {
     exibirToast(`Auditoria de ${obiceTipado} iniciada.`, 'sucesso');
     
     verificarAcervoEmSegundoPlano(nomeCompleto);
+    
+    if (window.TimeTrackerManager && typeof window.TimeTrackerManager.handleNovoTopicoCriado === 'function') {
+        window.TimeTrackerManager.handleNovoTopicoCriado(novoTopicoId);
+    }
 };
 
 function renderizarTopicos() {
@@ -1558,6 +1590,12 @@ async function renomearAba(id) {
 
 function solicitarExclusaoAba(btnEl, id) {
     if (btnEl.dataset.confirming === "true") {
+        if (window.TopicsManager && TopicsManager.getActiveTabId() === id) {
+            if (window.TimeTrackerManager && typeof window.TimeTrackerManager.tratarExclusaoAba === 'function') {
+                window.TimeTrackerManager.tratarExclusaoAba();
+            }
+        }
+        
         topicos = topicos.filter(t => t.id !== id);
         renderizarTopicos();
         salvarBackupAutomatico();
@@ -1785,11 +1823,11 @@ async function acionarCriacaoBackup() {
 window.TimeTrackerManager = (function() {
     let _getTopicos = () => []; 
     
-    let isHabilitado = false;
+    let isAutoMode = false;
     let isRodando = false;
     let tempoSegundos = 0;
     let intervaloId = null;
-    let complexidadeAtual = null;
+    let complexidadeAtual = 'medio';
     let marcosAtingidos = { excelente: false, bom: false, cautela: false };
 
     const limites = {
@@ -1803,24 +1841,26 @@ window.TimeTrackerManager = (function() {
             _getTopicos = deps.getTopicos;
         }
         
-        // Lê a posição da chavinha assim que o aplicativo inicia
-        const toggleEl = document.getElementById('toggle-cronometro');
+        const savedState = localStorage.getItem('juris_auto_timer_ai');
+        isAutoMode = savedState === 'true';
+
+        const toggleEl = document.getElementById('toggle-auto-cronometro');
         if (toggleEl) {
-            isHabilitado = toggleEl.checked;
+            toggleEl.checked = isAutoMode;
+            toggleEl.addEventListener('change', (e) => {
+                isAutoMode = e.target.checked;
+                localStorage.setItem('juris_auto_timer_ai', isAutoMode);
+                exibirToast(`Modo Automático ${isAutoMode ? 'Ativado' : 'Desativado'}.`, 'info');
+            });
         }
     }
 
-    function toggleVisibility(fromToggle = false) {
-        if (fromToggle) {
-            const toggleEl = document.getElementById('toggle-cronometro');
-            if (toggleEl) isHabilitado = toggleEl.checked;
-        }
-        
+    function toggleVisibility() {
         const container = document.getElementById('efficiency-tracker-container');
         const isHistorico = document.body.dataset.activeTab === 'historico';
         const temTopico = _getTopicos().length > 0;
         
-        const deveExibir = isHabilitado && isHistorico && temTopico;
+        const deveExibir = isHistorico && temTopico;
         
         container.style.display = deveExibir ? 'flex' : 'none';
         if (deveExibir) sincronizarCor();
@@ -1829,6 +1869,8 @@ window.TimeTrackerManager = (function() {
     function handleClick() {
         document.getElementById('modal-tracker-backdrop').style.display = 'block';
         document.getElementById('modal-tracker-config').style.display = 'block';
+
+        if (typeof window.toggleFocoModal === 'function') window.toggleFocoModal(true);
         
         const svgIcon = isRodando 
             ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px; height:18px; margin-right:6px; vertical-align:middle;"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg>'
@@ -1842,15 +1884,20 @@ window.TimeTrackerManager = (function() {
     function fecharModal() {
         document.getElementById('modal-tracker-backdrop').style.display = 'none';
         document.getElementById('modal-tracker-config').style.display = 'none';
+        if (typeof window.toggleFocoModal === 'function') window.toggleFocoModal(false);
     }
 
-    function iniciar() {
-        complexidadeAtual = document.getElementById('tracker-complexity-select').value;
+    function iniciar(isSilencioso = false, topicoIdForce = null) {
+        const selectEl = document.getElementById('tracker-complexity-select');
+        if (selectEl && selectEl.value) {
+            complexidadeAtual = selectEl.value;
+        }
+
         marcosAtingidos = { excelente: false, bom: false, cautela: false };
         isRodando = true;
         fecharModal();
         
-        sincronizarCor();
+        sincronizarCor(topicoIdForce);
         document.getElementById('efficiency-tracker-dot').classList.add('pulsing');
         
         const pill = document.getElementById('efficiency-tracker-pill');
@@ -1859,13 +1906,14 @@ window.TimeTrackerManager = (function() {
         if (intervaloId) clearInterval(intervaloId);
         intervaloId = setInterval(tick, 1000);
 
-        exibirToast(`Cronômetro ativado. Foco na análise!`, 'info');
+        if (!isSilencioso) {
+            exibirToast(`Cronômetro ativado. Foco na análise!`, 'info');
+        }
     }
 
-    function parar() {
+    function pararSilencioso() {
         isRodando = false;
         if (intervaloId) clearInterval(intervaloId);
-        fecharModal();
         
         const dot = document.getElementById('efficiency-tracker-dot');
         const pill = document.getElementById('efficiency-tracker-pill');
@@ -1876,15 +1924,18 @@ window.TimeTrackerManager = (function() {
             dot.style.boxShadow = 'none';
         }
         
-        if(pill) {
-            pill.classList.remove('milestone-1', 'milestone-2', 'milestone-3');
-        }
-        
-        const tempoFinal = document.getElementById('efficiency-tracker-time').textContent;
-        exibirToast(`Tópico concluído. Tempo de tela: ${tempoFinal}`, 'sucesso');
+        if(pill) pill.classList.remove('milestone-1', 'milestone-2', 'milestone-3');
         
         tempoSegundos = 0;
         atualizarDisplay();
+    }
+
+    function parar() {
+        const timeEl = document.getElementById('efficiency-tracker-time');
+        const tempoFinal = timeEl ? timeEl.textContent : '00:00';
+        pararSilencioso();
+        fecharModal();
+        exibirToast(`Tópico concluído. Tempo de tela: ${tempoFinal}`, 'sucesso');
     }
 
     function tick() {
@@ -1929,11 +1980,9 @@ window.TimeTrackerManager = (function() {
         }
     }
 
-    function sincronizarCor() {
-        if (!isHabilitado) return;
-        
+    function sincronizarCor(topicoIdForce = null) {
         const topicosData = _getTopicos();
-        const activeTabId = typeof TopicsManager !== 'undefined' ? TopicsManager.getActiveTabId() : null;
+        const activeTabId = topicoIdForce || (typeof TopicsManager !== 'undefined' ? TopicsManager.getActiveTabId() : null);
         let cor = '#ccc'; 
         
         if (activeTabId && topicosData.length > 0) {
@@ -1954,7 +2003,25 @@ window.TimeTrackerManager = (function() {
         }
     }
 
-    return { init, toggleVisibility, handleClick, fecharModal, iniciar, parar, sincronizarCor };
+    function handleNovoTopicoCriado(novoTopicoId = null) {
+        if (!isAutoMode) return;
+        if (isRodando) pararSilencioso();
+
+        requestAnimationFrame(() => {
+            iniciar(true, novoTopicoId);
+        });
+    }
+
+    function tratarExclusaoAba() {
+        if (isRodando) {
+            pararSilencioso();
+        }
+    }
+
+    return { 
+        init, toggleVisibility, handleClick, fecharModal, iniciar, parar, 
+        sincronizarCor, handleNovoTopicoCriado, tratarExclusaoAba 
+    };
 })();
 
 /* ================================================

@@ -694,6 +694,32 @@ document.getElementById('seletor-topico').addEventListener('change', (e) => {
 /* ================================================
    MÓDULO: EXTRATOR INTELIGENTE DE TEXTO (ALFINETE)
    ================================================ */
+
+// 1. HELPERS PUROS DE NORMALIZAÇÃO
+const _gerarSlugSeguro = (texto) => {
+    return 'custom_' + texto.trim().toLowerCase()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_|_$/g, '');
+};
+
+// 2. CONTROLE DE EVENTOS E ESTADO DA UI DO EXTRATOR
+document.addEventListener('DOMContentLoaded', () => {
+    const selectDoc = document.getElementById('extrator-doc-select');
+    if (selectDoc) {
+        selectDoc.addEventListener('change', (e) => {
+            const inputCustom = document.getElementById('extrator-doc-custom');
+            if (e.target.value === 'custom') {
+                inputCustom.removeAttribute('hidden');
+                requestAnimationFrame(() => inputCustom.focus());
+            } else {
+                inputCustom.setAttribute('hidden', '');
+                inputCustom.value = '';
+            }
+        });
+    }
+});
+
 window.iniciarMarcadorExtracao = function() {
     if (topicos.length === 0) {
         exibirToast('Crie um tópico recursal primeiro.', 'aviso'); return;
@@ -711,14 +737,38 @@ window.iniciarMarcadorExtracao = function() {
 
 window.salvarMarcadorExtracao = function() {
     const topicoId = document.getElementById('extrator-topic-select').value;
-    const docTipo = document.getElementById('extrator-doc-select').value;
+    const selectValue = document.getElementById('extrator-doc-select').value;
     const fronteira = document.getElementById('extrator-fronteira-select').value;
+    
+    let docTipo = selectValue;
+    let docLabel = null;
+    
+    if (selectValue === 'custom') {
+        const rawInput = document.getElementById('extrator-doc-custom').value.replace(/\s+/g, ' ').trim();
+        if (rawInput.length < 3) {
+            exibirToast('Digite um nome válido (mínimo 3 caracteres).', 'aviso');
+            return;
+        }
+        docTipo = _gerarSlugSeguro(rawInput);
+        docLabel = rawInput;
+        
+        // Guarda de colisão contra chaves do sistema
+        if (Array.from(document.getElementById('extrator-doc-select').options).some(opt => opt.value === docTipo)) {
+            exibirToast('Esta peça já existe nas opções padrão.', 'aviso');
+            return;
+        }
+    }
     
     const topico = topicos.find(t => t.id === topicoId);
     if (!topico.marcosExtracao) topico.marcosExtracao = [];
     
     topico.marcosExtracao = topico.marcosExtracao.filter(m => !(m.docTipo === docTipo && m.fronteira === fronteira));
-    topico.marcosExtracao.push({ ...extratorTempState, docTipo, fronteira });
+    
+    // Persistência Híbrida: injeta o docLabel apenas se existir
+    const payload = { ...extratorTempState, docTipo, fronteira };
+    if (docLabel) payload.docLabel = docLabel;
+    
+    topico.marcosExtracao.push(payload);
 
     cancelarMarcadorExtracao();
     exibirToast(`Marco de ${fronteira} definido com sucesso!`, 'sucesso');
@@ -733,6 +783,15 @@ window.salvarMarcadorExtracao = function() {
 window.cancelarMarcadorExtracao = function() {
     document.getElementById('extrator-modal-backdrop').style.display = 'none';
     document.getElementById('extrator-wizard-popup').style.display = 'none';
+    
+    const inputCustom = document.getElementById('extrator-doc-custom');
+    if (inputCustom) {
+        inputCustom.setAttribute('hidden', '');
+        inputCustom.value = '';
+    }
+    const selectDoc = document.getElementById('extrator-doc-select');
+    if (selectDoc) selectDoc.value = selectDoc.options[0].value;
+    
     extratorTempState = null;
     modoExtratorAtivo = false;
     document.body.classList.remove('modo-extrator-ativo');
@@ -1236,15 +1295,21 @@ document.addEventListener('mouseover', (e) => {
         contrarrazões_re: "Contraminuta (Ré)", 
         inicial: "Recurso Ordinário" 
     };
-    const nomeBonito = docNomes[docTipo] || (docTipo ? docTipo.toUpperCase() : 'DESCONHECIDO');
+    
+    // Resolução segura de exibição: prioriza o docLabel, faz fallback pro dicionário, e último fallback humanizando o slug
+    const rawName = pin.dataset.tooltipDocLabel || docNomes[docTipo] || (docTipo ? docTipo.replace(/^custom_/, '').toUpperCase() : 'DESCONHECIDO');
+    const nomeBonito = window.TopicsManager ? TopicsManager.escaparHTML(rawName) : rawName;
+    
+    const safeTopicoNome = window.TopicsManager ? TopicsManager.escaparHTML(topicoNome) : topicoNome;
+
     const corFronteira = fronteira === 'INÍCIO' ? '#34db98' : '#e74c3c';
 
-    // 2. DOM MUTATION: Injeta o novo conteúdo com formatação consistente
+    // 2. DOM MUTATION: Injeta o novo conteúdo com formatação consistente (com escape anti-XSS)
     _cachedTooltip.innerHTML = `
         <strong style="color: ${corFronteira};">📍 MARCO DE ${fronteira}</strong>
         <span style="display:block; margin-top:4px; font-size: 0.8rem; color:#ecf0f1;">
             <b>Doc:</b> ${nomeBonito}<br>
-            <b>Tópico:</b> ${topicoNome}
+            <b>Tópico:</b> ${safeTopicoNome}
         </span>
     `;
 
