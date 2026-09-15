@@ -1184,7 +1184,8 @@ async function criarTopicoPrompt() {
         }
 
         const cor = TopicsManager.obterCor(topicos.length);
-        topicos.push({ id: 'topico-' + Date.now(), nome: nomeLimpo, cor, anotacoes: [] });
+        const novoTopicoId = 'topico-' + Date.now();
+        topicos.push({ id: novoTopicoId, nome: nomeLimpo, cor, anotacoes: [] });
 
         renderizarTopicos();
         salvarBackupAutomatico();
@@ -1192,6 +1193,10 @@ async function criarTopicoPrompt() {
         exibirToast(`Tópico "${nomeLimpo}" criado.`);
         
         verificarAcervoEmSegundoPlano(nomeLimpo);
+        
+        if (window.TimeTrackerManager && typeof window.TimeTrackerManager.handleNovoTopicoCriado === 'function') {
+            window.TimeTrackerManager.handleNovoTopicoCriado(novoTopicoId);
+        }
     } catch (error) {
         console.error('[AppCore] Erro ao criar tópico:', error);
         exibirToast('Erro ao criar tópico. Tente novamente.', 'erro');
@@ -1616,6 +1621,12 @@ async function renomearAba(id) {
 
 function solicitarExclusaoAba(btnEl, id) {
     if (btnEl.dataset.confirming === "true") {
+        if (window.TopicsManager && TopicsManager.getActiveTabId() === id) {
+            if (window.TimeTrackerManager && typeof window.TimeTrackerManager.tratarExclusaoAba === 'function') {
+                window.TimeTrackerManager.tratarExclusaoAba();
+            }
+        }
+        
         topicos = topicos.filter(t => t.id !== id);
         renderizarTopicos();
         salvarBackupAutomatico();
@@ -1843,11 +1854,11 @@ async function acionarCriacaoBackup() {
 window.TimeTrackerManager = (function() {
     let _getTopicos = () => []; 
     
-    let isHabilitado = false;
+    let isAutoMode = false;
     let isRodando = false;
     let tempoSegundos = 0;
     let intervaloId = null;
-    let complexidadeAtual = null;
+    let complexidadeAtual = 'medio';
     let marcosAtingidos = { excelente: false, bom: false, cautela: false };
 
     const limites = {
@@ -1861,24 +1872,26 @@ window.TimeTrackerManager = (function() {
             _getTopicos = deps.getTopicos;
         }
         
-        // CORREÇÃO: Lê a posição da chavinha assim que o aplicativo inicia
-        const toggleEl = document.getElementById('toggle-cronometro');
+        const savedState = localStorage.getItem('juris_auto_timer');
+        isAutoMode = savedState === 'true';
+
+        const toggleEl = document.getElementById('toggle-auto-cronometro');
         if (toggleEl) {
-            isHabilitado = toggleEl.checked;
+            toggleEl.checked = isAutoMode;
+            toggleEl.addEventListener('change', (e) => {
+                isAutoMode = e.target.checked;
+                localStorage.setItem('juris_auto_timer', isAutoMode);
+                exibirToast(`Modo Automático ${isAutoMode ? 'Ativado' : 'Desativado'}.`, 'info');
+            });
         }
     }
 
-    function toggleVisibility(fromToggle = false) {
-        if (fromToggle) {
-            const toggleEl = document.getElementById('toggle-cronometro');
-            if (toggleEl) isHabilitado = toggleEl.checked;
-        }
-        
+    function toggleVisibility() {
         const container = document.getElementById('efficiency-tracker-container');
         const isHistorico = document.body.dataset.activeTab === 'historico';
         const temTopico = _getTopicos().length > 0;
         
-        const deveExibir = isHabilitado && isHistorico && temTopico;
+        const deveExibir = isHistorico && temTopico;
         
         container.style.display = deveExibir ? 'flex' : 'none';
         if (deveExibir) sincronizarCor();
@@ -1888,7 +1901,6 @@ window.TimeTrackerManager = (function() {
         document.getElementById('modal-tracker-backdrop').style.display = 'block';
         document.getElementById('modal-tracker-config').style.display = 'block';
 
-        // Ativa o desfoque de fundo
         if (typeof window.toggleFocoModal === 'function') window.toggleFocoModal(true);
         
         const svgIcon = isRodando 
@@ -1903,18 +1915,20 @@ window.TimeTrackerManager = (function() {
     function fecharModal() {
         document.getElementById('modal-tracker-backdrop').style.display = 'none';
         document.getElementById('modal-tracker-config').style.display = 'none';
-
-        // Desativa o desfoque de fundo
         if (typeof window.toggleFocoModal === 'function') window.toggleFocoModal(false);
     }
 
-    function iniciar() {
-        complexidadeAtual = document.getElementById('tracker-complexity-select').value;
+    function iniciar(isSilencioso = false, topicoIdForce = null) {
+        const selectEl = document.getElementById('tracker-complexity-select');
+        if (selectEl && selectEl.value) {
+            complexidadeAtual = selectEl.value;
+        }
+
         marcosAtingidos = { excelente: false, bom: false, cautela: false };
         isRodando = true;
         fecharModal();
         
-        sincronizarCor();
+        sincronizarCor(topicoIdForce);
         document.getElementById('efficiency-tracker-dot').classList.add('pulsing');
         
         const pill = document.getElementById('efficiency-tracker-pill');
@@ -1923,13 +1937,14 @@ window.TimeTrackerManager = (function() {
         if (intervaloId) clearInterval(intervaloId);
         intervaloId = setInterval(tick, 1000);
 
-        exibirToast(`Cronômetro ativado. Foco na análise!`, 'info');
+        if (!isSilencioso) {
+            exibirToast(`Cronômetro ativado. Foco na análise!`, 'info');
+        }
     }
 
-    function parar() {
+    function pararSilencioso() {
         isRodando = false;
         if (intervaloId) clearInterval(intervaloId);
-        fecharModal();
         
         const dot = document.getElementById('efficiency-tracker-dot');
         const pill = document.getElementById('efficiency-tracker-pill');
@@ -1940,15 +1955,18 @@ window.TimeTrackerManager = (function() {
             dot.style.boxShadow = 'none';
         }
         
-        if(pill) {
-            pill.classList.remove('milestone-1', 'milestone-2', 'milestone-3');
-        }
-        
-        const tempoFinal = document.getElementById('efficiency-tracker-time').textContent;
-        exibirToast(`Tópico concluído. Tempo de tela: ${tempoFinal}`, 'sucesso');
+        if(pill) pill.classList.remove('milestone-1', 'milestone-2', 'milestone-3');
         
         tempoSegundos = 0;
         atualizarDisplay();
+    }
+
+    function parar() {
+        const timeEl = document.getElementById('efficiency-tracker-time');
+        const tempoFinal = timeEl ? timeEl.textContent : '00:00';
+        pararSilencioso();
+        fecharModal();
+        exibirToast(`Tópico concluído. Tempo de tela: ${tempoFinal}`, 'sucesso');
     }
 
     function tick() {
@@ -1993,11 +2011,10 @@ window.TimeTrackerManager = (function() {
         }
     }
 
-    function sincronizarCor() {
-        if (!isHabilitado) return;
-        
+    function sincronizarCor(topicoIdForce = null) {
         const topicosData = _getTopicos();
-        const activeTabId = typeof TopicsManager !== 'undefined' ? TopicsManager.getActiveTabId() : null;
+        // Usa o ID forçado (novo tópico) se fornecido, senão cai no fallback de leitura do DOM
+        const activeTabId = topicoIdForce || (typeof TopicsManager !== 'undefined' ? TopicsManager.getActiveTabId() : null);
         let cor = '#ccc'; 
         
         if (activeTabId && topicosData.length > 0) {
@@ -2018,7 +2035,27 @@ window.TimeTrackerManager = (function() {
         }
     }
 
-    return { init, toggleVisibility, handleClick, fecharModal, iniciar, parar, sincronizarCor };
+    function handleNovoTopicoCriado(novoTopicoId = null) {
+        if (!isAutoMode) return;
+        if (isRodando) pararSilencioso();
+
+        // Aguarda a thread de UI, mas força a injeção da cor 
+        // ignorando a latência do DOM.
+        requestAnimationFrame(() => {
+            iniciar(true, novoTopicoId);
+        });
+    }
+
+    function tratarExclusaoAba() {
+        if (isRodando) {
+            pararSilencioso();
+        }
+    }
+
+    return { 
+        init, toggleVisibility, handleClick, fecharModal, iniciar, parar, 
+        sincronizarCor, handleNovoTopicoCriado, tratarExclusaoAba 
+    };
 })();
 
 /* ================================================
@@ -2071,6 +2108,48 @@ window.atualizarStatusBotaoExtrator = function() {
 window.TaskManager = (function() {
     let selectorArmTimer = null;
 
+    // NOVO HELPER: Garante proteção XSS usando o motor do projeto
+    function _escaparSeguro(str) {
+        if (!str) return '';
+        if (window.TopicsManager && typeof TopicsManager.escaparHTML === 'function') {
+            return TopicsManager.escaparHTML(str);
+        }
+        // Fallback robusto
+        return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    // NOVO HELPER: Busca o nome em tempo real (O(n) pontual)
+    function _obterNomeTopicoEmTempoReal(topicId) {
+        if (topicId === 'global') return 'Global';
+        // Variável 'topicos' é acessada do escopo global do app-core.js
+        const topico = topicos.find(t => t.id === topicId);
+        return topico ? topico.nome : 'Tópico Excluído (Órfão)';
+    }
+
+    // NOVO HELPER: Event Delegation para o Tooltip e Acessibilidade (Just-in-Time)
+    function _setupTooltipDinamico() {
+        const container = document.getElementById('modal-tarefas');
+        if (!container || container.dataset.tooltipBound === 'true') return;
+
+        const handleFocusOrHover = (e) => {
+            const circle = e.target.closest('.topic-circle-indicator');
+            if (!circle) return;
+            
+            const topicId = circle.dataset.topicId;
+            if (topicId) {
+                // Resolve e higieniza no milissegundo da interação
+                const nomeSeguro = _escaparSeguro(_obterNomeTopicoEmTempoReal(topicId));
+                circle.setAttribute('title', nomeSeguro);
+                circle.setAttribute('aria-label', nomeSeguro);
+            }
+        };
+
+        // Captura tanto mouse quanto navegação por teclado (Tab)
+        container.addEventListener('mouseover', handleFocusOrHover);
+        container.addEventListener('focusin', handleFocusOrHover);
+        container.dataset.tooltipBound = 'true';
+    }
+
     async function abrirModal(e) {
         if(e) e.stopPropagation();
         const backdrop = document.getElementById('tarefas-modal-backdrop');
@@ -2102,11 +2181,13 @@ window.TaskManager = (function() {
         const div = document.createElement('div');
         div.className = 'native-task-item';
         
+        _setupTooltipDinamico(); // Garante que o listener raiz exista
+        
         div.innerHTML = `
             <input type="checkbox" onchange="TaskManager.toggleConcluido(this)">
-            <div class="topic-circle-indicator" data-topic-id="global" title="Global" style="background-color: #ffffff; border: 2px solid #cbd5e1;" onclick="TaskManager.abrirSeletorTemas(this, event)"></div>
+            <div class="topic-circle-indicator" role="button" tabindex="0" data-topic-id="global" style="background-color: #ffffff; border: 2px solid #cbd5e1;" onclick="TaskManager.abrirSeletorTemas(this, event)"></div>
             <input type="text" placeholder="Escreva sua tarefa..." oninput="this.setAttribute('value', this.value);">
-            <button onclick="this.parentElement.remove(); TaskManager.atualizarBadge();" style="border:none; background:none; cursor:pointer; color:#ef4444; margin-left: 8px;">✕</button>
+            <button onclick="this.parentElement.remove(); TaskManager.atualizarBadge();" style="border:none; background:none; cursor:pointer; color:#ef4444; margin-left: 8px;" aria-label="Excluir tarefa">✕</button>
         `;
         container.appendChild(div);
         
@@ -2177,10 +2258,23 @@ window.TaskManager = (function() {
             div.style.backgroundColor = '#eee';
             menu.appendChild(div);
 
-            topicos.forEach(t => {
+            // Algoritmo Cronológico Seguro: extrai o timestamp ou assume 0 (para legado)
+            const topicosCronologicos = [...topicos].sort((a, b) => {
+                const timeA = parseInt(a.id.replace('topico-', ''), 10) || 0;
+                const timeB = parseInt(b.id.replace('topico-', ''), 10) || 0;
+                return timeB - timeA; // Maior (mais recente) no topo
+            });
+
+            topicosCronologicos.forEach(t => {
                 const opt = document.createElement('div');
                 opt.className = 'jcs-option';
-                opt.innerHTML = `<div class="jcs-color-dot" style="background: ${t.cor};"></div> <span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${t.nome}</span>`;
+                opt.role = 'button';
+                opt.tabIndex = 0;
+                
+                // Proteção XSS no innerHTML
+                const nomeSeguro = _escaparSeguro(t.nome);
+                
+                opt.innerHTML = `<div class="jcs-color-dot" style="background: ${t.cor};"></div> <span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${nomeSeguro}">${nomeSeguro}</span>`;
                 opt.addEventListener('click', () => applyTheme(circleEl, t.id, t.nome, t.cor, menu));
                 menu.appendChild(opt);
             });
@@ -2244,6 +2338,8 @@ window.TaskManager = (function() {
         if(!container) return;
         container.innerHTML = '';
         
+        _setupTooltipDinamico(); // Garante que o listener raiz exista
+
         if(!tarefasArray || tarefasArray.length === 0) {
             atualizarBadge();
             return;
@@ -2258,11 +2354,17 @@ window.TaskManager = (function() {
             const borderStyle = t.topicId === 'global' ? '2px solid #cbd5e1' : '2px solid transparent';
             const shadowStyle = t.topicId === 'global' ? 'none' : `0 0 6px ${t.topicCor}40`;
 
+            // ARQUITETURA CORRIGIDA: Não inserimos 'title' aqui. 
+            // O Event Delegation cuidará disso. Adicionamos ARIA roles.
             div.innerHTML = `
                 <input type="checkbox" onchange="TaskManager.toggleConcluido(this)" ${checkedAttr}>
-                <div class="topic-circle-indicator" data-topic-id="${t.topicId}" title="${t.topicId === 'global' ? 'Global' : 'Tópico Específico'}" style="background-color: ${t.topicCor}; border: ${borderStyle}; box-shadow: ${shadowStyle};" onclick="TaskManager.abrirSeletorTemas(this, event)"></div>
-                <input type="text" placeholder="Escreva sua tarefa..." value="${t.texto.replace(/"/g, '&quot;')}" oninput="this.setAttribute('value', this.value);">
-                <button onclick="this.parentElement.remove(); TaskManager.atualizarBadge();" style="border:none; background:none; cursor:pointer; color:#ef4444; margin-left: 8px;">✕</button>
+                <div class="topic-circle-indicator" 
+                     role="button" tabindex="0" 
+                     data-topic-id="${_escaparSeguro(t.topicId)}" 
+                     style="background-color: ${_escaparSeguro(t.topicCor)}; border: ${borderStyle}; box-shadow: ${shadowStyle};" 
+                     onclick="TaskManager.abrirSeletorTemas(this, event)"></div>
+                <input type="text" placeholder="Escreva sua tarefa..." value="${_escaparSeguro(t.texto)}" oninput="this.setAttribute('value', this.value);">
+                <button onclick="this.parentElement.remove(); TaskManager.atualizarBadge();" style="border:none; background:none; cursor:pointer; color:#ef4444; margin-left: 8px;" aria-label="Excluir tarefa">✕</button>
             `;
             container.appendChild(div);
         });
