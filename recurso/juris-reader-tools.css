@@ -1677,3 +1677,25 @@ MINI PLAYER DE ÁUDIO — MODAL FOCADO
 }
 
 .btn-icon-micro { width: 14px; height: 14px; }
+
+/* ================================================
+   REVELAÇÃO DO CAMPO CUSTOMIZADO (EXTRATOR)
+   ================================================ */
+.extrator-custom-reveal[hidden] {
+    display: none !important;
+}
+
+.extrator-custom-reveal:not([hidden]) {
+    display: block;
+    margin-top: 8px;
+    animation: slideDownFade 0.2s ease-out forwards;
+}
+
+@keyframes slideDownFade {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .extrator-custom-reveal:not([hidden]) { animation: none; }
+}

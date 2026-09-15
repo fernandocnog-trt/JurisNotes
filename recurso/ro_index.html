@@ -778,17 +778,17 @@
 
     <!-- MENU FLUTUANTE DA LOGO -->
     <div id="juris-menu" class="annotation-context-menu" style="flex-direction: column; min-width: 150px; padding: 8px;">
-        <!-- NOVO: Toggle do Cronômetro -->
+        <!-- NOVO: Toggle do Cronômetro Automático (Limpo de regras de negócio) -->
         <div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 12px; margin-bottom: 4px;">
-            <span style="display: flex; align-items: center; gap: 6px; font-size: 0.8rem; color: #555; font-weight: 600;">
+            <span style="display: flex; align-items: center; gap: 6px; font-size: 0.8rem; color: #555; font-weight: 600;" title="Inicia a contagem automaticamente ao criar um tópico">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px; height:14px; flex-shrink:0;">
                     <circle cx="12" cy="12" r="10"></circle>
                     <polyline points="12 6 12 12 16 14"></polyline>
                 </svg>
-                Cronômetro
+                Cronômetro Auto
             </span>
             <label class="toggle-switch-minimal">
-                <input type="checkbox" id="toggle-cronometro" checked onchange="TimeTrackerManager.toggleVisibility(true)">
+                <input type="checkbox" id="toggle-auto-cronometro">
                 <span class="toggle-slider"></span>
             </label>
         </div>
@@ -1613,7 +1613,9 @@ Crie um sumário hierárquico enxuto com as Grandes Categorias e Subcategorias q
         <option value="inicial">Petição Inicial</option>
         <option value="contestacao">Contestação</option>
     </optgroup>
+    <option value="custom">Outro (Digitar manualmente)...</option>
 </select>
+<input type="text" id="extrator-doc-custom" class="topic-select extrator-custom-reveal" hidden placeholder="Ex: Laudo Pericial..." maxlength="60" aria-label="Nome personalizado da peça">
             </div>
             <div>
                 <p class="popup-label">Este clique representa o:</p>
