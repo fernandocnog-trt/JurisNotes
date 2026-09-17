@@ -28,6 +28,69 @@ window.TopicsManager = (function () {
 
     const _topicosComGlobaisAbertas = new Set();
 
+    /* ================================================
+       SCROLL GUARD v2 (Context-Aware Viewport Manager)
+       ================================================
+       NOTA DE HONESTIDADE TÉCNICA: A memória baseada em pixels (yOffset) é uma
+       aproximação conhecida. Ela é 100% precisa para edições in-place (mudança de
+       cor, intenção, revisão) onde o delta de altura cai no/abaixo do viewport.
+       Para mutações estruturais que alteram conteúdo ACIMA da dobra (ex: desativar
+       Diretrizes Globais, SmartMove), o pixel pode sofrer desalinhamento. A 
+       mitigação total (Âncora DOM + Delta) está no backlog (Phase 2).
+    */
+    const _scrollGuard = {
+        yOffset: 0,
+        suprimido: false,
+        podeRestaurar: false
+    };
+    let _ultimaAbaRenderizada = null;
+
+    function suprimirProximaRestauracao() {
+        _scrollGuard.suprimido = true;
+    }
+
+    function capturarScroll() {
+        if (_scrollGuard.suprimido) return;
+        const historyContainer = document.getElementById('history-container');
+        if (historyContainer && activeTabId) {
+            _scrollGuard.yOffset = historyContainer.scrollTop;
+            _scrollGuard.podeRestaurar = (activeTabId === _ultimaAbaRenderizada);
+        }
+    }
+
+    function restaurarScroll() {
+        const historyContainer = document.getElementById('history-container');
+        
+        if (_scrollGuard.suprimido) {
+            if (historyContainer) historyContainer.scrollTo({ top: 0, behavior: 'smooth' });
+            _scrollGuard.suprimido = false;
+            _scrollGuard.podeRestaurar = false;
+            _ultimaAbaRenderizada = activeTabId;
+            return;
+        }
+
+        if (_scrollGuard.podeRestaurar && historyContainer) {
+            historyContainer.scrollTo({
+                top: _scrollGuard.yOffset,
+                behavior: 'instant' 
+            });
+        }
+        
+        _ultimaAbaRenderizada = activeTabId;
+        _scrollGuard.podeRestaurar = false;
+    }
+
+    function _reassertScroll() {
+        if (_scrollGuard.suprimido) return;
+        const historyContainer = document.getElementById('history-container');
+        if (!historyContainer || !_scrollGuard.podeRestaurar) return;
+        
+        if (Math.abs(historyContainer.scrollTop - _scrollGuard.yOffset) > 4) {
+            historyContainer.scrollTo({ top: _scrollGuard.yOffset, behavior: 'instant' });
+        }
+        _scrollGuard.podeRestaurar = false;
+    }
+
     function _sincronizarBtnGlobais(temDados, aberto) {
         const btn = document.getElementById('btn-toggle-globais');
         if (!btn) return;
@@ -637,11 +700,20 @@ window.TopicsManager = (function () {
                 ? `<button title="Criar Pilha Processual" onclick="TopicsManager.abrirModalPilhaProcessual('${activeTabId}', ${index}, ${cIdx})">🗂️</button>` 
                 : '';
 
+            const paramCitacao = isCorrelacionado && cIdx != null ? `'${activeTabId}', ${index}, ${cIdx}` : `'${activeTabId}', ${index}, null`;
+            
+            const btnCitacaoExpressa = (tipoDoItem === 'texto') 
+                ? `<button class="btn-citacao-expressa" title="Adicionar Citação Expressa" onclick="window.adicionarCitacaoExpressa(${paramCitacao})">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                   </button>` 
+                : '';
+
             return `
             <div class="card-actions-bar">
                 ${btnAgrupar}
                 ${btnLeitura}
                 ${btnEditar}
+                ${btnCitacaoExpressa}
                 <button title="Adicionar Nó de Ideia" onclick="_menuAnotacaoCtx={topicoId:'${activeTabId}', index:${index}${ctxCidx}}; acionarNovoNoIdeia()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg></button>
                 <button title="Mover / Reordenar" onclick="abrirModalSmartMove(${paramMove})"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="8 17 12 21 16 17"></polyline><line x1="12" y1="12" x2="12" y2="21"></line><polyline points="8 7 12 3 16 7"></polyline><line x1="12" y1="12" x2="12" y2="3"></line></svg></button>
                 <button class="delete-btn" title="Excluir" onclick="${isCorrelacionado ? `excluirItemCorrelacionado('${activeTabId}', ${index}, ${cIdx})` : `_menuAnotacaoCtx={topicoId:'${activeTabId}', index:${index}}; excluirAnotacao()`}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg></button>
@@ -947,6 +1019,10 @@ window.TopicsManager = (function () {
 
         const hierarquiaTitulo = isGlobal ? 'Diretrizes Globais (Auditoria)' : `Vício Alegado: ${escaparHTML(titulo)}`;
         const wrapperClass = isGlobal ? 'nivel-global' : 'nivel-vicio';
+        
+        // Geração do ID Dinâmico baseado no contexto (Fase 2 Prep)
+        const vicioSlug = isGlobal ? '' : (titulo || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'vicio';
+        const wrapperId = isGlobal ? `timeline-wrapper-globais-${topicoId}` : `timeline-wrapper-vicio-${vicioSlug}`;
 
         // NOVO: Renderização segura e elegante das teses compiladas
         let htmlTesesMapeadas = '';
@@ -960,7 +1036,7 @@ window.TopicsManager = (function () {
         }
 
         return `
-            <div class="timeline-item-master ${alignClass} nivel-hierarquico ${wrapperClass}">
+            <div class="timeline-item-master ${alignClass} nivel-hierarquico ${wrapperClass}" id="${wrapperId}">
                 <div class="main-card-wrapper">
                     <div class="annotation-number-area">
                         <div class="timeline-icon-box" title="${hierarquiaTitulo}" style="${styleIconBox}">
@@ -1075,6 +1151,8 @@ window.TopicsManager = (function () {
      * Re-renderiza o fichário inteiro.
      */
     function renderizarFichario(topicosArray) {
+        capturarScroll();
+
         const headerEl  = document.getElementById('topics-tabs-header');
         const contentEl = document.getElementById('topics-tab-content');
 
@@ -1089,6 +1167,7 @@ window.TopicsManager = (function () {
                 </p>`;
             contentEl.style.borderTop       = 'none';
             contentEl.style.backgroundColor = 'transparent';
+            restaurarScroll();
             return;
         }
 
@@ -1130,10 +1209,7 @@ window.TopicsManager = (function () {
         const corTextoTese = obterCorContraste(_activeTopicoCor);
 
         requestAnimationFrame(() => {
-            headerEl.scrollLeft = scrollAnterior;
-            if (abaAtivaNode) {
-                abaAtivaNode.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
-            }
+            headerEl.scrollTo({ left: scrollAnterior, behavior: 'auto' });
         });
 
         const preambleHtml = `
@@ -1200,6 +1276,7 @@ window.TopicsManager = (function () {
             }
             
             _sincronizarBtnGlobais(false, false);
+            restaurarScroll();
             return;
         }
 
@@ -1354,9 +1431,14 @@ window.TopicsManager = (function () {
             const container = document.getElementById('timeline-container');
             if (container) {
                 posicionarNosDeIdeia(container);
+                restaurarScroll();
+                
                 requestAnimationFrame(() => {
                     desenharConexoes();
+                    _reassertScroll();
                 });
+            } else {
+                restaurarScroll();
             }
             
             _atualizarMarcadoresDeIdeia(topicoAtivo);
@@ -1930,6 +2012,7 @@ window.TopicsManager = (function () {
 
     // API pública do módulo
     return {
+        suprimirProximaRestauracao,
         toggleDiretrizesGlobais,
         resetVisibilidadeGlobais,
         obterCor,

@@ -108,6 +108,18 @@ function definirIntencaoSubAnotacao(intencaoStr) {
     renderizarTopicos(); 
     salvarBackupAutomatico();
     
+    requestAnimationFrame(() => {
+        // Busca o card baseando-se no viewSource e no localIndex recém-renderizados
+        const cardsDestaFonte = document.querySelectorAll(`[data-source="${_menuSubAnotacaoCtx.viewSource}"] .sub-annotation-card`);
+        const cardEditado = cardsDestaFonte[_menuSubAnotacaoCtx.localIndex];
+        
+        if (cardEditado) {
+            cardEditado.classList.remove('card-flash-focus');
+            void cardEditado.offsetWidth;
+            cardEditado.classList.add('card-flash-focus');
+        }
+    });
+    
     const rotulos = { 
         'comando': 'Comando Direto', 
         'texto': 'Texto Fixo', 
@@ -137,6 +149,81 @@ function _posicionarMenu(menuId, event) {
 }
 
 /* --- MODAL DE EDIÇÃO E NEGRITO (MARKDOWN) --- */
+window.adicionarCitacaoExpressa = function(topicoId, parentIndex, cIdx) {
+    const topico = topicos.find(t => t.id === topicoId);
+    if (!topico) return;
+
+    // 1. Resolve o Alvo: Card Mestre ou Item Correlacionado
+    const cardMestre = topico.anotacoes[parentIndex];
+    const alvo = (cIdx !== null && cIdx !== undefined) 
+        ? cardMestre.itensCorrelacionados[cIdx] 
+        : cardMestre;
+    
+    // 2. Extração segura dos metadados do alvo correto
+    const docNome = alvo.documento || alvo.polo || 'Documento';
+    const idInfo = alvo.pjeId || 'não informado';
+    const flInfo = alvo.pagina || 'não informada';
+    
+    // 3. SANITIZAÇÃO CRÍTICA (Evita Prompt Injection e quebra de Markdown)
+    let textoCru = alvo.conteudo || "";
+    if (window.JurisUtils && window.JurisUtils.limparTextoPDF) {
+        textoCru = window.JurisUtils.limparTextoPDF(textoCru);
+    }
+    textoCru = textoCru.replace(/\n/g, ' ').replace(/"/g, "'");
+
+    // 4. Engenharia de Prompt
+    const comandoLiteral = `Transcreva expressamente o trecho do documento **${docNome}** (Id. ${idInfo} - fl. ${flInfo}), inserindo a seguinte citação literal entre aspas e em itálico:\n\n*"${textoCru}"*`;
+
+    // 5. Criação do Objeto "Nó de Ideia" classificado como Comando
+    const novoNoComando = {
+        uuid: gerarUUIDSeguro(),
+        texto: comandoLiteral,
+        intencao: 'comando', 
+        revisada: false,
+        timestamp: Date.now()
+    };
+
+    // 6. Mutação de Estado (Sempre ancorado ao alvo específico extraído)
+    if (!alvo.subAnotacoes) alvo.subAnotacoes = [];
+    alvo.subAnotacoes.push(novoNoComando);
+
+    // 7. Commit e Re-renderização
+    renderizarTopicos();
+    if(window.salvarBackupAutomatico) salvarBackupAutomatico();
+    if(window.exibirToast) exibirToast('Citação expressa vinculada ao Card!', 'sucesso');
+
+    // 8. MICROINTERAÇÃO DE UX (Scroll Suave e Destaque Visual)
+    requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+            const masterWrapper = document.getElementById(`timeline-wrapper-${cardMestre.uuid || parentIndex}`);
+            if (!masterWrapper) return;
+
+            // Busca o último sub-nó adicionado a este master
+            const subNodes = masterWrapper.querySelectorAll('.sub-annotations-wrapper .sub-annotation-item');
+            if (subNodes.length === 0) return;
+            const targetNode = subNodes[subNodes.length - 1];
+            
+            const scrollContainer = document.getElementById('history-container');
+            if (targetNode && scrollContainer) {
+                // Cálculo matemático seguro para scroll relativo
+                const containerRect = scrollContainer.getBoundingClientRect();
+                const targetRect = targetNode.getBoundingClientRect();
+                const offset = (targetRect.top - containerRect.top) + scrollContainer.scrollTop - 20;
+                
+                scrollContainer.scrollTo({ top: offset, behavior: 'smooth' });
+                
+                // Aplica a classe de flash visual
+                const innerCard = targetNode.querySelector('.sub-annotation-card');
+                if (innerCard) {
+                    innerCard.classList.remove('card-flash-focus');
+                    void innerCard.offsetWidth; // Força reflow
+                    innerCard.classList.add('card-flash-focus');
+                }
+            }
+        });
+    });
+};
+
 window.copiarDegravacao = function(topicoId, uuidCard) {
     const topico = topicos.find(t => t.id === topicoId);
     if (!topico) return;
