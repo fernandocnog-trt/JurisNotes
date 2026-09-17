@@ -113,6 +113,18 @@ function definirIntencaoSubAnotacao(intencaoStr) {
     renderizarTopicos(); 
     salvarBackupAutomatico();
     
+    requestAnimationFrame(() => {
+        // Busca o card baseando-se no viewSource e no localIndex recém-renderizados
+        const cardsDestaFonte = document.querySelectorAll(`[data-source="${_menuSubAnotacaoCtx.viewSource}"] .sub-annotation-card`);
+        const cardEditado = cardsDestaFonte[_menuSubAnotacaoCtx.localIndex];
+        
+        if (cardEditado) {
+            cardEditado.classList.remove('card-flash-focus');
+            void cardEditado.offsetWidth;
+            cardEditado.classList.add('card-flash-focus');
+        }
+    });
+    
     const rotulos = { 
         'comando': 'Comando Direto', 
         'texto': 'Texto Fixo', 

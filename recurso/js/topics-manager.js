@@ -11,6 +11,69 @@ window.TopicsManager = (function () {
     let _activeTopicoCor = '#ffffff';
     const _topicosComGlobaisAbertas = new Set();
 
+    /* ================================================
+       SCROLL GUARD v2 (Context-Aware Viewport Manager)
+       ================================================
+       NOTA DE HONESTIDADE TÉCNICA: A memória baseada em pixels (yOffset) é uma
+       aproximação conhecida. Ela é 100% precisa para edições in-place (mudança de
+       cor, intenção, revisão) onde o delta de altura cai no/abaixo do viewport.
+       Para mutações estruturais que alteram conteúdo ACIMA da dobra (ex: desativar
+       Diretrizes Globais, SmartMove), o pixel pode sofrer desalinhamento. A 
+       mitigação total (Âncora DOM + Delta) está no backlog (Phase 2).
+    */
+    const _scrollGuard = {
+        yOffset: 0,
+        suprimido: false,
+        podeRestaurar: false
+    };
+    let _ultimaAbaRenderizada = null;
+
+    function suprimirProximaRestauracao() {
+        _scrollGuard.suprimido = true;
+    }
+
+    function capturarScroll() {
+        if (_scrollGuard.suprimido) return;
+        const historyContainer = document.getElementById('history-container');
+        if (historyContainer && activeTabId) {
+            _scrollGuard.yOffset = historyContainer.scrollTop;
+            _scrollGuard.podeRestaurar = (activeTabId === _ultimaAbaRenderizada);
+        }
+    }
+
+    function restaurarScroll() {
+        const historyContainer = document.getElementById('history-container');
+        
+        if (_scrollGuard.suprimido) {
+            if (historyContainer) historyContainer.scrollTo({ top: 0, behavior: 'smooth' });
+            _scrollGuard.suprimido = false;
+            _scrollGuard.podeRestaurar = false;
+            _ultimaAbaRenderizada = activeTabId;
+            return;
+        }
+
+        if (_scrollGuard.podeRestaurar && historyContainer) {
+            historyContainer.scrollTo({
+                top: _scrollGuard.yOffset,
+                behavior: 'instant' 
+            });
+        }
+        
+        _ultimaAbaRenderizada = activeTabId;
+        _scrollGuard.podeRestaurar = false;
+    }
+
+    function _reassertScroll() {
+        if (_scrollGuard.suprimido) return;
+        const historyContainer = document.getElementById('history-container');
+        if (!historyContainer || !_scrollGuard.podeRestaurar) return;
+        
+        if (Math.abs(historyContainer.scrollTop - _scrollGuard.yOffset) > 4) {
+            historyContainer.scrollTo({ top: _scrollGuard.yOffset, behavior: 'instant' });
+        }
+        _scrollGuard.podeRestaurar = false;
+    }
+
     // OTIMIZAÇÃO DE MEMÓRIA: Função Içada (Prevenção de GC Thrashing)
     function _sincronizarBtnGlobais(temDados, aberto) {
         const btn = document.getElementById('btn-toggle-globais');
@@ -1096,8 +1159,10 @@ window.TopicsManager = (function () {
         });
         const tesesHtml = subCardsHTMLArray.join('');
 
+        const teseSlug = teseAtual.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'tese';
+
         return `
-        <div class="timeline-item-master ${alignClass} nivel-hierarquico">
+        <div class="timeline-item-master ${alignClass} nivel-hierarquico" id="timeline-wrapper-tese-${teseSlug}">
             <div class="main-card-wrapper">
                 <div class="annotation-number-area">
                     <div class="timeline-icon-box" title="Tese" style="background-color: ${corTema}; color: ${corTextoTese};">
@@ -1125,6 +1190,8 @@ window.TopicsManager = (function () {
      * Re-renderiza o fichário inteiro.
      */
     function renderizarFichario(topicosArray) {
+        capturarScroll();
+
         const headerEl  = document.getElementById('topics-tabs-header');
         const contentEl = document.getElementById('topics-tab-content');
 
@@ -1139,6 +1206,7 @@ window.TopicsManager = (function () {
                 </p>`;
             contentEl.style.borderTop       = 'none';
             contentEl.style.backgroundColor = 'transparent';
+            restaurarScroll();
             return;
         }
 
@@ -1186,10 +1254,7 @@ window.TopicsManager = (function () {
         contentEl.style.setProperty('--active-tab-color', _activeTopicoCor);
 
         requestAnimationFrame(() => {
-            headerEl.scrollLeft = scrollAnterior;
-            if (abaAtivaNode) {
-                abaAtivaNode.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
-            }
+            headerEl.scrollTo({ left: scrollAnterior, behavior: 'auto' });
         });
         const corTextoTese = obterCorContraste(_activeTopicoCor);
 
@@ -1255,8 +1320,9 @@ window.TopicsManager = (function () {
             }
             
             _sincronizarBtnGlobais(false, false);
-            return;
-        }
+                restaurarScroll();
+                return;
+            }
 
         let sumarioHtml = '';
         const tesesValidas = topicoAtivo.anotacoes.filter(an => an.tese && an.tese.trim() !== '');
@@ -1378,7 +1444,7 @@ window.TopicsManager = (function () {
             }
 
             htmlDiretrizesGlobais = `
-            <div class="timeline-item-master align-left nivel-hierarquico nivel-global">
+            <div class="timeline-item-master align-left nivel-hierarquico nivel-global" id="timeline-wrapper-globais-${activeTabId}">
                 <div class="main-card-wrapper">
                     <div class="annotation-number-area">
                         <div class="timeline-icon-box" title="Diretrizes Globais do Tópico">
@@ -1452,9 +1518,14 @@ window.TopicsManager = (function () {
             const container = document.getElementById('timeline-container');
             if (container) {
                 posicionarNosDeIdeia(container);
+                restaurarScroll();
+                
                 requestAnimationFrame(() => {
                     desenharConexoes();
+                    _reassertScroll();
                 });
+            } else {
+                restaurarScroll();
             }
             
             _atualizarMarcadoresDeIdeia(topicoAtivo);
@@ -2069,6 +2140,7 @@ window.TopicsManager = (function () {
 
     // API pública do módulo
     return {
+        suprimirProximaRestauracao,
         toggleDiretrizesGlobais,
         resetVisibilidadeGlobais,
         MAPA_TESE_ICONES,

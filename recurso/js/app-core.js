@@ -1048,6 +1048,11 @@ async function retomarProcesso() {
         modoRetomada = true;
         _sessaoPossuiAudio = pacote.metadata.possuiAudio ?? false;
 
+        // Hook de Supressão: Garante que o usuário vá para o topo na restauração
+        if (window.TopicsManager && typeof window.TopicsManager.suprimirProximaRestauracao === 'function') {
+            window.TopicsManager.suprimirProximaRestauracao();
+        }
+
         renderizarTopicos();
         habilitarFerramentasDeTrabalho();
         trocarAba('historico');
