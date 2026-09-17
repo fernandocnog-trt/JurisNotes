@@ -27,6 +27,69 @@ window.TopicsManager = (function () {
     let _activeTopicoCor = '#ffffff';
     const _topicosComGlobaisAbertas = new Set();
 
+    /* ================================================
+       SCROLL GUARD v2 (Context-Aware Viewport Manager)
+       ================================================
+       NOTA DE HONESTIDADE TÉCNICA: A memória baseada em pixels (yOffset) é uma
+       aproximação conhecida. Ela é 100% precisa para edições in-place (mudança de
+       cor, intenção, revisão) onde o delta de altura cai no/abaixo do viewport.
+       Para mutações estruturais que alteram conteúdo ACIMA da dobra (ex: desativar
+       Diretrizes Globais, SmartMove), o pixel pode sofrer desalinhamento. A 
+       mitigação total (Âncora DOM + Delta) está no backlog (Phase 2).
+    */
+    const _scrollGuard = {
+        yOffset: 0,
+        suprimido: false,
+        podeRestaurar: false
+    };
+    let _ultimaAbaRenderizada = null;
+
+    function suprimirProximaRestauracao() {
+        _scrollGuard.suprimido = true;
+    }
+
+    function capturarScroll() {
+        if (_scrollGuard.suprimido) return;
+        const historyContainer = document.getElementById('history-container');
+        if (historyContainer && activeTabId) {
+            _scrollGuard.yOffset = historyContainer.scrollTop;
+            _scrollGuard.podeRestaurar = (activeTabId === _ultimaAbaRenderizada);
+        }
+    }
+
+    function restaurarScroll() {
+        const historyContainer = document.getElementById('history-container');
+        
+        if (_scrollGuard.suprimido) {
+            if (historyContainer) historyContainer.scrollTo({ top: 0, behavior: 'smooth' });
+            _scrollGuard.suprimido = false;
+            _scrollGuard.podeRestaurar = false;
+            _ultimaAbaRenderizada = activeTabId;
+            return;
+        }
+
+        if (_scrollGuard.podeRestaurar && historyContainer) {
+            historyContainer.scrollTo({
+                top: _scrollGuard.yOffset,
+                behavior: 'instant' 
+            });
+        }
+        
+        _ultimaAbaRenderizada = activeTabId;
+        _scrollGuard.podeRestaurar = false;
+    }
+
+    function _reassertScroll() {
+        if (_scrollGuard.suprimido) return;
+        const historyContainer = document.getElementById('history-container');
+        if (!historyContainer || !_scrollGuard.podeRestaurar) return;
+        
+        if (Math.abs(historyContainer.scrollTop - _scrollGuard.yOffset) > 4) {
+            historyContainer.scrollTo({ top: _scrollGuard.yOffset, behavior: 'instant' });
+        }
+        _scrollGuard.podeRestaurar = false;
+    }
+
     // OTIMIZAÇÃO DE MEMÓRIA: Função Içada (Prevenção de GC Thrashing)
     function _sincronizarBtnGlobais(temDados, aberto) {
         const btn = document.getElementById('btn-toggle-globais');
@@ -634,6 +697,8 @@ window.TopicsManager = (function () {
             const acaoEditar = isCorrelacionado ? 'editarItemCorrelacionado()' : 'editarAnotacao()';
             const paramMove = isCorrelacionado ? `'${activeTabId}', ${index}, ${cIdx}` : `'${activeTabId}', ${index}, null`;
             
+            const paramCitacao = isCorrelacionado && cIdx != null ? `'${activeTabId}', ${index}, ${cIdx}` : `'${activeTabId}', ${index}, null`;
+
             const btnEditar = tipoDoItem === 'texto' ? `<button title="Editar Texto" onclick="_menuAnotacaoCtx={topicoId:'${activeTabId}', index:${index}${ctxCidx}}; ${acaoEditar}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg></button>` : '';
             
             // NOVO: Renderiza botão apenas se for tipo texto. Variáveis tratadas para não quebrar o DOM.
@@ -641,6 +706,12 @@ window.TopicsManager = (function () {
                 <button title="Modo Leitura" onclick="TopicsManager.abrirModoLeitura(this)" data-raw-text="${escaparHTML(itemReal.conteudo)}" data-raw-title="${escaparHTML(itemReal.documento || itemReal.polo || 'Anotação')}">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path></svg>
                 </button>` : '';
+
+            const btnCitacaoExpressa = (tipoDoItem === 'texto') 
+                ? `<button class="btn-citacao-expressa" title="Adicionar Citação Expressa" onclick="window.adicionarCitacaoExpressa(${paramCitacao})">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                   </button>` 
+                : '';
 
             const isElegivelParaPilha = isCorrelacionado && cIdx != null && !anotacao.itensCorrelacionados[cIdx].pilhaProcId;
             const btnAgrupar = isElegivelParaPilha 
@@ -652,6 +723,7 @@ window.TopicsManager = (function () {
                 ${btnAgrupar}
                 ${btnLeitura}
                 ${btnEditar}
+                ${btnCitacaoExpressa}
                 <button title="Adicionar Nó de Ideia" onclick="_menuAnotacaoCtx={topicoId:'${activeTabId}', index:${index}${ctxCidx}}; acionarNovoNoIdeia()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg></button>
                 <button title="Mover / Reordenar" onclick="abrirModalSmartMove(${paramMove})"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="8 17 12 21 16 17"></polyline><line x1="12" y1="12" x2="12" y2="21"></line><polyline points="8 7 12 3 16 7"></polyline><line x1="12" y1="12" x2="12" y2="3"></line></svg></button>
                 <button class="delete-btn" title="Excluir" onclick="${isCorrelacionado ? `excluirItemCorrelacionado('${activeTabId}', ${index}, ${cIdx})` : `_menuAnotacaoCtx={topicoId:'${activeTabId}', index:${index}}; excluirAnotacao()`}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg></button>
@@ -988,6 +1060,8 @@ window.TopicsManager = (function () {
     }
 
     function renderizarFichario(topicosArray) {
+        capturarScroll();
+
         const headerEl  = document.getElementById('topics-tabs-header');
         const contentEl = document.getElementById('topics-tab-content');
 
@@ -1002,6 +1076,7 @@ window.TopicsManager = (function () {
                 </p>`;
             contentEl.style.borderTop       = 'none';
             contentEl.style.backgroundColor = 'transparent';
+            restaurarScroll();
             return;
         }
 
@@ -1046,10 +1121,7 @@ window.TopicsManager = (function () {
         contentEl.style.setProperty('--active-tab-color', escurecerCor(_activeTopicoCor));
 
         requestAnimationFrame(() => {
-            headerEl.scrollLeft = scrollAnterior;
-            if (abaAtivaNode) {
-                abaAtivaNode.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
-            }
+            headerEl.scrollTo({ left: scrollAnterior, behavior: 'auto' });
         });
 
         const preambleHtml = `
@@ -1114,6 +1186,7 @@ window.TopicsManager = (function () {
             }
             
             _sincronizarBtnGlobais(false, false);
+            restaurarScroll();
             return;
         }
 
@@ -1322,9 +1395,14 @@ window.TopicsManager = (function () {
                 const container = document.getElementById('timeline-container');
                 if (container) {
                     posicionarNosDeIdeia(container);
+                    restaurarScroll();
+                    
                     requestAnimationFrame(() => {
                         desenharConexoes();
+                        _reassertScroll();
                     });
+                } else {
+                    restaurarScroll();
                 }
                 
                 _atualizarMarcadoresDeIdeia(topicoAtivo);
@@ -1899,6 +1977,7 @@ window.TopicsManager = (function () {
 
     // API pública do módulo
     return {
+        suprimirProximaRestauracao,
         toggleDiretrizesGlobais,
         resetVisibilidadeGlobais,
         abrirModalPilha,

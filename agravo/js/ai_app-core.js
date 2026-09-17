@@ -990,6 +990,11 @@ async function retomarProcesso() {
         modoRetomada = true;
         _sessaoPossuiAudio = pacote.metadata.possuiAudio ?? false;
 
+        // Hook de Supressão: Garante que o usuário vá para o topo na restauração
+        if (window.TopicsManager && typeof window.TopicsManager.suprimirProximaRestauracao === 'function') {
+            window.TopicsManager.suprimirProximaRestauracao();
+        }
+
         renderizarTopicos();
         habilitarFerramentasDeTrabalho();
         trocarAba('historico');
@@ -2074,6 +2079,48 @@ window.atualizarStatusBotaoExtrator = function() {
 window.TaskManager = (function() {
     let selectorArmTimer = null;
 
+    // NOVO HELPER: Garante proteção XSS usando o motor do projeto
+    function _escaparSeguro(str) {
+        if (!str) return '';
+        if (window.TopicsManager && typeof TopicsManager.escaparHTML === 'function') {
+            return TopicsManager.escaparHTML(str);
+        }
+        // Fallback robusto
+        return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    // NOVO HELPER: Busca o nome em tempo real (O(n) pontual)
+    function _obterNomeTopicoEmTempoReal(topicId) {
+        if (topicId === 'global') return 'Global';
+        // Variável 'topicos' é acessada do escopo global
+        const topico = topicos.find(t => t.id === topicId);
+        return topico ? topico.nome : 'Tópico Excluído (Órfão)';
+    }
+
+    // NOVO HELPER: Event Delegation para o Tooltip e Acessibilidade (Just-in-Time)
+    function _setupTooltipDinamico() {
+        const container = document.getElementById('modal-tarefas');
+        if (!container || container.dataset.tooltipBound === 'true') return;
+
+        const handleFocusOrHover = (e) => {
+            const circle = e.target.closest('.topic-circle-indicator');
+            if (!circle) return;
+            
+            const topicId = circle.dataset.topicId;
+            if (topicId) {
+                // Resolve e higieniza no milissegundo da interação
+                const nomeSeguro = _escaparSeguro(_obterNomeTopicoEmTempoReal(topicId));
+                circle.setAttribute('title', nomeSeguro);
+                circle.setAttribute('aria-label', nomeSeguro);
+            }
+        };
+
+        // Captura tanto mouse quanto navegação por teclado (Tab)
+        container.addEventListener('mouseover', handleFocusOrHover);
+        container.addEventListener('focusin', handleFocusOrHover);
+        container.dataset.tooltipBound = 'true';
+    }
+
     async function abrirModal(e) {
         if(e) e.stopPropagation();
         const backdrop = document.getElementById('tarefas-modal-backdrop');
@@ -2105,11 +2152,13 @@ window.TaskManager = (function() {
         const div = document.createElement('div');
         div.className = 'native-task-item';
         
+        _setupTooltipDinamico(); // Garante que o listener raiz exista
+        
         div.innerHTML = `
             <input type="checkbox" onchange="TaskManager.toggleConcluido(this)">
-            <div class="topic-circle-indicator" data-topic-id="global" title="Global" style="background-color: #ffffff; border: 2px solid #cbd5e1;" onclick="TaskManager.abrirSeletorTemas(this, event)"></div>
+            <div class="topic-circle-indicator" role="button" tabindex="0" data-topic-id="global" style="background-color: #ffffff; border: 2px solid #cbd5e1;" onclick="TaskManager.abrirSeletorTemas(this, event)"></div>
             <input type="text" placeholder="Escreva sua tarefa..." oninput="this.setAttribute('value', this.value);">
-            <button onclick="this.parentElement.remove(); TaskManager.atualizarBadge();" style="border:none; background:none; cursor:pointer; color:#ef4444; margin-left: 8px;">✕</button>
+            <button onclick="this.parentElement.remove(); TaskManager.atualizarBadge();" style="border:none; background:none; cursor:pointer; color:#ef4444; margin-left: 8px;" aria-label="Excluir tarefa">✕</button>
         `;
         container.appendChild(div);
         
@@ -2180,10 +2229,23 @@ window.TaskManager = (function() {
             div.style.backgroundColor = '#eee';
             menu.appendChild(div);
 
-            topicos.forEach(t => {
+            // Algoritmo Cronológico Seguro: extrai o timestamp ou assume 0 (para legado)
+            const topicosCronologicos = [...topicos].sort((a, b) => {
+                const timeA = parseInt(a.id.replace('topico-', ''), 10) || 0;
+                const timeB = parseInt(b.id.replace('topico-', ''), 10) || 0;
+                return timeB - timeA; // Maior (mais recente) no topo
+            });
+
+            topicosCronologicos.forEach(t => {
                 const opt = document.createElement('div');
                 opt.className = 'jcs-option';
-                opt.innerHTML = `<div class="jcs-color-dot" style="background: ${t.cor};"></div> <span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${t.nome}</span>`;
+                opt.role = 'button';
+                opt.tabIndex = 0;
+                
+                // Proteção XSS no innerHTML
+                const nomeSeguro = _escaparSeguro(t.nome);
+                
+                opt.innerHTML = `<div class="jcs-color-dot" style="background: ${t.cor};"></div> <span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${nomeSeguro}">${nomeSeguro}</span>`;
                 opt.addEventListener('click', () => applyTheme(circleEl, t.id, t.nome, t.cor, menu));
                 menu.appendChild(opt);
             });
@@ -2247,6 +2309,8 @@ window.TaskManager = (function() {
         if(!container) return;
         container.innerHTML = '';
         
+        _setupTooltipDinamico(); // Garante que o listener raiz exista
+
         if(!tarefasArray || tarefasArray.length === 0) {
             atualizarBadge();
             return;
@@ -2261,11 +2325,17 @@ window.TaskManager = (function() {
             const borderStyle = t.topicId === 'global' ? '2px solid #cbd5e1' : '2px solid transparent';
             const shadowStyle = t.topicId === 'global' ? 'none' : `0 0 6px ${t.topicCor}40`;
 
+            // ARQUITETURA CORRIGIDA: Não inserimos 'title' aqui. 
+            // O Event Delegation cuidará disso. Adicionamos ARIA roles.
             div.innerHTML = `
                 <input type="checkbox" onchange="TaskManager.toggleConcluido(this)" ${checkedAttr}>
-                <div class="topic-circle-indicator" data-topic-id="${t.topicId}" title="${t.topicId === 'global' ? 'Global' : 'Tópico Específico'}" style="background-color: ${t.topicCor}; border: ${borderStyle}; box-shadow: ${shadowStyle};" onclick="TaskManager.abrirSeletorTemas(this, event)"></div>
-                <input type="text" placeholder="Escreva sua tarefa..." value="${t.texto.replace(/"/g, '&quot;')}" oninput="this.setAttribute('value', this.value);">
-                <button onclick="this.parentElement.remove(); TaskManager.atualizarBadge();" style="border:none; background:none; cursor:pointer; color:#ef4444; margin-left: 8px;">✕</button>
+                <div class="topic-circle-indicator" 
+                     role="button" tabindex="0" 
+                     data-topic-id="${_escaparSeguro(t.topicId)}" 
+                     style="background-color: ${_escaparSeguro(t.topicCor)}; border: ${borderStyle}; box-shadow: ${shadowStyle};" 
+                     onclick="TaskManager.abrirSeletorTemas(this, event)"></div>
+                <input type="text" placeholder="Escreva sua tarefa..." value="${_escaparSeguro(t.texto)}" oninput="this.setAttribute('value', this.value);">
+                <button onclick="this.parentElement.remove(); TaskManager.atualizarBadge();" style="border:none; background:none; cursor:pointer; color:#ef4444; margin-left: 8px;" aria-label="Excluir tarefa">✕</button>
             `;
             container.appendChild(div);
         });
