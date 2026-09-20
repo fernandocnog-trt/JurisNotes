@@ -918,3 +918,30 @@ body.theme-processo-jasmine {
     justify-content: flex-end;
     gap: 12px;
 }
+
+/* ================================================
+   ANIMAÇÕES DE FEEDBACK NÃO-BLOQUEANTE (UX) - CORRIGIDO
+   ================================================ */
+@keyframes pulse-alerta-tarefa {
+    0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(229, 57, 53, 0.8); }
+    50% { transform: scale(1.15); box-shadow: 0 0 0 12px rgba(229, 57, 53, 0); background-color: #e53935 !important; border-color: #b71c1c !important; }
+    100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(229, 57, 53, 0); }
+}
+
+/* Acorrentado com .has-tasks para vencer a especificidade original do botão Fúcsia */
+#btn-lembretes-tarefa.has-tasks.alerta-pulsante,
+#btn-lembretes-tarefa.alerta-pulsante {
+    animation: pulse-alerta-tarefa 0.6s cubic-bezier(0.25, 0.8, 0.25, 1) 3 !important;
+    z-index: 999; /* Joga o botão para frente durante o pulso */
+}
+
+/* Acessibilidade para usuários com sensibilidade a movimento */
+@media (prefers-reduced-motion: reduce) {
+    #btn-lembretes-tarefa.has-tasks.alerta-pulsante,
+    #btn-lembretes-tarefa.alerta-pulsante {
+        animation: none !important;
+        background-color: #e53935 !important;
+        border-color: #c62828 !important;
+        transition: background-color 0.3s ease;
+    }
+}

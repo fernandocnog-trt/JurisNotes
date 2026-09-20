@@ -1441,3 +1441,24 @@ MINI PLAYER DE ÁUDIO — MODAL FOCADO (ED)
 @media (prefers-reduced-motion: reduce) {
     .extrator-custom-reveal:not([hidden]) { animation: none; }
 }
+
+/* ================================================
+   UI EXTRATOR DE POLOS (Rádios Ocultos)
+   ================================================ */
+#extrator-polo-container .polo-radio-label input[type="radio"] {
+    display: none;
+}
+
+#extrator-polo-container .polo-radio-label input[type="radio"]:not(:checked) + .chip-btn {
+    background-color: transparent;
+    color: var(--text-muted, #64748b);
+    border: 1px solid var(--border-color, #cbd5e1);
+    opacity: 0.7;
+    box-shadow: none;
+}
+
+#extrator-polo-container .polo-radio-label input[type="radio"]:checked + .chip-btn {
+    opacity: 1;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
