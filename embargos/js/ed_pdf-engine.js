@@ -655,6 +655,7 @@ window.PdfEngine = (function () {
                         pin.dataset.tooltipFronteira = marco.fronteira;
                         pin.dataset.tooltipDoc = marco.docTipo;
                         pin.dataset.tooltipTopico = topico.nome;
+                        pin.dataset.tooltipPolo = marco.polo || 'Comum';
 
                         pin.innerHTML = `<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M16 11.78L20.24 16H13v6l-1 2-1-2v-6H3.76L8 11.78V4h1V2h6v2h1v7.78z"></path></svg>`;
 

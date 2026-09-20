@@ -159,6 +159,26 @@ window.ExportManager = (function () {
         md += `  <decisao_embargada>\n${_safeMD(topico.fundamentos || 'Nenhum trecho da decisão embargada colado.')}\n  </decisao_embargada>\n`;
         md += `</escopo_auditoria>\n\n`;
 
+        // [INÍCIO DA INSERÇÃO] - Injeção dos Dados do Contrato de Trabalho para a IA
+        if (window.ContratoManager) {
+            const dadosContrato = window.ContratoManager.getDados();
+            if (dadosContrato.admissao || dadosContrato.demissao || dadosContrato.funcao) {
+                md += `<contexto_fatico_vinculo_empregaticio>\n`;
+                if (dadosContrato.funcao) md += `  [Função Exercida]: ${dadosContrato.funcao}\n`;
+                if (dadosContrato.admissao) {
+                    // Formata a data (de YYYY-MM-DD para DD/MM/YYYY) para a IA ler de forma nativa
+                    const admArr = dadosContrato.admissao.split('-');
+                    md += `  [Data de Admissão]: ${admArr.length === 3 ? `${admArr[2]}/${admArr[1]}/${admArr[0]}` : dadosContrato.admissao}\n`;
+                }
+                if (dadosContrato.demissao) {
+                    const demArr = dadosContrato.demissao.split('-');
+                    md += `  [Data de Demissão]: ${demArr.length === 3 ? `${demArr[2]}/${demArr[1]}/${demArr[0]}` : dadosContrato.demissao}\n`;
+                }
+                md += `</contexto_fatico_vinculo_empregaticio>\n\n`;
+            }
+        }
+        // [FIM DA INSERÇÃO]
+
         // 2. INJEÇÃO DAS DIRETRIZES GLOBAIS DA IA
         if (topico.diretrizesGlobais && topico.diretrizesGlobais.length > 0) {
             const globaisValidas = topico.diretrizesGlobais.filter(dir => dir.intencao !== 'nota');
@@ -446,11 +466,6 @@ window.ExportManager = (function () {
             return;
         }
 
-        if (window.BalancaManager && !window.BalancaManager.executarGuardrailDeTarefas('gerar o pacote de exportação para a IA')) {
-            _deps.exibirToast('Exportação interrompida pelo usuário.', 'aviso');
-            return; 
-        }
-
         const container = document.getElementById('export-options-container');
         _documentosParaExtracaoCache = {};
 
@@ -468,21 +483,25 @@ window.ExportManager = (function () {
 
         if (topico.marcosExtracao && topico.marcosExtracao.length > 0) {
             const agrupados = topico.marcosExtracao.reduce((acc, curr) => {
-                if(!acc[curr.docTipo]) acc[curr.docTipo] = {};
-                acc[curr.docTipo][curr.fronteira] = curr;
+                const poloSufixo = (curr.polo && curr.polo !== 'Comum') ? curr.polo : 'Comum';
+                const compositeKey = `${curr.docTipo}|${poloSufixo}`;
+                if(!acc[compositeKey]) acc[compositeKey] = {};
+                acc[compositeKey][curr.fronteira] = curr;
                 return acc;
             }, {});
 
             const svgPin = `<svg viewBox="0 0 24 24" fill="none" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M16 11.78L20.24 16H13v6l-1 2-1-2v-6H3.76L8 11.78V4h1V2h6v2h1v7.78z"></path></svg>`;
 
-            for (const [docTipo, limites] of Object.entries(agrupados)) {
+            for (const [compositeKey, limites] of Object.entries(agrupados)) {
+                const [docTipo, poloDaPeca] = compositeKey.split('|');
                 const hasInicio = !!limites.inicio;
                 const hasFim = !!limites.fim;
                 const isCompleto = hasInicio && hasFim;
                 
-                if (isCompleto) _documentosParaExtracaoCache[docTipo] = limites;
+                if (isCompleto) _documentosParaExtracaoCache[compositeKey] = limites;
                 
-                const nomeF = getDocLabel(docTipo);
+                let nomeF = getDocLabel(docTipo);
+                if (poloDaPeca !== 'Comum') nomeF += ` (${poloDaPeca})`;
                 
                 const regras = _carregarRegrasFiltro();
                 const hasRegra = !!regras[docTipo];
@@ -491,11 +510,11 @@ window.ExportManager = (function () {
                 const btnBorracha = `<button type="button" class="pin-eraser-btn trigger-borracha ${hasRegra ? 'is-active' : ''}" data-doc-tipo="${docTipo}" data-doc-nome="${_escapeXmlAttr(nomeF)}" title="Borracha Mágica">${svgEraser}</button>`;
                 
                 const btnInicio = hasInicio 
-                    ? `<button type="button" class="pin-action-btn pin-start-active" onclick="event.preventDefault(); event.stopPropagation(); excluirMarcadorExtracao('${topico.id}', '${docTipo}', 'inicio');" title="Excluir Início (Fl. ${limites.inicio.pagina})">${svgPin}</button>`
+                    ? `<button type="button" class="pin-action-btn pin-start-active" onclick="event.preventDefault(); event.stopPropagation(); excluirMarcadorExtracao('${topico.id}', '${docTipo}', 'inicio', '${poloDaPeca}');" title="Excluir Início (Fl. ${limites.inicio.pagina})">${svgPin}</button>`
                     : `<button type="button" class="pin-action-btn pin-missing" title="Falta Marcador de Início">${svgPin}</button>`;
                     
                 const btnFim = hasFim 
-                    ? `<button type="button" class="pin-action-btn pin-end-active" onclick="event.preventDefault(); event.stopPropagation(); excluirMarcadorExtracao('${topico.id}', '${docTipo}', 'fim');" title="Excluir Fim (Fl. ${limites.fim.pagina})">${svgPin}</button>`
+                    ? `<button type="button" class="pin-action-btn pin-end-active" onclick="event.preventDefault(); event.stopPropagation(); excluirMarcadorExtracao('${topico.id}', '${docTipo}', 'fim', '${poloDaPeca}');" title="Excluir Fim (Fl. ${limites.fim.pagina})">${svgPin}</button>`
                     : `<button type="button" class="pin-action-btn pin-missing" title="Falta Marcador de Fim">${svgPin}</button>`;
 
                 const statusTexto = isCompleto 
@@ -504,7 +523,7 @@ window.ExportManager = (function () {
 
                 htmlBuffer.push(`
                     <label class="export-option-card ${!isCompleto ? 'locked-option' : ''}">
-                        <input type="checkbox" value="${docTipo}" class="extra-doc-checkbox export-control-checkbox" ${isCompleto ? 'checked' : 'disabled'}>
+                        <input type="checkbox" value="${compositeKey}" class="extra-doc-checkbox export-control-checkbox" ${isCompleto ? 'checked' : 'disabled'}>
                         <div class="export-option-details">
                             <span class="export-option-title">Teor Integral: ${nomeF}</span>
                             <span class="export-option-subtitle">${statusTexto}</span>
@@ -657,9 +676,9 @@ window.ExportManager = (function () {
                 // Orquestração da fila de documentos com progresso
                 for (let idx = 0; idx < checkboxesDocsExtra.length; idx++) {
                     const cb = checkboxesDocsExtra[idx];
-                    const docTipo = cb.value;
-                    const limites = _documentosParaExtracaoCache[docTipo];
-                    const tagName = docTipo.toUpperCase();
+                    const compositeKey = cb.value;
+                    const [docTipo, poloDaPeca] = compositeKey.split('|');
+                    const limites = _documentosParaExtracaoCache[compositeKey];
                     
                     try {
                         const pInicio = Math.min(limites.inicio.pagina, limites.fim.pagina);
@@ -687,13 +706,16 @@ window.ExportManager = (function () {
                         // SANITIZAÇÃO DELEGADA — fonte única, compartilhada com o Gerador de Contexto IA
                         textoLimpo = aplicarFiltrosAvancados(textoLimpo, docTipo, amostrasMap, pInicio, pFim);
 
-                        conteudoFinal += `<${tagName}>\n${textoLimpo}\n</${tagName}>\n\n`;
+                        const tagName = docTipo.toUpperCase();
+                        const attrPolo = poloDaPeca !== 'Comum' ? ` polo="${poloDaPeca.replace(/\s+/g, '_')}"` : '';
+                        conteudoFinal += `<${tagName}${attrPolo}>\n${textoLimpo}\n</${tagName}>\n\n`;
                     } catch (extraError) {
                         if (extraError.message && extraError.message.includes("CONCURRENCY_VIOLATION")) {
                             throw extraError; // Repassa erro fatal abortando a exportação
                         }
                         console.warn(`[ExportManager ED] Falha ao extrair ${docTipo}:`, extraError);
-                        conteudoFinal += `<${tagName}>\n[AVISO DE SISTEMA: Falha na extração deste documento no PDF. Possível página corrompida.]\n</${tagName}>\n\n`;
+                        const tagNameError = docTipo.toUpperCase();
+                        conteudoFinal += `<${tagNameError}>\n[AVISO DE SISTEMA: Falha na extração deste documento no PDF. Possível página corrompida.]\n</${tagNameError}>\n\n`;
                     }
                 }
             }
@@ -731,6 +753,11 @@ window.ExportManager = (function () {
                 _executarFilaDeDownloads(filaDeDownloads);
             } else {
                 _deps.exibirToast('✅ Arquivo gerado com sucesso!', 'sucesso');
+            }
+
+            // Gatilho visual acionado DEPOIS que a exportação do arquivo finaliza
+            if (window.TaskManager && typeof window.TaskManager.sinalizarTarefasPendentes === 'function') {
+                window.TaskManager.sinalizarTarefasPendentes();
             }
 
         } catch (error) {
@@ -803,13 +830,6 @@ window.ExportManager = (function () {
                 return;
             }
 
-            // --- CÓDIGO REFATORADO (Substitui o bloco antigo de BalancaManager) ---
-            if (window.BalancaManager && !window.BalancaManager.executarGuardrailDeTarefas('gerar o pacote de exportação de Embargos')) {
-                _deps.exibirToast('Exportação interrompida pelo usuário.', 'aviso');
-                return; // Aborta a exportação
-            }
-            // --- FIM DA REFATORAÇÃO ---
-
             try {
                 // 1. Gera e baixa o Markdown
                 const config = ESQUEMAS_CONTEXTO['ED'];
@@ -845,6 +865,11 @@ window.ExportManager = (function () {
 
                 await _executarFilaDeDownloads(filaDeDownloads);
 
+                // Gatilho visual acionado DEPOIS de todos os arquivos baixados
+                if (window.TaskManager && typeof window.TaskManager.sinalizarTarefasPendentes === 'function') {
+                    window.TaskManager.sinalizarTarefasPendentes();
+                }
+
             } catch (error) {
                 console.error('[ExportManager ED] Erro crítico na exportação:', error);
                 _deps.exibirToast('Erro ao exportar Embargos. Verifique o console.', 'erro');
@@ -859,7 +884,17 @@ window.ExportManager = (function () {
         obterDadosDoTopicoAtivo: function() {
             const activeId = _deps.getActiveTabId();
             if (!activeId) return null;
-// ... (linhas omitidas para brevidade) ...
+
+            // [CORREÇÃO]: Busca a lista de tópicos injetada e filtra o ativo
+            const topicosArray = _deps.getTopicos();
+            const topicoAtivo = topicosArray.find(t => t.id === activeId);
+
+            // Trava de segurança extra
+            if (!topicoAtivo) {
+                console.warn('[ExportManager] Tópico ativo não localizado na memória.');
+                return null;
+            }
+
             return {
                 nome: topicoAtivo.nome || 'Vício Não Nomeado',
                 markdown: _gerarMarkdown(topicoAtivo)

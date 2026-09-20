@@ -729,15 +729,21 @@ window.salvarMarcadorExtracao = function() {
         }
     }
     
+    // 1. Captura Segura do Polo
+    const poloEl = document.querySelector('input[name="extrator_polo"]:checked');
+    const poloSelecionado = poloEl ? poloEl.value : 'Comum';
+    
     const topico = topicos.find(t => t.id === topicoId);
     if (!topico.marcosExtracao) topico.marcosExtracao = [];
     
-    topico.marcosExtracao = topico.marcosExtracao.filter(m => !(m.docTipo === docTipo && m.fronteira === fronteira));
+    // 2. Prevenção de Duplicidade ciente de Polo (Evita sobrescrever embargos de partes distintas)
+    topico.marcosExtracao = topico.marcosExtracao.filter(m => 
+        !(m.docTipo === docTipo && m.fronteira === fronteira && (m.polo || 'Comum') === poloSelecionado)
+    );
     
-    // Persistência Híbrida: injeta o docLabel apenas se existir
-    const payload = { ...extratorTempState, docTipo, fronteira };
+    // 3. Persistência
+    const payload = { ...extratorTempState, docTipo, fronteira, polo: poloSelecionado };
     if (docLabel) payload.docLabel = docLabel;
-    
     topico.marcosExtracao.push(payload);
 
     cancelarMarcadorExtracao();
@@ -766,6 +772,9 @@ window.cancelarMarcadorExtracao = function() {
     modoExtratorAtivo = false;
     document.body.classList.remove('modo-extrator-ativo');
     if (!modoRecorteAtivo) overlay.style.display = 'none';
+    
+    const poloDefault = document.querySelector('input[name="extrator_polo"][value="Comum"]');
+    if (poloDefault) poloDefault.checked = true;
 };
 
 /* ================================================
@@ -1045,10 +1054,14 @@ window.abrirModalGeradorContexto = async function() {
         const topicoBruto = topicos.find(t => t.id === TopicsManager.getActiveTabId());
         
         if (topicoBruto && topicoBruto.marcosExtracao && topicoBruto.marcosExtracao.length > 0) {
-            // Agrupar marcos pareados por tipo de documento
+            // Agrupar marcos pareados por tipo de documento e polo
             const agrupados = topicoBruto.marcosExtracao.reduce((acc, curr) => {
-                if(!acc[curr.docTipo]) acc[curr.docTipo] = {};
-                acc[curr.docTipo][curr.fronteira] = curr;
+                // 1. Chave Composta Blindada
+                const poloSufixo = (curr.polo && curr.polo !== 'Comum') ? curr.polo : 'Comum';
+                const compositeKey = `${curr.docTipo}|${poloSufixo}`;
+                
+                if(!acc[compositeKey]) acc[compositeKey] = {};
+                acc[compositeKey][curr.fronteira] = curr;
                 return acc;
             }, {});
 
@@ -1056,8 +1069,10 @@ window.abrirModalGeradorContexto = async function() {
             let embargosXML = "";
             let confrontoXML = "";
 
-            for (const [docTipo, limites] of Object.entries(agrupados)) {
+            for (const [compositeKey, limites] of Object.entries(agrupados)) {
                 if (limites.inicio && limites.fim) {
+                    // Desmembra a chave
+                    const [docTipo, poloDaPeca] = compositeKey.split('|');
                     const pInicio = Math.min(limites.inicio.pagina, limites.fim.pagina);
                     const pFim = Math.max(limites.inicio.pagina, limites.fim.pagina);
                     const amostrasMap = new Map();
@@ -1081,9 +1096,12 @@ window.abrirModalGeradorContexto = async function() {
                         textoLimpo = window.ExportManager.aplicarFiltrosAvancados(textoLimpo, docTipo, amostrasMap, pInicio, pFim);
                     }
 
-                    // GERAÇÃO DE XML PROFUNDO PARA A IA
+                    // 2. CONSTRUÇÃO DO XML SEMÂNTICO (Engenharia de Prompt Segura)
                     const tagName = docTipo.toUpperCase();
-                    const xml = `\n<${tagName}>\n${textoLimpo}\n</${tagName}>\n`;
+                    // Se houver polo distinto, cria o atributo padronizado em snake_case (melhor parsing)
+                    const attrPolo = poloDaPeca !== 'Comum' ? ` polo="${poloDaPeca.replace(/\s+/g, '_')}"` : '';
+                    
+                    const xml = `\n<${tagName}${attrPolo}>\n${textoLimpo}\n</${tagName}>\n`;
 
                     if (docTipo === 'decisao') decisaoXML += xml;
                     else if (docTipo === 'embargos') embargosXML += xml;
@@ -1149,12 +1167,6 @@ window.fecharModalGeradorContexto = function() {
 window.gerarECopiarContexto = function(modo = 'pro') {
     const nomeAcao = modo === 'interno' ? 'copiar DADOS COMPLETOS para ChatJT' : 'copiar DADOS SEGUROS para Gemini PRO';
     
-    // Guardrail context-aware
-    if (window.BalancaManager && !window.BalancaManager.executarGuardrailDeTarefas(nomeAcao)) {
-        exibirToast('Cópia interrompida pelo usuário.', 'aviso');
-        return; 
-    }
-
     const btnId = modo === 'interno' ? 'btn-copiar-contexto-interno' : 'btn-copiar-contexto-pro';
     const btn = document.getElementById(btnId);
     
@@ -1211,20 +1223,27 @@ window.gerarECopiarContexto = function(modo = 'pro') {
     }
 
     navigator.clipboard.writeText(outputFinal).then(() => {
-        targetTextNode.innerText = '✅ Sucesso!';
-        btn.style.backgroundColor = "#2e7d32"; 
-        btn.style.opacity = "1";
-        
-        const msgToast = modo === 'interno' ? 'Pacote Interno copiado (com XML).' : 'Pacote PRO seguro copiado.';
-        exibirToast(msgToast, 'sucesso');
-        
-        setTimeout(() => {
-            targetTextNode.innerText = originalText;
-            btn.style.backgroundColor = modo === 'interno' ? '#f57c00' : 'var(--trt-blue)';
-            if(typeof window.fecharModalGeradorContexto === 'function') window.fecharModalGeradorContexto();
-        }, 1500); 
-        
-    }).catch(err => {
+            targetTextNode.innerText = '✅ Sucesso!';
+            btn.style.backgroundColor = "#2e7d32"; 
+            btn.style.opacity = "1";
+            
+            const msgToast = modo === 'interno' ? 'Pacote Interno copiado (com XML).' : 'Pacote PRO seguro copiado.';
+            exibirToast(msgToast, 'sucesso');
+            
+            setTimeout(() => {
+                targetTextNode.innerText = originalText;
+                btn.style.backgroundColor = modo === 'interno' ? '#f57c00' : 'var(--trt-blue)';
+                if(typeof window.fecharModalGeradorContexto === 'function') window.fecharModalGeradorContexto();
+                
+                // Gatilho visual acionado DEPOIS que o modal sai da frente (300ms p/ fade-out)
+                setTimeout(() => {
+                    if (window.TaskManager && typeof window.TaskManager.sinalizarTarefasPendentes === 'function') {
+                        window.TaskManager.sinalizarTarefasPendentes();
+                    }
+                }, 300);
+            }, 1500); 
+            
+        }).catch(err => {
         console.error('Falha na Clipboard API:', err);
         executarCopiaFallback(outputFinal, btn, targetTextNode, originalText, modo);
     });
@@ -1281,12 +1300,16 @@ document.addEventListener('mouseover', (e) => {
 
     const corFronteira = fronteira === 'INÍCIO' ? '#34db98' : '#e74c3c';
 
+    // Montagem do balão informativo com o polo
+    const polo = pin.dataset.tooltipPolo || 'Comum';
+    const badgePolo = polo !== 'Comum' ? `<br><b>Polo:</b> <span style="color: #fff;">${polo}</span>` : '';
+
     // 2. DOM MUTATION: Injeta o novo conteúdo e semântica de cores (com escape anti-XSS)
     _cachedTooltip.innerHTML = `
         <strong style="color: ${corFronteira};">📍 MARCO DE ${fronteira}</strong>
         <span style="display:block; margin-top:4px; font-size: 0.8rem; color:#ecf0f1;">
             <b>Doc:</b> ${nomeBonito}<br>
-            <b>Tópico:</b> ${safeTopicoNome}
+            <b>Tópico:</b> ${safeTopicoNome}${badgePolo}
         </span>
     `;
 

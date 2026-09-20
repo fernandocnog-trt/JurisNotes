@@ -948,10 +948,15 @@ window.TopicsManager = (function () {
 
     /**
      * Renderiza o bloco de diretrizes visuais para a IA (Global ou Por Vício)
+     * Adicionado: chaveVicioCrua para preservar o ponteiro do estado
      */
-    function renderizarNivelHierarquico(tipo, titulo, subanotacoes, topicoId, tesesConsolidadas = [], indexGlobal = 0, renderContext) {
+    function renderizarNivelHierarquico(tipo, titulo, subanotacoes, topicoId, tesesConsolidadas = [], indexGlobal = 0, renderContext, chaveVicioCrua = '') {
         const listaSegura = subanotacoes || [];
         const isGlobal = tipo === 'global';
+        
+        // Defesa contra valores nulos/corrompidos
+        const chaveCruaSegura = chaveVicioCrua || 'vicio_desconhecido';
+        const tituloSeguroUI = titulo || 'Vício Não Identificado';
         
         // NÚCLEO DA CORREÇÃO: paridade dinâmica baseada no índice global
         const isLeft = (indexGlobal % 2 === 0);
@@ -986,15 +991,16 @@ window.TopicsManager = (function () {
             styleSubBorda = `border-left: 5px solid ${corBase}; border-color: ${rgbaTeseBorda};`;
         }
         
-        const tituloContexto = isGlobal ? 'Diretriz Global' : `Diretriz do Vício: ${titulo}`;
+        const tituloContexto = isGlobal ? 'Diretriz Global' : `Diretriz do Vício: ${tituloSeguroUI}`;
         
         // RENDERIZAÇÃO SEGURA DOS NÓS COM SHALLOW COPY E PILHAS
         const gruposProcessadosNesteCard = new Set();
         const subCardsHTMLArray = [];
-        const viewSourceAtual = isGlobal ? 'global' : `vicio:${titulo}`;
+        
+        // CORREÇÃO ARQUITETURAL 1: viewSource agora usa a chave crua para que edição e exclusão funcionem
+        const viewSourceAtual = isGlobal ? 'global' : `vicio:${chaveCruaSegura}`;
         
         listaSegura.forEach((sub, idx) => {
-            // CÓPIA SUPERFICIAL
             const subRender = { ...sub, viewSource: viewSourceAtual, localIndex: idx };
             
             if (!subRender.grupoId) {
@@ -1017,23 +1023,26 @@ window.TopicsManager = (function () {
         });
         const subCardsHTML = subCardsHTMLArray.join('');
 
-        const hierarquiaTitulo = isGlobal ? 'Diretrizes Globais (Auditoria)' : `Vício Alegado: ${escaparHTML(titulo)}`;
+        const hierarquiaTitulo = isGlobal ? 'Diretrizes Globais (Auditoria)' : `Vício Alegado: ${escaparHTML(tituloSeguroUI)}`;
         const wrapperClass = isGlobal ? 'nivel-global' : 'nivel-vicio';
         
-        // Geração do ID Dinâmico baseado no contexto (Fase 2 Prep)
-        const vicioSlug = isGlobal ? '' : (titulo || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'vicio';
-        const wrapperId = isGlobal ? `timeline-wrapper-globais-${topicoId}` : `timeline-wrapper-vicio-${vicioSlug}`;
+        const teseSlug = (tesesConsolidadas[0] || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').substring(0, 20);
+        const vicioSlug = isGlobal ? '' : chaveCruaSegura.replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+        const wrapperId = isGlobal 
+            ? `timeline-wrapper-globais-${topicoId}` 
+            : `timeline-wrapper-vicio-${vicioSlug}-${teseSlug}-${indexGlobal}`;
 
-        // NOVO: Renderização segura e elegante das teses compiladas
         let htmlTesesMapeadas = '';
         if (!isGlobal && tesesConsolidadas.length > 0) {
-            // Escapa os dados para evitar injeção de HTML malicioso (XSS)
             const tesesSeguras = tesesConsolidadas.map(t => escaparHTML(t)).join(' <span style="color:#ccc;">|</span> ');
             htmlTesesMapeadas = `
                 <div style="font-size: 0.8rem; color: #555; margin-top: 4px; font-weight: normal; line-height: 1.4;">
                     <strong style="color: var(--trt-blue-mid);">Teses Mapeadas:</strong> ${tesesSeguras}
                 </div>`;
         }
+
+        // CORREÇÃO ARQUITETURAL 2: Sanitização JS-Safe para atributos inline (previne quebra de sintaxe)
+        const chaveParaGravarJS = isGlobal ? '' : String(chaveCruaSegura).replace(/'/g, "\\'");
 
         return `
             <div class="timeline-item-master ${alignClass} nivel-hierarquico ${wrapperClass}" id="${wrapperId}">
@@ -1050,7 +1059,8 @@ window.TopicsManager = (function () {
                                 ${htmlTesesMapeadas}
                             </div>
                             <div class="card-actions-bar" style="margin-top: 0; padding-top: 0; border-top: none;">
-                                <button title="Adicionar Diretriz" onclick="adicionarDiretrizEstrutural('${isGlobal ? 'global' : 'vicio'}', '${topicoId}', '${isGlobal ? '' : escaparHTML(titulo)}', event)">
+                                <!-- Botão atualizado injetando chaveParaGravarJS -->
+                                <button title="Adicionar Diretriz" onclick="adicionarDiretrizEstrutural('${isGlobal ? 'global' : 'vicio'}', '${topicoId}', '${chaveParaGravarJS}', event)">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
                                 </button>
                             </div>
@@ -1377,14 +1387,18 @@ window.TopicsManager = (function () {
 
                 if (isTesePreenchida || diretrizesDoVicio.length > 0) {
                     const tituloExibicao = isTesePreenchida ? anotacao.tese.trim() : "Provas não agrupadas";
+                    // Fallback seguro caso JurisUtils falhe
+                    const vicioSeguroUI = vicioFormatado || 'Vício Não Identificado';
+
                     cardsHTML += renderizarNivelHierarquico(
                         'vicio',
-                        vicioFormatado,
+                        vicioSeguroUI,
                         diretrizesDoVicio,
                         activeTabId,
                         [tituloExibicao],
                         index,
-                        renderContext
+                        renderContext,
+                        vicioRaw // <-- CORREÇÃO ARQUITETURAL 3: Passagem da chave crua do estado global
                     );
                 }
                 ultimaTeseRenderizada = chaveTeseCrua;

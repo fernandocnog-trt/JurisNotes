@@ -627,6 +627,56 @@ window.ShortcutManager = (function() {
 })();
 
 /* ================================================
+   MÓDULO DE CONTRATO DE TRABALHO
+   ================================================ */
+window.ContratoManager = (function() {
+    let dadosContrato = {
+        admissao: '',
+        demissao: '',
+        funcao: ''
+    };
+
+    function abrirModal() {
+        const backdrop = document.getElementById('contrato-modal-backdrop');
+        const modal = document.getElementById('modal-contrato-trabalho');
+        if (!backdrop || !modal) return;
+
+        document.getElementById('input-contrato-admissao').value = dadosContrato.admissao;
+        document.getElementById('input-contrato-demissao').value = dadosContrato.demissao;
+        document.getElementById('input-contrato-funcao').value = dadosContrato.funcao;
+
+        backdrop.style.display = 'block';
+        modal.style.display = 'flex';
+    }
+
+    function fecharModal() {
+        document.getElementById('contrato-modal-backdrop').style.display = 'none';
+        document.getElementById('modal-contrato-trabalho').style.display = 'none';
+    }
+
+    function salvarContrato() {
+        dadosContrato.admissao = document.getElementById('input-contrato-admissao').value;
+        dadosContrato.demissao = document.getElementById('input-contrato-demissao').value;
+        dadosContrato.funcao = document.getElementById('input-contrato-funcao').value.trim();
+
+        const btnContrato = document.getElementById('btn-contrato-trabalho');
+        if (btnContrato) {
+            if (dadosContrato.admissao || dadosContrato.demissao || dadosContrato.funcao) {
+                btnContrato.classList.add('has-data');
+            } else {
+                btnContrato.classList.remove('has-data');
+            }
+        }
+
+        fecharModal();
+        if (typeof exibirToast === 'function') exibirToast('Parâmetros do contrato atualizados.', 'sucesso');
+        if (typeof salvarBackupAutomatico === 'function') salvarBackupAutomatico();
+    }
+
+    return { abrirModal, fecharModal, salvarContrato, getDados: () => dadosContrato };
+})();
+
+/* ================================================
    INICIALIZAÇÃO E INJEÇÃO DE DEPENDÊNCIAS
    ================================================ */
 document.addEventListener("DOMContentLoaded", () => {
@@ -1321,15 +1371,17 @@ function identificarFaseMetodologica(docNome) {
 /**
  * Exclui um marco de extração com segurança de estado e atualiza a UI.
  */
-window.excluirMarcadorExtracao = function(topicoId, docTipo, fronteira) {
+window.excluirMarcadorExtracao = function(topicoId, docTipo, fronteira, polo = 'Comum') {
     const fronteiraLabel = fronteira === 'inicio' ? 'INÍCIO' : 'FIM';
     if (!confirm(`Deseja apagar o marcador de ${fronteiraLabel} deste documento?`)) return;
 
     const topico = topicos.find(t => t.id === topicoId);
     if (!topico || !topico.marcosExtracao) return;
 
-    // Mutação Segura: Filtra o array preservando imutabilidade estrutural
-    topico.marcosExtracao = topico.marcosExtracao.filter(m => !(m.docTipo === docTipo && m.fronteira === fronteira));
+    // Exclusão estrita via Identity Check Completo
+    topico.marcosExtracao = topico.marcosExtracao.filter(m => 
+        !(m.docTipo === docTipo && m.fronteira === fronteira && (m.polo || 'Comum') === polo)
+    );
 
     exibirToast(`Marcador de ${fronteiraLabel} excluído.`, 'sucesso');
     
@@ -2355,5 +2407,36 @@ window.TaskManager = (function() {
         atualizarBadge();
     }
 
-    return { abrirModal, fecharModal, adicionarTarefa, toggleConcluido, atualizarBadge, abrirSeletorTemas, getTarefasState, setTarefasState };
+    function sinalizarTarefasPendentes() {
+        const container = document.getElementById('native-obs-list');
+        if (!container) return;
+        
+        const pendentes = container.querySelectorAll('input[type="checkbox"]:not(:checked)').length;
+        
+        if (pendentes > 0) {
+            if (typeof exibirToast === 'function') {
+                exibirToast(`Aviso: Existem ${pendentes} tarefa(s) pendente(s) no seu painel.`, 'aviso');
+            }
+            
+            const btn = document.getElementById('btn-lembretes-tarefa');
+            if (btn) {
+                // 1. Limpa qualquer timer anterior (Previne Race Condition de múltiplos cliques)
+                clearTimeout(btn._pulseTimer);
+                
+                // 2. Força o navegador a recalcular o layout (Reset da animação)
+                btn.classList.remove('alerta-pulsante');
+                void btn.offsetWidth; 
+                
+                // 3. Aplica a classe que dispara o @keyframes
+                btn.classList.add('alerta-pulsante');
+                
+                // 4. Remove a classe após 1.9s (Duração: 0.6s * 3 pulsos = 1800ms + folga)
+                btn._pulseTimer = setTimeout(() => {
+                    btn.classList.remove('alerta-pulsante');
+                }, 1900);
+            }
+        }
+    }
+
+    return { abrirModal, fecharModal, adicionarTarefa, toggleConcluido, atualizarBadge, abrirSeletorTemas, getTarefasState, setTarefasState, sinalizarTarefasPendentes };
 })();
