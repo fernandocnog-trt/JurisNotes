@@ -1757,5 +1757,41 @@ Crie um sumário hierárquico enxuto com as Grandes Categorias e Subcategorias q
             </div>
         </div>
     </div>
+
+<!-- BACKDROP E MODAL: CONTRATO DE TRABALHO -->
+<div id="contrato-modal-backdrop" style="display: none; position: fixed; inset: 0; background: rgba(15, 37, 61, 0.85); backdrop-filter: blur(4px); z-index: 4004;" onclick="ContratoManager.fecharModal()"></div>
+
+<div id="modal-contrato-trabalho" class="crop-wizard-popup" style="display:none; z-index: 4005; min-width: 450px; max-width: 90vw;">
+    <div class="wizard-header" style="display: flex; justify-content: space-between; align-items: center;">
+        <span style="font-weight: 700; color: var(--trt-blue);">📝 Parâmetros do Contrato</span>
+        <button style="background: none; border: none; font-size: 1.2rem; cursor: pointer; color: #64748b;" onclick="ContratoManager.fecharModal()">✕</button>
+    </div>
+    
+    <div style="padding: 16px 0; display: flex; flex-direction: column; gap: 12px;">
+        <p class="popup-label">Dados do Vínculo Empregatício:</p>
+        
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+            <div>
+                <label style="font-size: 0.75rem; color: #666;">Admissão:</label>
+                <input type="date" id="input-contrato-admissao" class="topic-select">
+            </div>
+            <div>
+                <label style="font-size: 0.75rem; color: #666;">Demissão:</label>
+                <input type="date" id="input-contrato-demissao" class="topic-select">
+            </div>
+        </div>
+        
+        <div>
+            <label style="font-size: 0.75rem; color: #666;">Função:</label>
+            <input type="text" id="input-contrato-funcao" class="topic-select" placeholder="Ex: Operador de Máquina">
+        </div>
+    </div>
+
+    <div class="wizard-actions">
+        <button class="chip-btn chip-cancelar" onclick="ContratoManager.fecharModal()">Cancelar</button>
+        <button class="chip-btn chip-autora" style="background: var(--ed-neon-bg, #D500B5); color: white; border: none;" onclick="ContratoManager.salvarContrato()">✔ Salvar Dados</button>
+    </div>
+</div>
+
 </body>
 </html>
