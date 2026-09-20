@@ -174,7 +174,7 @@ window.TopicsManager = (function () {
                     }
                     setTimeout(() => { _isUpdatingLayout = false; }, 50);
                 });
-            }, 32); 
+            }, 150); 
         }
     });
 
@@ -663,12 +663,108 @@ window.TopicsManager = (function () {
     // Função estática gerarSVGConector removida (substituída pelo motor dinâmico desenharConexoes)
 
     /**
+     * Motor Robusto de Handoff para IA
+     * Arquitetura Síncrona/Assíncrona bifurcada para preservar Transient Activation
+     */
+    async function copiarHandoff(btnContext) {
+        // Extração segura via Dataset (Blindado contra XSS)
+        const chkId = btnContext.dataset.chkId || 'ID_DESCONHECIDO';
+        const alvo = btnContext.dataset.alvo || 'Tópico de Destino';
+
+        // Prompt Engineering Avançado (Delimitadores e System Roles Estritos)
+        const promptHandoff = `<CONTEXTO_HANDOFF>\n[COMANDO DE CONTINUAÇÃO DE MINUTA — VOLUME 2]\nVocê receberá, nesta ordem:\n1. O checkpoint de estado atual: [ID] ${chkId}\n2. O Contexto RAG completo do tópico continuado: "${alvo}".\n\n<REGRAS_ESTRITAS>\n- MANIFESTO INICIAL: Declare obrigatoriamente onde você parou no último volume e qual o escopo deste novo volume. AGUARDE APROVAÇÃO se instruído.\n- TRAVA DE SEGURANÇA: Se o Checkpoint ID recebido não for EXATAMENTE ${chkId}, INTERROMPA A GERAÇÃO E ALERTE O ASSESSOR.\n- ESCOPO LIMITADO: Redija EXCLUSIVAMENTE o trecho continuado. É EXPRESSAMENTE PROIBIDO reescrever, revisar ou resumir fatos já decididos no volume anterior.\n</REGRAS_ESTRITAS>\n</CONTEXTO_HANDOFF>`;
+
+        try {
+            // Bifurcação Estratégica: Verifica segurança ANTES de qualquer await
+            if (navigator.clipboard && window.isSecureContext) {
+                // Modo Assíncrono Moderno (Requer HTTPS)
+                await navigator.clipboard.writeText(promptHandoff);
+            } else {
+                // Modo Síncrono Legado (Preserva Gesto do Usuário em HTTP)
+                const textArea = document.createElement("textarea");
+                textArea.value = promptHandoff;
+                textArea.style.position = "fixed";
+                textArea.style.left = "-999999px";
+                document.body.appendChild(textArea);
+                textArea.focus();
+                textArea.select();
+                
+                const copiou = document.execCommand('copy');
+                textArea.remove();
+                
+                if (!copiou) throw new Error("Fallback de clipboard rejeitado pelo navegador.");
+            }
+
+            // Feedback de Sucesso (UX)
+            const originalHtml = btnContext.innerHTML;
+            btnContext.innerHTML = '✅ Instrução Copiada!';
+            btnContext.style.backgroundColor = '#e8f5e9';
+            btnContext.style.color = '#2e7d32';
+            btnContext.style.borderColor = '#a5d6a7';
+            
+            if (window.exibirToast) window.exibirToast('Instrução copiada! Cole no ChatJT / LLM.', 'sucesso');
+            
+            setTimeout(() => {
+                btnContext.innerHTML = originalHtml;
+                btnContext.style.backgroundColor = '';
+                btnContext.style.color = '';
+                btnContext.style.borderColor = '';
+            }, 2500);
+
+        } catch (err) {
+            console.error("[TopicsManager] Erro no Handoff de Clipboard:", err);
+            if (window.exibirToast) window.exibirToast('Erro de permissão na Área de Transferência.', 'erro');
+        }
+    }
+
+    // Componente isolado (Clean Code)
+    function _gerarHtmlCheckpoint(anotacao, index) {
+        const isSaida = anotacao.tipo === 'checkpoint_saida';
+        const volumeNum = isSaida ? anotacao.metaHandoff.versao : (anotacao.metaHandoff.versao + 1);
+        const romano = toRoman(volumeNum);
+        const titulo = `Volume ${romano}`;
+        
+        // Dados brutos sem risco de quebra de JS, pois irão para atributos data-*
+        const chkId = escaparHTML(anotacao.metaHandoff.chkId || '');
+        const alvo = escaparHTML(anotacao.metaHandoff.alvo || anotacao.metaHandoff.origem || '');
+
+        return `
+        <div class="timeline-item-master align-left" id="timeline-wrapper-${anotacao.uuid || index}" style="justify-content: center; margin-bottom: 24px;">
+            <div class="sub-annotation-card borda-checkpoint-minimalista" style="width: 80%; max-width: 600px; margin: 0 auto;">
+                <h3 class="checkpoint-title">${titulo}</h3>
+                
+                <aside class="checkpoint-hint-box" aria-label="Lembrete de transição de IA">
+                    <small class="checkpoint-hint-text">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px; height:14px; margin-right:4px; vertical-align:text-bottom;"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+                        A <strong>Instrução de Continuidade</strong> orienta a IA no próximo passo.
+                    </small>
+                    <!-- REVISÃO ARQUITETURAL: Uso de dataset, delegação segura e chamada modular -->
+                    <button class="btn-copy-chave-quick" 
+                            data-chk-id="${chkId}"
+                            data-alvo="${alvo}"
+                            onclick="TopicsManager.copiarHandoff(this); event.stopPropagation();" 
+                            aria-label="Copiar instrução de continuidade para a IA">
+                        🔑 Copiar Instrução P/ IA
+                    </button>
+                </aside>
+
+                <p style="display: none;" aria-hidden="true">${escaparHTML(anotacao.conteudo)}</p>
+            </div>
+        </div>`;
+    }
+
+    /**
      * Fábrica de cards no formato de fluxograma alternado.
      * Retorna: card + bloco de sub-anotações (se houver) + conector SVG.
      * Os três fragmentos são irmãos diretos no .timeline-container,
      * garantindo que align-self funcione corretamente nas sub-anotações.
      */
     function criarCard(anotacao, index, arr, renderContext) {
+        // INTERCEPTAÇÃO ESTRUTURAL: Renderiza o Checkpoint modularizado
+        if (anotacao.tipo && anotacao.tipo.startsWith('checkpoint')) {
+            return _gerarHtmlCheckpoint(anotacao, index);
+        }
+
         const total    = arr.length;
         const numero   = index + 1;
         const tagClass = poloParaClasse(anotacao.polo);
@@ -1533,6 +1629,7 @@ window.TopicsManager = (function () {
         });
         
         _sincronizarBtnGlobais(temGlobais, forcadoAberto);
+        atualizarAlertaCapacidadeTopico(topicoAtivo);
     }
 
     /**
@@ -1590,7 +1687,7 @@ window.TopicsManager = (function () {
     }
 
     /**
-     * Motor Dinâmico de Conexões Sinuosas
+     * Motor Dinâmico de Conexões Sinuosas (Padrão FastDOM para evitar Layout Thrashing)
      * @param {boolean} isZenActive - Indica se o Modo Zen está ativo (injetado para evitar reflows no loop)
      */
     function desenharConexoes(isZenActive = false) {
@@ -1599,13 +1696,12 @@ window.TopicsManager = (function () {
         if (!container || !svg) return;
 
         const containerRect = container.getBoundingClientRect();
-        let svgContent = '';
+        
+        // --- LOOP 1: APENAS LEITURA (MEMÓRIA GEOMÉTRICA) ---
+        const spineGeometria = [];
+        const tracejadasGeometria = []; 
 
-        // 1. LINHA VERMELHA (ESPINHA DORSAL): Conecta Grupo a Grupo (incluindo Teses)
-        // CORREÇÃO TOPOLÓGICA: Alterado de :not(.nivel-hierarquico) para :not(.nivel-global) 
-        // para que a linha ancore corretamente nos cards de Tese.
         const masterItemsForSpine = Array.from(container.querySelectorAll('.timeline-item-master:not(.nivel-global)'));
-
         for (let i = 0; i < masterItemsForSpine.length - 1; i++) {
             const currentGroup = masterItemsForSpine[i];
             const nextGroup = masterItemsForSpine[i + 1];
@@ -1619,28 +1715,14 @@ window.TopicsManager = (function () {
             const rectAtual = cardAtual.getBoundingClientRect();
             const rectProx = cardProx.getBoundingClientRect();
 
-            const startX = (rectAtual.left + rectAtual.width / 2) - containerRect.left;
-            const startY = rectAtual.bottom - containerRect.top;
-            const endX = (rectProx.left + rectProx.width / 2) - containerRect.left;
-            const endY = rectProx.top - containerRect.top;
-            const ctrlY = (startY + endY) / 2;
-
-            // Constante geométrica para a haste horizontal nas pontas (8px para cada lado)
-            const tick = 8; 
-
-            // Montagem consolidada do Path:
-            // 1. Haste Superior (Move, Line)
-            // 2. Curva Sinuosa (Move, Curve)
-            // 3. Haste Inferior (Move, Line)
-            const pathD = `M ${startX - tick},${startY} L ${startX + tick},${startY} ` +
-                          `M ${startX},${startY} C ${startX},${ctrlY} ${endX},${ctrlY} ${endX},${endY} ` +
-                          `M ${endX - tick},${endY} L ${endX + tick},${endY}`;
-
-            // Injeção puramente geométrica e semântica
-            svgContent += `<path class="spine-connection" d="${pathD}" />`;
+            spineGeometria.push({
+                startX: (rectAtual.left + rectAtual.width / 2) - containerRect.left,
+                startY: rectAtual.bottom - containerRect.top,
+                endX: (rectProx.left + rectProx.width / 2) - containerRect.left,
+                endY: rectProx.top - containerRect.top
+            });
         }
 
-        // 2. LINHAS TRACEJADAS: Conecta Master aos Sub-itens (Nós de Ideia)
         const masterItems = container.querySelectorAll('.timeline-item-master');
         masterItems.forEach(master => {
             const mainCard = master.querySelector('.main-card-wrapper > .annotation-card');
@@ -1661,35 +1743,43 @@ window.TopicsManager = (function () {
                 }
                 const sourceRect = sourceCard.getBoundingClientRect();
 
-                const startX = isRightAligned ? sourceRect.left - containerRect.left : sourceRect.right - containerRect.left;
-                const endX = isRightAligned ? subRect.right - containerRect.left : subRect.left - containerRect.left;
-                const startY = (sourceRect.top + sourceRect.height / 2) - containerRect.top;
-                const endY   = (subRect.top + subRect.height / 2) - containerRect.top;
-                const ctrlX  = (startX + endX) / 2;
-
-                // LÓGICA DE UX: Comportamento Visual no Modo Zen
-                let strokeColor = "#777";
-                let strokeOpacity = "1";
-                let strokeWidth = "1.5";
-                let dashArray = "5 4";
-
-                if (isZenActive) {
-                    if (subItem.classList.contains('is-zen-focused')) {
-                        strokeColor = _activeTopicoCor; // Cor da aba ativa
-                        strokeWidth = "2.5";
-                        dashArray = "none"; // Linha sólida para foco
-                    } else {
-                        strokeOpacity = "0.15"; // Esmaece os demais para acompanhar o blur do fundo
-                    }
-                }
-
-                svgContent += `<path d="M ${startX},${startY} C ${ctrlX},${startY} ${ctrlX},${endY} ${endX},${endY}" stroke="${strokeColor}" stroke-width="${strokeWidth}" stroke-dasharray="${dashArray}" opacity="${strokeOpacity}" fill="none" stroke-linecap="round"/>`;
+                tracejadasGeometria.push({
+                    startX: isRightAligned ? sourceRect.left - containerRect.left : sourceRect.right - containerRect.left,
+                    endX: isRightAligned ? subRect.right - containerRect.left : subRect.left - containerRect.left,
+                    startY: (sourceRect.top + sourceRect.height / 2) - containerRect.top,
+                    endY: (subRect.top + subRect.height / 2) - containerRect.top,
+                    isZenFocused: subItem.classList.contains('is-zen-focused')
+                });
             });
         });
 
-        svg.innerHTML = svgContent;
-    }
+        // --- LOOP 2: APENAS ESCRITA (CRIAÇÃO DA STRING HTML) ---
+        let svgContent = '';
+        const tick = 8; 
+        
+        spineGeometria.forEach(coord => {
+            const ctrlY = (coord.startY + coord.endY) / 2;
+            const pathD = `M ${coord.startX - tick},${coord.startY} L ${coord.startX + tick},${coord.startY} ` +
+                          `M ${coord.startX},${coord.startY} C ${coord.startX},${ctrlY} ${coord.endX},${ctrlY} ${coord.endX},${coord.endY} ` +
+                          `M ${coord.endX - tick},${coord.endY} L ${coord.endX + tick},${coord.endY}`;
+            svgContent += `<path class="spine-connection" d="${pathD}" />`;
+        });
 
+        tracejadasGeometria.forEach(coord => {
+            const ctrlX = (coord.startX + coord.endX) / 2;
+            let strokeColor = "#777", strokeOpacity = "1", strokeWidth = "1.5", dashArray = "5 4";
+            
+            if (isZenActive) {
+                if (coord.isZenFocused) {
+                    strokeColor = _activeTopicoCor; strokeWidth = "2.5"; dashArray = "none";
+                } else { strokeOpacity = "0.15"; }
+            }
+            svgContent += `<path d="M ${coord.startX},${coord.startY} C ${ctrlX},${coord.startY} ${ctrlX},${coord.endY} ${coord.endX},${coord.endY}" stroke="${strokeColor}" stroke-width="${strokeWidth}" stroke-dasharray="${dashArray}" opacity="${strokeOpacity}" fill="none" stroke-linecap="round"/>`;
+        });
+
+        svg.innerHTML = svgContent; // Reflow executado em lote, sem quebras
+    }
+        
     /**
      * Motor de Sincronia: Executa o posicionamento UMA vez, e depois 
      * aciona o loop de redesenho SVG passivo por 350ms (acompanhando CSS transition).
@@ -2138,6 +2228,192 @@ window.TopicsManager = (function () {
         if(typeof exibirToast === 'function') exibirToast('Pilha desagrupada com sucesso.', 'info');
     }
 
+    // ==========================================
+    // INÍCIO: LÓGICA DA TESOURA E CHECKPOINT (CORRIGIDO)
+    // ==========================================
+    
+    // ELEVAÇÃO DE ESCOPO: O conversor romano precisa estar acessível para o criarCard() 
+    // rodar quando um backup com volumes divididos for carregado.
+    const toRoman = (num) => {
+        const lookup = {M:1000,CM:900,D:500,CD:400,C:100,XC:90,L:50,XL:40,X:10,IX:9,V:5,IV:4,I:1};
+        let roman = '', i;
+        for (i in lookup) { while (num >= lookup[i]) { roman += i; num -= lookup[i]; } }
+        return roman;
+    };
+
+    let _debounceContagemItens = null;
+    function atualizarAlertaCapacidadeTopico(topico) {
+        clearTimeout(_debounceContagemItens);
+        _debounceContagemItens = setTimeout(() => {
+            let total = topico.anotacoes.length;
+            topico.anotacoes.forEach(an => {
+                total += (an.subAnotacoes ? an.subAnotacoes.length : 0);
+                if (an.itensCorrelacionados) {
+                    total += an.itensCorrelacionados.length;
+                    an.itensCorrelacionados.forEach(ic => total += (ic.subAnotacoes ? ic.subAnotacoes.length : 0));
+                }
+            });
+
+            const btn = document.getElementById('btn-dividir-topico');
+            if (btn) {
+                btn.classList.toggle('limite-pulse-alert', total >= 30);
+                btn.disabled = false;
+            }
+        }, 500);
+    }
+
+    function abrirJurisPrompt(mensagem, titulo, callback) {
+        console.log("🔍 [Tesoura] Tentando abrir o modal customizado...");
+        const backdrop = document.getElementById('juris-prompt-backdrop');
+        
+        if (!backdrop) {
+            console.warn("⚠️ [Tesoura] Modal não encontrado no HTML. Usando alerta nativo.");
+            callback(confirm(mensagem)); 
+            return;
+        }
+        
+        document.getElementById('juris-prompt-title-text').textContent = titulo || 'Confirmação';
+        document.getElementById('juris-prompt-message').textContent = mensagem;
+        
+        const inputEl = document.getElementById('juris-prompt-input');
+        if (inputEl) inputEl.style.display = 'none';
+
+        // ========================================================
+        // BLINDAGEM VISUAL: Forçando o CSS via JavaScript
+        // ========================================================
+        backdrop.style.position = 'fixed';
+        backdrop.style.top = '0';
+        backdrop.style.left = '0';
+        backdrop.style.width = '100vw';
+        backdrop.style.height = '100vh';
+        backdrop.style.backgroundColor = 'rgba(0, 0, 0, 0.75)';
+        backdrop.style.zIndex = '99999';
+        backdrop.style.display = 'flex';
+        backdrop.style.justifyContent = 'center';
+        backdrop.style.alignItems = 'center';
+        
+        // 👉 NOVAS LINHAS: Garantindo que o CSS não oculte via opacidade
+        backdrop.style.opacity = '1';
+        backdrop.style.visibility = 'visible';
+        backdrop.style.pointerEvents = 'auto'; 
+
+        const modalBox = document.getElementById('juris-prompt-modal');
+        if (modalBox) {
+            modalBox.style.backgroundColor = '#ffffff';
+            modalBox.style.padding = '24px';
+            modalBox.style.borderRadius = '8px';
+            modalBox.style.boxShadow = '0 10px 25px rgba(0,0,0,0.5)';
+            modalBox.style.minWidth = '320px';
+            modalBox.style.maxWidth = '90vw';
+            modalBox.style.zIndex = '100000';
+            modalBox.style.display = 'flex';
+            modalBox.style.flexDirection = 'column';
+            modalBox.style.gap = '16px';
+            
+            // 👉 NOVAS LINHAS: Resetando transformações e forçando visibilidade
+            modalBox.style.opacity = '1';
+            modalBox.style.visibility = 'visible';
+            modalBox.style.transform = 'scale(1) translateY(0)'; 
+        }
+
+        console.log("✅ [Tesoura] Modal forçado para o centro da tela com opacidade total.");
+
+        const botoes = backdrop.querySelectorAll('[data-action]');
+        const onClick = function(e) {
+        const acao = e.currentTarget.getAttribute('data-action');
+        
+        // 👉 1. Ocultação IMEDIATA (Sem setTimeout para não enganar o app-core.js)
+        backdrop.style.display = 'none';
+        backdrop.style.opacity = '0';
+        backdrop.style.visibility = 'hidden';
+        backdrop.style.pointerEvents = 'none';
+        
+        // 👉 2. Limpeza de possíveis classes de trava que o app-core possa ler
+        backdrop.classList.remove('active', 'show', 'is-visible', 'in-use');
+        
+        // 👉 3. Destravamento Global: Se o app-core usar uma variável para trancar, nós a soltamos
+        if (window.JurisPrompt) {
+            window.JurisPrompt.ativo = false;
+            window.JurisPrompt.isOpen = false;
+            window.JurisPrompt.inUse = false;
+            window.JurisPrompt.busy = false;
+        }
+        
+        botoes.forEach(b => b.removeEventListener('click', onClick));
+        console.log("🎯 [Tesoura] Usuário clicou em:", acao, " - Modal liberado.");
+        callback(acao === 'confirm');
+    };
+        
+        botoes.forEach(b => b.addEventListener('click', onClick));
+    }
+
+    // CORREÇÃO CRÍTICA AQUI: Removido o "window."
+    // A função agora é local e será encontrada pelo "return" lá embaixo.
+    function acionarDivisaoTopico() {
+        console.log("✂️ [Tesoura] O clique chegou com sucesso no JavaScript!");
+        
+        if (!activeTabId) {
+            console.warn("[Tesoura] Bloqueado: Nenhum tópico selecionado.");
+            if(window.exibirToast) window.exibirToast('Nenhum tópico selecionado.', 'aviso');
+            return;
+        }
+        
+        abrirJurisPrompt('Deseja selar este tópico e continuar em um novo Volume? O sistema inserirá as pontes de IA automaticamente.', '✂️ Divisão de Tópico', (confirmado) => {
+            if (!confirmado) {
+                console.log("[Tesoura] Cancelado pelo usuário.");
+                return;
+            }
+            
+            console.log("[Tesoura] Confirmado. Processando...");
+            const topicoAtual = topicos.find(t => t.id === activeTabId);
+            if (!topicoAtual) return;
+
+            const volAtual = topicoAtual.volumeData && topicoAtual.volumeData.sequencia ? topicoAtual.volumeData.sequencia : 1;
+            const proxVol = volAtual + 1;
+            const nomeBase = topicoAtual.nome.replace(/\s*\(Vol\. [IVXLCDM]+\)$/, '');
+            const novoNome = `${nomeBase} (Vol. ${toRoman(proxVol)})`;
+            const novoId = 'topico-' + Date.now();
+            const slugA = nomeBase.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, '-');
+            const chkId = `CHK-${slugA}-v${volAtual}`;
+
+            topicoAtual.anotacoes.push({
+                uuid: 'id-chk-out-' + Date.now(),
+                tipo: 'checkpoint_saida',
+                conteudo: `CONTINUA NO TÓPICO: "${novoNome}" | ID: ${chkId}`,
+                metaHandoff: { alvo: novoNome, slug: slugA, versao: volAtual, chkId: chkId }
+            });
+
+            const novoTopico = {
+                id: novoId,
+                nome: novoNome,
+                cor: topicoAtual.cor,
+                alegacoes: topicoAtual.alegacoes,
+                fundamentos: topicoAtual.fundamentos,
+                veredito: topicoAtual.veredito, 
+                volumeData: { sequencia: proxVol, anteriorId: topicoAtual.id, chkId: chkId },
+                diretrizesGlobais: [], 
+                anotacoes: [{
+                    uuid: 'id-chk-in-' + Date.now(),
+                    tipo: 'checkpoint_entrada',
+                    conteudo: `CONTINUAÇÃO DO TÓPICO: "${topicoAtual.nome}" | ID: ${chkId}`,
+                    metaHandoff: { origem: topicoAtual.nome, slug: slugA, versao: volAtual, chkId: chkId }
+                }]
+            };
+
+            topicos.push(novoTopico);
+            activeTabId = novoId; 
+            renderizarFichario(topicos); 
+            
+            if (typeof salvarBackupAutomatico === 'function') salvarBackupAutomatico();
+            if (typeof exibirToast === 'function') exibirToast('Novo volume criado com sucesso.', 'sucesso');
+            console.log("✅ [Tesoura] Novo volume criado e renderizado.");
+        });
+    }
+
+    // ==========================================
+    // FIM: LÓGICA DA TESOURA E CHECKPOINT
+    // ==========================================
+
     // API pública do módulo
     return {
         suprimirProximaRestauracao,
@@ -2161,18 +2437,13 @@ window.TopicsManager = (function () {
         copiarTextoModoLeitura,
         hexToRgba,
         rolarParaProximaNotaOculta,
-        // NOVAS EXPORTAÇÕES DA PILHA PROCESSUAL
         abrirModoLeituraPilhaProcessual,
         abrirModalPilhaProcessual,
         fecharModalPilhaProcessual,
         salvarPilhaProcessual,
-        desagruparPilhaProcessual
+        desagruparPilhaProcessual,
+        acionarDivisaoTopico,
+        copiarHandoff
     };
 
 })();
-
-// ================================================
-// ARQUITETURA: Views de documento (OutlineViewManager e MinutaViewManager)
-// foram extraídas para o módulo 'js/document-views.js' para respeitar o 
-// Princípio da Responsabilidade Única (SRP) e reduzir o acoplamento deste arquivo.
-// ================================================

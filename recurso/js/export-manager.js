@@ -278,6 +278,23 @@ window.ExportManager = (function () {
         let mdMatriz = `<matriz_dialetica_e_provas>\n[ATENÇÃO IA]: Esta é a sua fonte de premissas fáticas incontroversas. Nunca presuma fatos fora destes blocos.\n\n`;
 
         topico.anotacoes.forEach((an, index) => {
+            // INTERCEPTADOR DE MÓDULOS DE CONTINUIDADE (HANDOFF RAG)
+            if (an.tipo === 'checkpoint_saida') {
+                const meta = an.metaHandoff;
+                mdMatriz += `\n⛓️ PONTE DE CONTINUIDADE (SAÍDA) + COMANDO DE GERAÇÃO PARCIAL\n`;
+                mdMatriz += `→ CONTINUA NO TÓPICO: "${meta.alvo}"\n`;
+                mdMatriz += `→ COMANDO DE GERAÇÃO PARCIAL: ao redigir a minuta deste tópico, NÃO escreva conclusão, pedidos finais ou parágrafo de fecho; interrompa após a última seção do escopo e encerre com bloco "CHECKPOINT DE CONTINUIDADE" contendo [ID] CHK-${meta.slug}-v${meta.versao}, [STATUS], [JÁ REDIGIDO], [PREMISSAS FIXADAS], [PENDÊNCIAS], [PONTO DE RETOMADA], [VEDAÇÕES].\n`;
+                mdMatriz += `→ ORDEM DE LEITURA: processe este contexto integralmente e só então abra o contexto de "${meta.alvo}", tratando-o como capítulo continuado.\n\n`;
+                return;
+            } else if (an.tipo === 'checkpoint_entrada') {
+                const meta = an.metaHandoff;
+                mdMatriz += `\n⛓️ PONTE DE CONTINUIDADE (CHEGADA) + COMANDO DE RETOMADA\n`;
+                mdMatriz += `← ORIGEM: continuação direta do tópico "${meta.origem}" via minuta parcial com checkpoint CHK-${meta.slug}-v${meta.versao}.\n`;
+                mdMatriz += `← VEDAÇÃO: não re-provar nem reescrever itens de [JÁ REDIGIDO]/[PREMISSAS FIXADAS] do checkpoint; remeta-os como "conforme estabelecido no tópico recursal anterior".\n`;
+                mdMatriz += `← WORKFLOW: antes de redigir, localizar o checkpoint CHK-${meta.slug}-v${meta.versao} e aplicar o [COMANDO DE CONTINUAÇÃO DE MINUTA — HANDOFF].\n\n`;
+                return;
+            }
+
             const numIdeia    = index + 1;
             const refCitacao  = _formatarCitacaoOficial(an.pjeId, an.pagina);
             const tituloIdeia = an.tese ? an.tese : 'Tese não nomeada pelo assessor';
@@ -1086,6 +1103,24 @@ window.ExportManager = (function () {
         }
     }
 
+    function copiarChaveHandoff() {
+        const activeId = _deps.getActiveTabId();
+        const topico = _deps.getTopicos().find(t => t.id === activeId);
+        
+        if (!topico || !topico.volumeData || !topico.volumeData.chkId) {
+            _deps.exibirToast('A aba atual não é um Volume de Continuação.', 'aviso');
+            return;
+        }
+        
+        const chave = `[COMANDO DE CONTINUAÇÃO DE MINUTA — HANDOFF]\nVocê receberá, nesta ordem: (1) o checkpoint ${topico.volumeData.chkId} da minuta parcial; (2) o CONTEXTO RAG do tópico "${topico.nome}".\nPassos obrigatórios: 1. MANIFESTO: diga onde parou e escopo. AGUARDE aprovação. 2. CHECAGEM: se o ID não for ${topico.volumeData.chkId}, PARE. 3. CONTINUAÇÃO: redija SOMENTE o trecho continuado, sem reescrever o já redigido.`;
+        
+        navigator.clipboard.writeText(chave).then(() => {
+            _deps.exibirToast('Chave de Handoff copiada! Cole na IA antes do Export.', 'sucesso');
+        }).catch(err => {
+            _deps.exibirToast('Erro ao copiar a Chave.', 'erro');
+        });
+    }
+
     return { 
         init, 
         exportarTopicoAtivo, 
@@ -1099,7 +1134,8 @@ window.ExportManager = (function () {
         salvarFiltro,
         limparFiltro,
         aplicarFiltrosAvancados,
-        gerarPromptMestre
+        gerarPromptMestre,
+        copiarChaveHandoff
     };
 
 })();

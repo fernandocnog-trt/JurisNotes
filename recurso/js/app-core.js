@@ -835,6 +835,11 @@ function trocarAba(aba) {
     const isAnotacoes = (aba === 'historico' && topicos.length > 0);
     const isLeitura   = (aba === 'leitura');
     
+    const btnTesoura = document.getElementById('btn-dividir-topico');
+    if (btnTesoura) {
+        btnTesoura.disabled = !isAnotacoes;
+    }
+    
     const btnExportar = document.getElementById('btn-exportar-topico');
     if (btnExportar) btnExportar.style.display = isAnotacoes ? 'flex' : 'none';
 
