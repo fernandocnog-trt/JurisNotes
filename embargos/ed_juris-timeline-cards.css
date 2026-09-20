@@ -1543,3 +1543,127 @@ body[data-context="ed"] .topics-content-area {
     margin-bottom: 6px;
     text-transform: uppercase;
 }
+
+/* ================================================
+   12. CLASSES DE CHECKPOINT E TESOURA IA (REDESIGN ED)
+   ================================================ */
+#btn-dividir-topico.limite-pulse-alert {
+    background-color: #d32f2f;
+    border-color: #b71c1c;
+    color: white;
+}
+@keyframes urgent-task-pulse {
+    0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(211, 47, 47, 0.7); }
+    70% { transform: scale(1.08); box-shadow: 0 0 0 8px rgba(211, 47, 47, 0); }
+    100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(211, 47, 47, 0); }
+}
+@media (prefers-reduced-motion: no-preference) {
+    #btn-dividir-topico.limite-pulse-alert {
+        animation: urgent-task-pulse 1.5s ease-in-out infinite;
+    }
+}
+
+/* Novo Layout Minimalista do Checkpoint */
+.sub-annotation-card.borda-checkpoint-minimalista {
+    border: none;
+    border-top: 4px solid var(--trt-blue-mid);
+    background: linear-gradient(180deg, #f8fafc 0%, #ffffff 100%);
+    text-align: center;
+    padding: 24px 32px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.04);
+    border-radius: 12px;
+}
+
+.checkpoint-title {
+    font-size: 1.15rem; 
+    font-weight: 800; 
+    color: var(--trt-blue); 
+    text-transform: uppercase; 
+    letter-spacing: 2px;
+    margin: 0 0 16px 0;
+}
+
+.checkpoint-hint-box {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    padding-top: 16px;
+    border-top: 1px dashed #cbd5e1;
+}
+
+.checkpoint-hint-text {
+    font-size: 0.8rem;
+    color: #64748b;
+}
+
+.checkpoint-hint-text strong {
+    color: var(--trt-blue-mid);
+}
+
+.btn-copy-chave-quick {
+    background: #fffdf2;
+    border: 1px solid #ffe082;
+    color: #e65100;
+    padding: 6px 18px;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.btn-copy-chave-quick:hover {
+    background: #fff8e1;
+    transform: scale(1.05);
+    box-shadow: 0 2px 6px rgba(230, 81, 0, 0.1);
+}
+
+.btn-copy-chave-quick:active {
+    transform: scale(0.95);
+}
+
+/* ================================================
+   13. CHECKPOINT & TESOURA IA (UX HUMANIZADA)
+   ================================================ */
+.checkpoint-card--saida {
+    border-top-color: #2e7d32;
+}
+
+.checkpoint-card--entrada {
+    border-top-color: #f57c00;
+    background: #fffcf4;
+}
+
+.checkpoint-badge-link {
+    display: inline-flex;
+    align-items: center;
+    background: #e8f5e9;
+    color: #2e7d32;
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: bold;
+    margin-bottom: 12px;
+    border: 1px solid #c8e6c9;
+}
+
+.checkpoint-instructions {
+    text-align: left;
+    font-size: 0.85rem;
+    color: #475569;
+    padding: 12px;
+    background: #ffffff;
+    border-radius: 8px;
+    border: 1px dashed #cbd5e1;
+}
+
+.checkpoint-instructions p {
+    margin-bottom: 8px;
+}
+.checkpoint-instructions p:last-child {
+    margin-bottom: 0;
+}
