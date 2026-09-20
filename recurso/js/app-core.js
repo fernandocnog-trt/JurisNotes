@@ -2410,3 +2410,37 @@ window.TaskManager = (function() {
 
     return { abrirModal, fecharModal, adicionarTarefa, toggleConcluido, atualizarBadge, abrirSeletorTemas, getTarefasState, setTarefasState, sinalizarTarefasPendentes };
 })();
+
+/* ================================================
+   PATCH: INTERCEPTOR DO GERADOR DE CONTEXTO
+   (Acoplamento seguro via Monkey Patch para evitar alteração em export-manager.js)
+   ================================================ */
+document.addEventListener("DOMContentLoaded", () => {
+    if (typeof window.abrirModalGeradorContexto === 'function') {
+        const originalAbrirModalGeradorContexto = window.abrirModalGeradorContexto;
+        
+        window.abrirModalGeradorContexto = function() {
+            // Executa a função original primeiro (popula dados, exibe modal)
+            originalAbrirModalGeradorContexto.apply(this, arguments);
+
+            // Injeta a lógica de UX do Selo de Continuidade
+            if (typeof TopicsManager !== 'undefined') {
+                const activeTabId = TopicsManager.getActiveTabId();
+                const topico = topicos.find(t => t.id === activeTabId);
+                const banner = document.getElementById('banner-continuacao-ia');
+                const spanVol = document.getElementById('span-vol-atual');
+
+                if (banner && spanVol) {
+                    banner.classList.remove('is-active'); 
+                    if (topico && topico.volumeData && topico.volumeData.sequencia > 1) {
+                        spanVol.textContent = TopicsManager.toRoman(topico.volumeData.sequencia);
+                        
+                        requestAnimationFrame(() => {
+                            banner.classList.add('is-active');
+                        });
+                    }
+                }
+            }
+        };
+    }
+});

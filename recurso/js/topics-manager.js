@@ -662,93 +662,42 @@ window.TopicsManager = (function () {
 
     // Função estática gerarSVGConector removida (substituída pelo motor dinâmico desenharConexoes)
 
-    /**
-     * Motor Robusto de Handoff para IA
-     * Arquitetura Síncrona/Assíncrona bifurcada para preservar Transient Activation
-     */
-    async function copiarHandoff(btnContext) {
-        // Extração segura via Dataset (Blindado contra XSS)
-        const chkId = btnContext.dataset.chkId || 'ID_DESCONHECIDO';
-        const alvo = btnContext.dataset.alvo || 'Tópico de Destino';
-
-        // Prompt Engineering Avançado (Delimitadores e System Roles Estritos)
-        const promptHandoff = `<CONTEXTO_HANDOFF>\n[COMANDO DE CONTINUAÇÃO DE MINUTA — VOLUME 2]\nVocê receberá, nesta ordem:\n1. O checkpoint de estado atual: [ID] ${chkId}\n2. O Contexto RAG completo do tópico continuado: "${alvo}".\n\n<REGRAS_ESTRITAS>\n- MANIFESTO INICIAL: Declare obrigatoriamente onde você parou no último volume e qual o escopo deste novo volume. AGUARDE APROVAÇÃO se instruído.\n- TRAVA DE SEGURANÇA: Se o Checkpoint ID recebido não for EXATAMENTE ${chkId}, INTERROMPA A GERAÇÃO E ALERTE O ASSESSOR.\n- ESCOPO LIMITADO: Redija EXCLUSIVAMENTE o trecho continuado. É EXPRESSAMENTE PROIBIDO reescrever, revisar ou resumir fatos já decididos no volume anterior.\n</REGRAS_ESTRITAS>\n</CONTEXTO_HANDOFF>`;
-
-        try {
-            // Bifurcação Estratégica: Verifica segurança ANTES de qualquer await
-            if (navigator.clipboard && window.isSecureContext) {
-                // Modo Assíncrono Moderno (Requer HTTPS)
-                await navigator.clipboard.writeText(promptHandoff);
-            } else {
-                // Modo Síncrono Legado (Preserva Gesto do Usuário em HTTP)
-                const textArea = document.createElement("textarea");
-                textArea.value = promptHandoff;
-                textArea.style.position = "fixed";
-                textArea.style.left = "-999999px";
-                document.body.appendChild(textArea);
-                textArea.focus();
-                textArea.select();
-                
-                const copiou = document.execCommand('copy');
-                textArea.remove();
-                
-                if (!copiou) throw new Error("Fallback de clipboard rejeitado pelo navegador.");
-            }
-
-            // Feedback de Sucesso (UX)
-            const originalHtml = btnContext.innerHTML;
-            btnContext.innerHTML = '✅ Instrução Copiada!';
-            btnContext.style.backgroundColor = '#e8f5e9';
-            btnContext.style.color = '#2e7d32';
-            btnContext.style.borderColor = '#a5d6a7';
-            
-            if (window.exibirToast) window.exibirToast('Instrução copiada! Cole no ChatJT / LLM.', 'sucesso');
-            
-            setTimeout(() => {
-                btnContext.innerHTML = originalHtml;
-                btnContext.style.backgroundColor = '';
-                btnContext.style.color = '';
-                btnContext.style.borderColor = '';
-            }, 2500);
-
-        } catch (err) {
-            console.error("[TopicsManager] Erro no Handoff de Clipboard:", err);
-            if (window.exibirToast) window.exibirToast('Erro de permissão na Área de Transferência.', 'erro');
-        }
-    }
-
-    // Componente isolado (Clean Code)
+    // Componente isolado (Clean Code) - Automação de Handoff (Nível 3)
     function _gerarHtmlCheckpoint(anotacao, index) {
         const isSaida = anotacao.tipo === 'checkpoint_saida';
         const volumeNum = isSaida ? anotacao.metaHandoff.versao : (anotacao.metaHandoff.versao + 1);
         const romano = toRoman(volumeNum);
-        const titulo = `Volume ${romano}`;
-        
-        // Dados brutos sem risco de quebra de JS, pois irão para atributos data-*
         const chkId = escaparHTML(anotacao.metaHandoff.chkId || '');
-        const alvo = escaparHTML(anotacao.metaHandoff.alvo || anotacao.metaHandoff.origem || '');
 
+        // ATRIBUTO DE DADOS: Mantém o payload para leitura sistêmica, limpo do DOM visual
+        const payloadSafe = escaparHTML(anotacao.conteudo);
+
+        if (isSaida) {
+            return `
+            <div class="timeline-item-master align-left" id="timeline-wrapper-${anotacao.uuid || index}" data-chk-payload="${payloadSafe}" style="justify-content: center; margin-bottom: 24px;">
+                <div class="sub-annotation-card borda-checkpoint-minimalista checkpoint-card--saida" style="width: 80%; max-width: 600px; margin: 0 auto;">
+                    <h3 class="checkpoint-title" style="color: #2e7d32;">Fim do Volume</h3>
+                    <aside class="checkpoint-hint-box" aria-label="Lembrete de transição">
+                        <small class="checkpoint-hint-text">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="#2e7d32" stroke-width="2" style="width:14px; height:14px; margin-right:4px; vertical-align:text-bottom;"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+                            <strong style="color: #2e7d32;">Volume Fechado:</strong> A continuação deste assunto foi transferida para a nova aba criada acima.
+                        </small>
+                    </aside>
+                </div>
+            </div>`;
+        }
+
+        // Layout de Entrada (Volume 2+)
         return `
-        <div class="timeline-item-master align-left" id="timeline-wrapper-${anotacao.uuid || index}" style="justify-content: center; margin-bottom: 24px;">
-            <div class="sub-annotation-card borda-checkpoint-minimalista" style="width: 80%; max-width: 600px; margin: 0 auto;">
-                <h3 class="checkpoint-title">${titulo}</h3>
+        <div class="timeline-item-master align-left" id="timeline-wrapper-${anotacao.uuid || index}" data-chk-payload="${payloadSafe}" style="justify-content: center; margin-bottom: 24px;">
+            <div class="sub-annotation-card borda-checkpoint-minimalista checkpoint-card--entrada" style="width: 80%; max-width: 600px; margin: 0 auto;">
+                <div class="checkpoint-badge-link">🔗 Vinculado ao Volume Anterior</div>
+                <h3 class="checkpoint-title" style="color: #f57c00; font-size: 1rem;">Volume ${romano}: Como prosseguir?</h3>
                 
-                <aside class="checkpoint-hint-box" aria-label="Lembrete de transição de IA">
-                    <small class="checkpoint-hint-text">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px; height:14px; margin-right:4px; vertical-align:text-bottom;"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
-                        A <strong>Instrução de Continuidade</strong> orienta a IA no próximo passo.
-                    </small>
-                    <!-- REVISÃO ARQUITETURAL: Uso de dataset, delegação segura e chamada modular -->
-                    <button class="btn-copy-chave-quick" 
-                            data-chk-id="${chkId}"
-                            data-alvo="${alvo}"
-                            onclick="TopicsManager.copiarHandoff(this); event.stopPropagation();" 
-                            aria-label="Copiar instrução de continuidade para a IA">
-                        🔑 Copiar Instrução P/ IA
-                    </button>
-                </aside>
-
-                <p style="display: none;" aria-hidden="true">${escaparHTML(anotacao.conteudo)}</p>
+                <div class="checkpoint-instructions">
+                    <p><strong>Passo 1:</strong> Continue analisando os autos e marcando as novas provas normalmente aqui nesta tela.</p>
+                    <p><strong>Passo 2:</strong> Ao terminar as marcações, abra o Gerador de Contexto. A ordem para a IA continuar de onde parou será enviada automaticamente.</p>
+                </div>
             </div>
         </div>`;
     }
@@ -2256,8 +2205,15 @@ window.TopicsManager = (function () {
 
             const btn = document.getElementById('btn-dividir-topico');
             if (btn) {
-                btn.classList.toggle('limite-pulse-alert', total >= 30);
+                const limiteAtingido = total >= 30;
+                btn.classList.toggle('limite-pulse-alert', limiteAtingido);
                 btn.disabled = false;
+                
+                if (limiteAtingido) {
+                    btn.title = '⚠️ Este tópico está muito longo! Clique para dividir em um novo volume e evitar que a IA se perca ou esqueça do contexto.';
+                } else {
+                    btn.title = 'Dividir Tópico em Volumes (Checkpoint IA)';
+                }
             }
         }, 500);
     }
@@ -2442,8 +2398,8 @@ window.TopicsManager = (function () {
         fecharModalPilhaProcessual,
         salvarPilhaProcessual,
         desagruparPilhaProcessual,
-        acionarDivisaoTopico,
-        copiarHandoff
+        toRoman,
+        acionarDivisaoTopico
     };
 
 })();
