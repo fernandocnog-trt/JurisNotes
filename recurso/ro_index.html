@@ -175,6 +175,15 @@
                     </svg>
                 </button>
 
+                <button class="icon-btn" id="btn-dividir-topico" onclick="TopicsManager.acionarDivisaoTopico()" title="Dividir Tópico em Volumes (Checkpoint IA)" disabled>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="6" cy="6" r="3"></circle><circle cx="6" cy="18" r="3"></circle>
+                        <line x1="20" y1="4" x2="8.12" y2="15.88"></line>
+                        <line x1="14.47" y1="14.48" x2="20" y2="20"></line>
+                        <line x1="8.12" y1="8.12" x2="12" y2="12"></line>
+                    </svg>
+                </button>
+
                 <!-- NOVO BOTÃO: Visão Estruturada (Nasce desabilitado) -->
                 <button class="icon-btn" id="btn-visao-estruturada" onclick="OutlineViewManager.abrir()" title="Visão Estruturada (Documento)" disabled>
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -813,6 +822,7 @@
             </div>
         </div>
         
+        <button class="doc-btn" style="border:none; text-align:left; margin-top: 4px; margin-bottom: 4px;" onclick="ExportManager.copiarChaveHandoff()">🔑 Copiar Chave de Continuidade (IA)</button>
         <hr style="border: 0; border-top: 1px solid #eee; margin: 4px 0;">
         <button class="doc-btn neutro" style="border:none; text-align:left;" onclick="abrirModalAjuda()">📖 Guia da IA</button>
     </div>
