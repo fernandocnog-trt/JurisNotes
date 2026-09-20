@@ -236,6 +236,23 @@ window.ExportManager = (function () {
 
             // 3. ITERAÇÃO PROFUNDA COM ENVELOPAMENTO XML
             topico.anotacoes.forEach((an, idx) => {
+                // INTERCEPTADOR DE MÓDULOS DE CONTINUIDADE (HANDOFF RAG)
+                if (an.tipo === 'checkpoint_saida') {
+                    const meta = an.metaHandoff;
+                    md += `\n⛓️ PONTE DE CONTINUIDADE (SAÍDA) + COMANDO DE GERAÇÃO PARCIAL\n`;
+                    md += `→ CONTINUA NO TÓPICO: "${meta.alvo}"\n`;
+                    md += `→ COMANDO DE GERAÇÃO PARCIAL: ao auditar este vício, NÃO escreva conclusão, pedidos finais ou parágrafo de fecho; interrompa após a última seção e encerre com bloco "CHECKPOINT DE CONTINUIDADE" contendo [ID] CHK-${meta.slug}-v${meta.versao}, [STATUS], [JÁ REDIGIDO], [PREMISSAS FIXADAS], [PENDÊNCIAS].\n`;
+                    md += `→ ORDEM DE LEITURA: processe este contexto integralmente e só então abra o contexto de "${meta.alvo}", tratando-o como capítulo continuado.\n\n`;
+                    return;
+                } else if (an.tipo === 'checkpoint_entrada') {
+                    const meta = an.metaHandoff;
+                    md += `\n⛓️ PONTE DE CONTINUIDADE (CHEGADA) + COMANDO DE RETOMADA\n`;
+                    md += `← ORIGEM: continuação direta da auditoria "${meta.origem}" via checkpoint CHK-${meta.slug}-v${meta.versao}.\n`;
+                    md += `← VEDAÇÃO: não re-provar nem reescrever itens de [JÁ REDIGIDO] do checkpoint; remeta-os como "conforme estabelecido na etapa anterior".\n`;
+                    md += `← WORKFLOW: antes de redigir, localizar o checkpoint CHK-${meta.slug}-v${meta.versao} e aplicar o [COMANDO DE CONTINUAÇÃO DE MINUTA — HANDOFF].\n\n`;
+                    return;
+                }
+
                 const teseAtual = an.tese && an.tese.trim() !== '' ? an.tese.trim() : 'Argumentação Geral';
                 const vicioAtual = an.vicio || topico.vicio || 'Nao Especificado';
 
@@ -909,7 +926,24 @@ window.ExportManager = (function () {
         fecharModalFiltro,
         validarTamanhoFiltro,
         salvarFiltro,
-        limparFiltro
+        limparFiltro,
+        copiarChaveHandoff: function() {
+            const activeId = _deps.getActiveTabId();
+            const topico = _deps.getTopicos().find(t => t.id === activeId);
+            
+            if (!topico || !topico.volumeData || !topico.volumeData.chkId) {
+                _deps.exibirToast('A aba atual não é um Volume de Continuação.', 'aviso');
+                return;
+            }
+            
+            const chave = `[COMANDO DE CONTINUAÇÃO DE MINUTA — HANDOFF]\nVocê receberá, nesta ordem: (1) o checkpoint ${topico.volumeData.chkId} da auditoria parcial; (2) o CONTEXTO RAG do tópico "${topico.nome}".\nPassos obrigatórios: 1. MANIFESTO: diga onde parou e escopo. AGUARDE aprovação. 2. CHECAGEM: se o ID não for ${topico.volumeData.chkId}, PARE. 3. CONTINUAÇÃO: redija SOMENTE o trecho continuado, sem reescrever o já redigido.`;
+            
+            navigator.clipboard.writeText(chave).then(() => {
+                _deps.exibirToast('Chave de Handoff copiada! Cole na IA antes do Export.', 'sucesso');
+            }).catch(err => {
+                _deps.exibirToast('Erro ao copiar a Chave.', 'erro');
+            });
+        }
     };
 
 })();

@@ -623,6 +623,46 @@ window.TopicsManager = (function () {
             </div>`;
     }
 
+    // Componente isolado (Clean Code) - Automação de Handoff (Nível 3)
+    function _gerarHtmlCheckpoint(anotacao, index) {
+        const isSaida = anotacao.tipo === 'checkpoint_saida';
+        const volumeNum = isSaida ? anotacao.metaHandoff.versao : (anotacao.metaHandoff.versao + 1);
+        const romano = toRoman(volumeNum);
+        const chkId = escaparHTML(anotacao.metaHandoff.chkId || '');
+
+        // ATRIBUTO DE DADOS: Mantém o payload para leitura sistêmica, limpo do DOM visual
+        const payloadSafe = escaparHTML(anotacao.conteudo);
+
+        if (isSaida) {
+            return `
+            <div class="timeline-item-master align-left" id="timeline-wrapper-${anotacao.uuid || index}" data-chk-payload="${payloadSafe}" style="justify-content: center; margin-bottom: 24px;">
+                <div class="sub-annotation-card borda-checkpoint-minimalista checkpoint-card--saida" style="width: 80%; max-width: 600px; margin: 0 auto;">
+                    <h3 class="checkpoint-title" style="color: #2e7d32;">Fim do Volume</h3>
+                    <aside class="checkpoint-hint-box" aria-label="Lembrete de transição">
+                        <small class="checkpoint-hint-text">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="#2e7d32" stroke-width="2" style="width:14px; height:14px; margin-right:4px; vertical-align:text-bottom;"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+                            <strong style="color: #2e7d32;">Volume Fechado:</strong> A continuação deste assunto foi transferida para a nova aba criada acima.
+                        </small>
+                    </aside>
+                </div>
+            </div>`;
+        }
+
+        // Layout de Entrada (Volume 2+)
+        return `
+        <div class="timeline-item-master align-left" id="timeline-wrapper-${anotacao.uuid || index}" data-chk-payload="${payloadSafe}" style="justify-content: center; margin-bottom: 24px;">
+            <div class="sub-annotation-card borda-checkpoint-minimalista checkpoint-card--entrada" style="width: 80%; max-width: 600px; margin: 0 auto;">
+                <div class="checkpoint-badge-link">🔗 Vinculado ao Volume Anterior</div>
+                <h3 class="checkpoint-title" style="color: #f57c00; font-size: 1rem;">Volume ${romano}: Como prosseguir?</h3>
+                
+                <div class="checkpoint-instructions">
+                    <p><strong>Passo 1:</strong> Continue analisando os autos e marcando as novas provas normalmente aqui nesta tela.</p>
+                    <p><strong>Passo 2:</strong> Ao terminar as marcações, abra o Gerador de Contexto. A ordem para a IA continuar de onde parou será enviada automaticamente.</p>
+                </div>
+            </div>
+        </div>`;
+    }
+
     /**
      * Fábrica de cards no formato de fluxograma alternado.
      * Retorna: card + bloco de sub-anotações (se houver) + conector SVG.
@@ -630,6 +670,11 @@ window.TopicsManager = (function () {
      * garantindo que align-self funcione corretamente nas sub-anotações.
      */
     function criarCard(anotacao, index, arr, renderContext) {
+        // INTERCEPTAÇÃO ESTRUTURAL: Renderiza o Checkpoint modularizado
+        if (anotacao.tipo && anotacao.tipo.startsWith('checkpoint')) {
+            return _gerarHtmlCheckpoint(anotacao, index);
+        }
+
         const total    = arr.length;
         const numero   = index + 1;
         const tagClass = poloParaClasse(anotacao.polo);
@@ -1460,6 +1505,7 @@ window.TopicsManager = (function () {
         });
         
         _sincronizarBtnGlobais(temGlobais, forcadoAberto);
+        atualizarAlertaCapacidadeTopico(topicoAtivo);
     }
 
     /**
@@ -1526,13 +1572,12 @@ window.TopicsManager = (function () {
         if (!container || !svg) return;
 
         const containerRect = container.getBoundingClientRect();
-        let svgContent = '';
+        
+        // --- LOOP 1: APENAS LEITURA (MEMÓRIA GEOMÉTRICA) ---
+        const spineGeometria = [];
+        const tracejadasGeometria = [];
 
-        // 1. LINHA VERMELHA (ESPINHA DORSAL): Conecta Grupo a Grupo (incluindo Vícios)
-        // CORREÇÃO TOPOLÓGICA: Exclui a diretriz global (.nivel-global) 
-        // para que a linha ancore corretamente nos cards de Vício Alegado.
         const masterItemsForSpine = Array.from(container.querySelectorAll('.timeline-item-master:not(.nivel-global)'));
-
         for (let i = 0; i < masterItemsForSpine.length - 1; i++) {
             const currentGroup = masterItemsForSpine[i];
             const nextGroup = masterItemsForSpine[i + 1];
@@ -1546,25 +1591,12 @@ window.TopicsManager = (function () {
             const rectAtual = cardAtual.getBoundingClientRect();
             const rectProx = cardProx.getBoundingClientRect();
 
-            const startX = (rectAtual.left + rectAtual.width / 2) - containerRect.left;
-            const startY = rectAtual.bottom - containerRect.top;
-            const endX = (rectProx.left + rectProx.width / 2) - containerRect.left;
-            const endY = rectProx.top - containerRect.top;
-            const ctrlY = (startY + endY) / 2;
-
-            // Constante geométrica para a haste horizontal nas pontas (8px para cada lado)
-            const tick = 8; 
-
-            // Montagem consolidada do Path:
-            // 1. Haste Superior (Move, Line)
-            // 2. Curva Sinuosa (Move, Curve)
-            // 3. Haste Inferior (Move, Line)
-            const pathD = `M ${startX - tick},${startY} L ${startX + tick},${startY} ` +
-                          `M ${startX},${startY} C ${startX},${ctrlY} ${endX},${ctrlY} ${endX},${endY} ` +
-                          `M ${endX - tick},${endY} L ${endX + tick},${endY}`;
-
-            // Injeção puramente geométrica e semântica
-            svgContent += `<path class="spine-connection" d="${pathD}" />`;
+            spineGeometria.push({
+                startX: (rectAtual.left + rectAtual.width / 2) - containerRect.left,
+                startY: rectAtual.bottom - containerRect.top,
+                endX: (rectProx.left + rectProx.width / 2) - containerRect.left,
+                endY: rectProx.top - containerRect.top
+            });
         }
 
         const masterItems = container.querySelectorAll('.timeline-item-master');
@@ -1587,29 +1619,38 @@ window.TopicsManager = (function () {
                 }
                 const sourceRect = sourceCard.getBoundingClientRect();
 
-                const startX = isRightAligned ? sourceRect.left - containerRect.left : sourceRect.right - containerRect.left;
-                const endX = isRightAligned ? subRect.right - containerRect.left : subRect.left - containerRect.left;
-                const startY = (sourceRect.top + sourceRect.height / 2) - containerRect.top;
-                const endY   = (subRect.top + subRect.height / 2) - containerRect.top;
-                const ctrlX  = (startX + endX) / 2;
-
-                let strokeColor = "#777";
-                let strokeOpacity = "1";
-                let strokeWidth = "1.5";
-                let dashArray = "5 4";
-
-                if (isZenActive) {
-                    if (subItem.classList.contains('is-zen-focused')) {
-                        strokeColor = _activeTopicoCor;
-                        strokeWidth = "2.5";
-                        dashArray = "none";
-                    } else {
-                        strokeOpacity = "0.15";
-                    }
-                }
-
-                svgContent += `<path d="M ${startX},${startY} C ${ctrlX},${startY} ${ctrlX},${endY} ${endX},${endY}" stroke="${strokeColor}" stroke-width="${strokeWidth}" stroke-dasharray="${dashArray}" opacity="${strokeOpacity}" fill="none" stroke-linecap="round"/>`;
+                tracejadasGeometria.push({
+                    startX: isRightAligned ? sourceRect.left - containerRect.left : sourceRect.right - containerRect.left,
+                    endX: isRightAligned ? subRect.right - containerRect.left : subRect.left - containerRect.left,
+                    startY: (sourceRect.top + sourceRect.height / 2) - containerRect.top,
+                    endY: (subRect.top + subRect.height / 2) - containerRect.top,
+                    isZenFocused: subItem.classList.contains('is-zen-focused')
+                });
             });
+        });
+
+        // --- LOOP 2: APENAS ESCRITA (CRIAÇÃO DA STRING HTML) ---
+        let svgContent = '';
+        const tick = 8;
+
+        spineGeometria.forEach(coord => {
+            const ctrlY = (coord.startY + coord.endY) / 2;
+            const pathD = `M ${coord.startX - tick},${coord.startY} L ${coord.startX + tick},${coord.startY} ` +
+                          `M ${coord.startX},${coord.startY} C ${coord.startX},${ctrlY} ${coord.endX},${ctrlY} ${coord.endX},${coord.endY} ` +
+                          `M ${coord.endX - tick},${coord.endY} L ${coord.endX + tick},${coord.endY}`;
+            svgContent += `<path class="spine-connection" d="${pathD}" />`;
+        });
+
+        tracejadasGeometria.forEach(coord => {
+            const ctrlX = (coord.startX + coord.endX) / 2;
+            let strokeColor = "#777", strokeOpacity = "1", strokeWidth = "1.5", dashArray = "5 4";
+
+            if (isZenActive) {
+                if (coord.isZenFocused) {
+                    strokeColor = _activeTopicoCor; strokeWidth = "2.5"; dashArray = "none";
+                } else { strokeOpacity = "0.15"; }
+            }
+            svgContent += `<path d="M ${coord.startX},${coord.startY} C ${ctrlX},${coord.startY} ${ctrlX},${coord.endY} ${coord.endX},${coord.endY}" stroke="${strokeColor}" stroke-width="${strokeWidth}" stroke-dasharray="${dashArray}" opacity="${strokeOpacity}" fill="none" stroke-linecap="round"/>`;
         });
 
         svg.innerHTML = svgContent;
@@ -2024,6 +2065,140 @@ window.TopicsManager = (function () {
         if(typeof exibirToast === 'function') exibirToast('Pilha desagrupada com sucesso.', 'info');
     }
 
+    // ==========================================
+    // INÍCIO: LÓGICA DA TESOURA E CHECKPOINT (ED)
+    // ==========================================
+    
+    const toRoman = (num) => {
+        const lookup = {M:1000,CM:900,D:500,CD:400,C:100,XC:90,L:50,XL:40,X:10,IX:9,V:5,IV:4,I:1};
+        let roman = '', i;
+        for (i in lookup) { while (num >= lookup[i]) { roman += i; num -= lookup[i]; } }
+        return roman;
+    };
+
+    let _debounceContagemItens = null;
+    function atualizarAlertaCapacidadeTopico(topico) {
+        clearTimeout(_debounceContagemItens);
+        _debounceContagemItens = setTimeout(() => {
+            let total = topico.anotacoes.length;
+            topico.anotacoes.forEach(an => {
+                total += (an.subAnotacoes ? an.subAnotacoes.length : 0);
+                if (an.itensCorrelacionados) {
+                    total += an.itensCorrelacionados.length;
+                    an.itensCorrelacionados.forEach(ic => total += (ic.subAnotacoes ? ic.subAnotacoes.length : 0));
+                }
+            });
+
+            const btn = document.getElementById('btn-dividir-topico');
+            if (btn) {
+                const limiteAtingido = total >= 30;
+                btn.classList.toggle('limite-pulse-alert', limiteAtingido);
+                btn.disabled = false;
+                
+                if (limiteAtingido) {
+                    btn.title = '⚠️ Este tópico está muito longo! Clique para dividir em um novo volume e evitar que a IA se perca ou esqueça do contexto.';
+                } else {
+                    btn.title = 'Dividir Vício em Volumes (Checkpoint IA)';
+                }
+            }
+        }, 500);
+    }
+
+    function abrirJurisPrompt(mensagem, titulo, callback) {
+        const backdrop = document.getElementById('juris-prompt-backdrop');
+        if (!backdrop) {
+            callback(confirm(mensagem)); 
+            return;
+        }
+        document.getElementById('juris-prompt-title-text').textContent = titulo || 'Confirmação';
+        document.getElementById('juris-prompt-message').textContent = mensagem;
+        
+        const inputEl = document.getElementById('juris-prompt-input');
+        if (inputEl) {
+            inputEl.style.display = 'none'; // Esconde para agir como 'Confirm' puro
+            inputEl.value = ''; // Limpa resquícios
+        }
+
+        // CORREÇÃO 1: Usa a classe CSS nativa da aplicação em vez de display flex inline
+        backdrop.classList.add('is-active');
+
+        const botoes = backdrop.querySelectorAll('[data-action]');
+        
+        const onClick = function(e) {
+            const acao = e.currentTarget.getAttribute('data-action');
+            
+            // CORREÇÃO 2: Remove a classe ativadora
+            backdrop.classList.remove('is-active');
+            
+            // CORREÇÃO 3: Restaura o Input para não quebrar outros modais (ex: Renomear Aba)
+            if (inputEl) inputEl.style.display = '';
+
+            botoes.forEach(b => b.removeEventListener('click', onClick));
+            callback(acao === 'confirm');
+        };
+        
+        botoes.forEach(b => b.addEventListener('click', onClick));
+    }
+
+    function acionarDivisaoTopico() {
+        if (!activeTabId) {
+            if(window.exibirToast) window.exibirToast('Nenhum tópico selecionado.', 'aviso');
+            return;
+        }
+        
+        abrirJurisPrompt('Deseja selar a análise deste vício e continuar em um novo Volume? O sistema inserirá as pontes de IA automaticamente.', '✂️ Divisão de Volume', (confirmado) => {
+            if (!confirmado) return;
+            
+            const topicoAtual = topicos.find(t => t.id === activeTabId);
+            if (!topicoAtual) return;
+
+            const volAtual = topicoAtual.volumeData && topicoAtual.volumeData.sequencia ? topicoAtual.volumeData.sequencia : 1;
+            const proxVol = volAtual + 1;
+            const nomeBase = topicoAtual.nome.replace(/\s*\(Vol\. [IVXLCDM]+\)$/, '');
+            const novoNome = `${nomeBase} (Vol. ${toRoman(proxVol)})`;
+            const novoId = 'topico-' + Date.now();
+            const slugA = nomeBase.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, '-');
+            const chkId = `CHK-${slugA}-v${volAtual}`;
+
+            topicoAtual.anotacoes.push({
+                uuid: 'id-chk-out-' + Date.now(),
+                tipo: 'checkpoint_saida',
+                conteudo: `CONTINUA NO TÓPICO: "${novoNome}" | ID: ${chkId}`,
+                metaHandoff: { alvo: novoNome, slug: slugA, versao: volAtual, chkId: chkId }
+            });
+
+            // HERANÇA ESPECÍFICA DO ED: Herda também o vício e as diretrizesPorVicio
+            const novoTopico = {
+                id: novoId,
+                nome: novoNome,
+                cor: topicoAtual.cor,
+                alegacoes: topicoAtual.alegacoes,
+                fundamentos: topicoAtual.fundamentos,
+                veredito: topicoAtual.veredito, 
+                vicio: topicoAtual.vicio,
+                diretrizesPorVicio: topicoAtual.diretrizesPorVicio ? JSON.parse(JSON.stringify(topicoAtual.diretrizesPorVicio)) : {},
+                volumeData: { sequencia: proxVol, anteriorId: topicoAtual.id, chkId: chkId },
+                diretrizesGlobais: [], 
+                anotacoes: [{
+                    uuid: 'id-chk-in-' + Date.now(),
+                    tipo: 'checkpoint_entrada',
+                    conteudo: `CONTINUAÇÃO DO TÓPICO: "${topicoAtual.nome}" | ID: ${chkId}`,
+                    metaHandoff: { origem: topicoAtual.nome, slug: slugA, versao: volAtual, chkId: chkId }
+                }]
+            };
+
+            topicos.push(novoTopico);
+            activeTabId = novoId; 
+            renderizarFichario(topicos); 
+            if (typeof salvarBackupAutomatico === 'function') salvarBackupAutomatico();
+            if (typeof exibirToast === 'function') exibirToast('Novo volume criado com sucesso.', 'sucesso');
+        });
+    }
+
+    // ==========================================
+    // FIM: LÓGICA DA TESOURA E CHECKPOINT
+    // ==========================================
+
     // API pública do módulo
     return {
         suprimirProximaRestauracao,
@@ -2046,12 +2221,13 @@ window.TopicsManager = (function () {
         copiarTextoModoLeitura,
         hexToRgba,
         rolarParaProximaNotaOculta,
-        // NOVAS EXPORTAÇÕES DA PILHA PROCESSUAL
         abrirModoLeituraPilhaProcessual,
         abrirModalPilhaProcessual,
         fecharModalPilhaProcessual,
         salvarPilhaProcessual,
-        desagruparPilhaProcessual
+        desagruparPilhaProcessual,
+        toRoman,
+        acionarDivisaoTopico
     };
 
 })();

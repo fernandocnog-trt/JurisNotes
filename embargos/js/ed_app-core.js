@@ -847,6 +847,11 @@ function trocarAba(aba) {
     const isAnotacoes = (aba === 'historico' && topicos.length > 0);
     const isLeitura   = (aba === 'leitura');
     
+    const btnTesoura = document.getElementById('btn-dividir-topico');
+    if (btnTesoura) {
+        btnTesoura.disabled = !isAnotacoes;
+    }
+    
     const btnExportar = document.getElementById('btn-exportar-topico');
     if (btnExportar) btnExportar.style.display = isAnotacoes ? 'flex' : 'none';
 
@@ -2440,3 +2445,37 @@ window.TaskManager = (function() {
 
     return { abrirModal, fecharModal, adicionarTarefa, toggleConcluido, atualizarBadge, abrirSeletorTemas, getTarefasState, setTarefasState, sinalizarTarefasPendentes };
 })();
+
+/* ================================================
+   PATCH: INTERCEPTOR DO GERADOR DE CONTEXTO (ED)
+   (Acoplamento seguro via Monkey Patch)
+   ================================================ */
+document.addEventListener("DOMContentLoaded", () => {
+    if (typeof window.abrirModalGeradorContexto === 'function') {
+        const originalAbrirModalGeradorContexto = window.abrirModalGeradorContexto;
+        
+        window.abrirModalGeradorContexto = function() {
+            // Executa a função original primeiro
+            originalAbrirModalGeradorContexto.apply(this, arguments);
+
+            // Injeta a lógica de UX do Selo de Continuidade
+            if (typeof TopicsManager !== 'undefined') {
+                const activeTabId = TopicsManager.getActiveTabId();
+                const topico = topicos.find(t => t.id === activeTabId);
+                const banner = document.getElementById('banner-continuacao-ia');
+                const spanVol = document.getElementById('span-vol-atual');
+
+                if (banner && spanVol) {
+                    banner.classList.remove('is-active'); 
+                    if (topico && topico.volumeData && topico.volumeData.sequencia > 1) {
+                        spanVol.textContent = TopicsManager.toRoman(topico.volumeData.sequencia);
+                        
+                        requestAnimationFrame(() => {
+                            banner.classList.add('is-active');
+                        });
+                    }
+                }
+            }
+        };
+    }
+});

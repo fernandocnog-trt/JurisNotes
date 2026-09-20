@@ -1165,6 +1165,33 @@ window.fecharModalGeradorContexto = function() {
 
 /* --- ATUALIZAÇÃO DA EXPORTAÇÃO COM TRAVA LGPD E TAGS XML --- */
 window.gerarECopiarContexto = function(modo = 'pro') {
+    // ========================================================
+    // MOTOR DE AUTOMAÇÃO DE CONTINUIDADE (SMART HANDOFF)
+    // ========================================================
+    let prefixoContinuidadeIA = "";
+    
+    // Identifica se o tópico atual é um Volume 2+ (criado pela Tesoura)
+    const activeId = typeof TopicsManager !== 'undefined' ? TopicsManager.getActiveTabId() : null;
+    const topicoAtual = (typeof topicos !== 'undefined' && activeId) ? topicos.find(t => t.id === activeId) : null;
+    
+    if (topicoAtual && topicoAtual.volumeData && topicoAtual.volumeData.chkId) {
+        prefixoContinuidadeIA = `🔗 ORDEM DE CONTINUIDADE (CHAVE: ${topicoAtual.volumeData.chkId})
+
+IA, preste atenção: Você já elaborou a primeira parte desta minuta. 
+Agora, vou fornecer a continuação da análise (Volume ${topicoAtual.volumeData.sequencia}).
+
+SUA TAREFA:
+1. Retome o contexto exato de onde paramos na chave acima.
+2. Continue a redação incorporando estas novas provas de forma coesa.
+3. NÃO repita a introdução, relatório ou itens já decididos na parte anterior.
+4. Mantenha o mesmo tom jurídico e formatação.
+
+Abaixo, envio os dados deste novo volume:
+======================================================
+
+`;
+    }
+
     const nomeAcao = modo === 'interno' ? 'copiar DADOS COMPLETOS para ChatJT' : 'copiar DADOS SEGUROS para Gemini PRO';
     
     const btnId = modo === 'interno' ? 'btn-copiar-contexto-interno' : 'btn-copiar-contexto-pro';
@@ -1174,8 +1201,8 @@ window.gerarECopiarContexto = function(modo = 'pro') {
     const targetTextNode = btn.querySelector('.btn-main-text');
     const originalText = targetTextNode.innerText;
     
-    // Concatenação Inteligente
-    let outputFinal = "";
+    // Concatenação Inteligente (Inicia automaticamente com o prefixo se existir)
+    let outputFinal = prefixoContinuidadeIA;
     const minuta = document.getElementById('ctx-minuta-anterior').value.trim();
     if (minuta) outputFinal += "== MINUTA_ATUAL ==\n" + minuta + "\n\n";
     
