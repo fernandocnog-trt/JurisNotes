@@ -1699,3 +1699,29 @@ MINI PLAYER DE ÁUDIO — MODAL FOCADO
 @media (prefers-reduced-motion: reduce) {
     .extrator-custom-reveal:not([hidden]) { animation: none; }
 }
+
+/* ================================================
+   SELO DE CONTINUIDADE (GERADOR DE CONTEXTO)
+   ================================================ */
+.continuity-badge {
+    display: none;
+    align-items: center;
+    gap: 6px;
+    background: #e8f5e9;
+    color: #2e7d32;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 800;
+    border: 1px solid #c8e6c9;
+}
+
+.continuity-badge.is-active {
+    display: flex;
+    animation: slideDownFade 0.3s cubic-bezier(0.25, 0.8, 0.25, 1) forwards;
+}
+
+@keyframes slideDownFade {
+    0% { opacity: 0; transform: translateY(-8px); }
+    100% { opacity: 1; transform: translateY(0); }
+}

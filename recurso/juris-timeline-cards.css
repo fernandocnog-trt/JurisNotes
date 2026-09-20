@@ -1788,3 +1788,45 @@ BOTÃO DE PLAY DO CARD DE ÁUDIO — REFINAMENTO
 .btn-copy-chave-quick:active {
     transform: scale(0.95);
 }
+
+/* ================================================
+   13. CHECKPOINT & TESOURA IA (UX HUMANIZADA)
+   ================================================ */
+.checkpoint-card--saida {
+    border-top-color: #2e7d32;
+}
+
+.checkpoint-card--entrada {
+    border-top-color: #f57c00;
+    background: #fffcf4;
+}
+
+.checkpoint-badge-link {
+    display: inline-flex;
+    align-items: center;
+    background: #e8f5e9;
+    color: #2e7d32;
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: bold;
+    margin-bottom: 12px;
+    border: 1px solid #c8e6c9;
+}
+
+.checkpoint-instructions {
+    text-align: left;
+    font-size: 0.85rem;
+    color: #475569;
+    padding: 12px;
+    background: #ffffff;
+    border-radius: 8px;
+    border: 1px dashed #cbd5e1;
+}
+
+.checkpoint-instructions p {
+    margin-bottom: 8px;
+}
+.checkpoint-instructions p:last-child {
+    margin-bottom: 0;
+}
