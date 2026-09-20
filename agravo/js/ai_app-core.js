@@ -611,6 +611,56 @@ window.ShortcutManager = (function() {
 })();
 
 /* ================================================
+   MÓDULO DE CONTRATO DE TRABALHO
+   ================================================ */
+window.ContratoManager = (function() {
+    let dadosContrato = {
+        admissao: '',
+        demissao: '',
+        funcao: ''
+    };
+
+    function abrirModal() {
+        const backdrop = document.getElementById('contrato-modal-backdrop');
+        const modal = document.getElementById('modal-contrato-trabalho');
+        if (!backdrop || !modal) return;
+
+        document.getElementById('input-contrato-admissao').value = dadosContrato.admissao;
+        document.getElementById('input-contrato-demissao').value = dadosContrato.demissao;
+        document.getElementById('input-contrato-funcao').value = dadosContrato.funcao;
+
+        backdrop.style.display = 'block';
+        modal.style.display = 'flex';
+    }
+
+    function fecharModal() {
+        document.getElementById('contrato-modal-backdrop').style.display = 'none';
+        document.getElementById('modal-contrato-trabalho').style.display = 'none';
+    }
+
+    function salvarContrato() {
+        dadosContrato.admissao = document.getElementById('input-contrato-admissao').value;
+        dadosContrato.demissao = document.getElementById('input-contrato-demissao').value;
+        dadosContrato.funcao = document.getElementById('input-contrato-funcao').value.trim();
+
+        const btnContrato = document.getElementById('btn-contrato-trabalho');
+        if (btnContrato) {
+            if (dadosContrato.admissao || dadosContrato.demissao || dadosContrato.funcao) {
+                btnContrato.classList.add('has-data');
+            } else {
+                btnContrato.classList.remove('has-data');
+            }
+        }
+
+        fecharModal();
+        if (typeof exibirToast === 'function') exibirToast('Parâmetros do contrato atualizados.', 'sucesso');
+        if (typeof salvarBackupAutomatico === 'function') salvarBackupAutomatico();
+    }
+
+    return { abrirModal, fecharModal, salvarContrato, getDados: () => dadosContrato };
+})();
+
+/* ================================================
    INICIALIZAÇÃO E INJEÇÃO DE DEPENDÊNCIAS
    ================================================ */
 document.addEventListener("DOMContentLoaded", () => {

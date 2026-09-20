@@ -148,6 +148,26 @@ window.ExportManager = (function () {
         md += `<${config.tagAlegacao}>\n${_safeMD(topico.alegacoes || 'Nenhum argumento do agravo descrito.')}\n</${config.tagAlegacao}>\n\n`;
         md += `<${config.tagFundamento}>\n${_safeMD(topico.fundamentos || 'Nenhum trecho da decisão denegatória colado.')}\n</${config.tagFundamento}>\n\n`;
 
+        // [INÍCIO DA INSERÇÃO] - Injeção dos Dados do Contrato de Trabalho para a IA
+        if (window.ContratoManager) {
+            const dadosContrato = window.ContratoManager.getDados();
+            if (dadosContrato.admissao || dadosContrato.demissao || dadosContrato.funcao) {
+                md += `<contexto_fatico_vinculo_empregaticio>\n`;
+                if (dadosContrato.funcao) md += `  [Função Exercida]: ${dadosContrato.funcao}\n`;
+                if (dadosContrato.admissao) {
+                    // Formata a data (de YYYY-MM-DD para DD/MM/YYYY) para a IA ler de forma nativa
+                    const admArr = dadosContrato.admissao.split('-');
+                    md += `  [Data de Admissão]: ${admArr.length === 3 ? `${admArr[2]}/${admArr[1]}/${admArr[0]}` : dadosContrato.admissao}\n`;
+                }
+                if (dadosContrato.demissao) {
+                    const demArr = dadosContrato.demissao.split('-');
+                    md += `  [Data de Demissão]: ${demArr.length === 3 ? `${demArr[2]}/${demArr[1]}/${demArr[0]}` : dadosContrato.demissao}\n`;
+                }
+                md += `</contexto_fatico_vinculo_empregaticio>\n\n`;
+            }
+        }
+        // [FIM DA INSERÇÃO]
+
         // 2. INJEÇÃO DAS DIRETRIZES GLOBAIS
         if (topico.diretrizesGlobais && topico.diretrizesGlobais.length > 0) {
             const globaisValidas = topico.diretrizesGlobais.filter(dir => dir.intencao !== 'nota');
