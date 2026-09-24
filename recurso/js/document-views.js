@@ -47,7 +47,7 @@ window.OutlineViewManager = (function() {
             'comando': 'Comando IA',
             'texto': 'Texto Fixo',
             'premissa': 'Premissa',
-            'fundamentacao': 'Base Legal',
+            'fundamentacao': 'Lei Seca',
             'refutacao': 'Refutação',
             'preliminar': 'Prejudicial',
             'veredito': 'Veredito',
@@ -297,7 +297,7 @@ window.OutlineViewManager = (function() {
    ================================================ */
 window.MinutaViewManager = (function() {
     'use strict';
-    const INTENCOES_PERMITIDAS = ['comando', 'texto', 'premissa', 'preliminar', 'refutacao', 'jurisprudencia', 'degravacao'];
+    const INTENCOES_PERMITIDAS = ['comando', 'texto', 'premissa', 'preliminar', 'refutacao', 'jurisprudencia', 'degravacao', 'fundamentacao'];
 
     function abrir() {
         const activeId = TopicsManager.getActiveTabId();
@@ -334,6 +334,7 @@ window.MinutaViewManager = (function() {
         if (intencao === 'comando') return `<div class="minuta-comando-card">${textoHTML}</div>`;
         if (intencao === 'jurisprudencia') return `<div class="minuta-juris-block">${textoHTML}</div>`;
         if (intencao === 'degravacao') return `<div class="minuta-audio-block">"${textoHTML}"</div>`;
+        if (intencao === 'fundamentacao') return `<div class="minuta-lei-block">${textoHTML}</div>`;
         
         return `<div class="minuta-text-block">${textoHTML}</div>`;
     }
@@ -433,6 +434,9 @@ window.MinutaViewManager = (function() {
             }
             if (intencao === 'degravacao') {
                 return `> **DESTAQUE DE PROVA ORAL:**\n> "${texto}"\n\n`;
+            }
+            if (intencao === 'fundamentacao') {
+                return `> **LEI SECA / NORMA:**\n> "${texto}"\n\n`;
             }
             return `${texto}\n\n`;
         }

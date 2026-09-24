@@ -231,7 +231,6 @@ window.ExportManager = (function () {
         const safeFormatTime = (sec) => window.AudioManager?.formatTime ? window.AudioManager.formatTime(sec) : `${Math.floor(sec/60)}' ${Math.floor(sec%60)}''`;
 
         const preliminaresInjetadas = [];
-        const baseLegalObrigatoria = [];
         const vereditosLocaisInjetados = []; 
         const diretrizesGlobaisGerais = []; 
 
@@ -239,11 +238,10 @@ window.ExportManager = (function () {
             topico.diretrizesGlobais
                 .filter(dir => dir.intencao !== 'nota') // BLINDAGEM: Remove notas ocultas globais
                 .forEach(dir => {
-                    if (dir.intencao === 'fundamentacao') baseLegalObrigatoria.push(`[DIRETRIZ GLOBAL]: ${_safeMD(dir.texto)}`);
-                    else if (dir.intencao === 'preliminar') preliminaresInjetadas.push(`[DIRETRIZ GLOBAL]: ${_safeMD(dir.texto)}`);
+                    if (dir.intencao === 'preliminar') preliminaresInjetadas.push(`[DIRETRIZ GLOBAL]: ${_safeMD(dir.texto)}`);
                     else if (dir.intencao === 'veredito') vereditosLocaisInjetados.push(`[DIRETRIZ GLOBAL]: ${_safeMD(dir.texto)}`);
                     else { 
-                        diretrizesGlobaisGerais.push(`[${(dir.intencao || 'PREMISSA GLOBAL').toUpperCase()}]: ${_safeMD(dir.texto)}`);
+                        diretrizesGlobaisGerais.push(`[${(dir.intencao === 'fundamentacao' ? 'LEI SECA GLOBAL' : dir.intencao || 'PREMISSA GLOBAL').toUpperCase()}]: ${_safeMD(dir.texto)}`);
                     }
                 });
         }
@@ -382,6 +380,9 @@ window.ExportManager = (function () {
                     } else if (intencao === 'jurisprudencia') {
                         const textoExato = _stripInternalTags(sub.texto);
                         localNodesBuffer += `\n[INSTRUÇÃO: APLICAÇÃO DE JURISPRUDÊNCIA${refContexto}]\nTranscreva a ementa/julgado abaixo exatamente como fornecida (cópia literal). Em seguida, obrigatoriamente crie um parágrafo conectivo explicando de forma sucinta por que este julgado se amolda perfeitamente aos fatos incontroversos deste tópico.\n<texto_verbatim>\n${textoExato}\n</texto_verbatim>\n\n`;
+                    } else if (intencao === 'fundamentacao') {
+                        const textoExato = _stripInternalTags(sub.texto);
+                        localNodesBuffer += `\n[INSTRUÇÃO: APLICAÇÃO DE LEI SECA / NORMA${refContexto}]\nTranscreva a legislação abaixo exatamente como fornecida (cópia literal). Em seguida, obrigatoriamente crie um parágrafo conectivo explicando de forma sucinta como esta lei incide e se aplica aos fatos incontroversos específicos deste tópico.\n<texto_verbatim>\n${textoExato}\n</texto_verbatim>\n\n`;
                     } else if (intencao === 'degravacao') {
                         const textoExato = _stripInternalTags(sub.texto);
                         localNodesBuffer += `\n[INSTRUÇÃO: ANCORAGEM DE DEPOIMENTO ORAL${refContexto}]\nATENÇÃO: O trecho abaixo é um recorte curado pelo assessor extraído da transcrição da audiência já fornecida. Utilize este trecho exato entre aspas como a "prova cabal" (bala de prata) para sustentar a tese, atribuindo a fala ao orador correspondente.\n<texto_verbatim>\n${textoExato}\n</texto_verbatim>\n\n`;
@@ -396,8 +397,6 @@ window.ExportManager = (function () {
                             localNodesBuffer += `[COMANDO DE EXECUÇÃO ESTRITA${refContexto}]: ${textoSanitizado}\n`;
                         } else if (intencao === 'fallback') {
                             localNodesBuffer += `[CONTEXTO FÁTICO COMPLEMENTAR${refContexto}]: ${textoSanitizado}\n`;
-                        } else if (intencao === 'fundamentacao') {
-                            baseLegalObrigatoria.push(`[Referência da Ideia ${numIdeia}${refContexto}]: ${textoSanitizado}`);
                         } else if (intencao === 'preliminar') {
                             preliminaresInjetadas.push(`[Referência da Ideia ${numIdeia}${refContexto}]: ${textoSanitizado}`);
                         } else if (intencao === 'veredito') {
@@ -457,12 +456,6 @@ window.ExportManager = (function () {
                 mdTags += `**Fundamentos da Origem (Por que o juiz decidiu assim):**\n${_safeMD(topico.fundamentos, '\n')}\n\n`;
             }
             mdTags += `</relatorio_do_conflito>\n\n`;
-        }
-
-        if (baseLegalObrigatoria.length > 0) {
-            mdTags += `<base_legal_obrigatoria>\n`;
-            mdTags += baseLegalObrigatoria.map(c => `* ${c}`).join('\n') + '\n';
-            mdTags += `</base_legal_obrigatoria>\n\n`;
         }
 
         let mdVeredito = '';

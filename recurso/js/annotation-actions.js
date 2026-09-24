@@ -131,7 +131,7 @@ function definirIntencaoSubAnotacao(intencaoStr) {
         'nota': 'Nota Oculta', 
         'premissa': 'Premissa Padrão',
         'veredito': 'Veredito / Conclusão',
-        'fundamentacao': 'Fundamentação Legal',
+        'fundamentacao': 'Lei Seca',
         'refutacao': 'Refutação (Mérito)',
         'preliminar': 'Filtro / Prejudicial',
         'jurisprudencia': 'Jurisprudência Exata',
@@ -1167,7 +1167,7 @@ function exibirTooltipRapido(intencao, event) {
         'texto': { titulo: 'Texto Fixo', texto: 'A IA fará um "copia e cola" desta redação na minuta.' },
         'nota': { titulo: 'Nota Oculta', texto: 'A IA NÃO lerá isso. É apenas um lembrete para você.' },
         'veredito': { titulo: 'Veredito / Conclusão', texto: 'Força a IA a concluir o tópico recursal com esta decisão.' },
-        'fundamentacao': { titulo: 'Base Legal', texto: 'A IA priorizará esta lei/súmula acima de qualquer outra.' },
+        'fundamentacao': { titulo: 'Lei Seca', texto: 'A IA fará a transcrição exata da norma e a conectará aos fatos nesta exata posição da narrativa.' },
         'refutacao': { titulo: 'Refutação (Mérito)', texto: 'A IA usará este argumento para derrubar a tese da parte.' },
         'preliminar': { titulo: 'Filtro / Prejudicial', texto: 'A IA redigirá este tópico antes de entrar no mérito.' },
         'jurisprudencia': { titulo: 'Jurisprudência', texto: 'A IA colará a ementa exata e a conectará ao argumento principal do caso.' },
@@ -1255,35 +1255,100 @@ window.adicionarCitacaoExpressa = function(topicoId, parentIndex, cIdx) {
     if(window.exibirToast) exibirToast('Citação expressa vinculada ao Card!', 'sucesso');
 
     // 8. MICROINTERAÇÃO DE UX (Scroll Suave e Destaque Visual)
+    window.JurisUX.scrollToLastSubNode(`timeline-wrapper-${cardMestre.uuid || parentIndex}`);
+};
+
+// ================================================
+// HELPER DE MICROINTERAÇÃO GLOBAL (JURIS UX)
+// ================================================
+window.JurisUX = window.JurisUX || {};
+window.JurisUX.scrollToLastSubNode = function(masterWrapperId) {
     requestAnimationFrame(() => {
         requestAnimationFrame(() => {
-            const masterWrapper = document.getElementById(`timeline-wrapper-${cardMestre.uuid || parentIndex}`);
+            const masterWrapper = document.getElementById(masterWrapperId);
             if (!masterWrapper) return;
 
-            // Busca o último sub-nó adicionado a este master
             const subNodes = masterWrapper.querySelectorAll('.sub-annotations-wrapper .sub-annotation-item');
             if (subNodes.length === 0) return;
             const targetNode = subNodes[subNodes.length - 1];
             
             const scrollContainer = document.getElementById('history-container');
             if (targetNode && scrollContainer) {
-                // Cálculo matemático seguro para scroll relativo
                 const containerRect = scrollContainer.getBoundingClientRect();
                 const targetRect = targetNode.getBoundingClientRect();
                 const offset = (targetRect.top - containerRect.top) + scrollContainer.scrollTop - 20;
                 
                 scrollContainer.scrollTo({ top: offset, behavior: 'smooth' });
                 
-                // Aplica a classe de flash visual
                 const innerCard = targetNode.querySelector('.sub-annotation-card');
                 if (innerCard) {
                     innerCard.classList.remove('card-flash-focus');
-                    void innerCard.offsetWidth; // Força reflow
+                    void innerCard.offsetWidth;
                     innerCard.classList.add('card-flash-focus');
                 }
             }
         });
     });
+};
+
+// ================================================
+// FUNÇÃO GLOBAL: DEGRAVAÇÃO EXPRESSA
+// ================================================
+window.adicionarDegravacaoExpressa = function(topicoId, parentIndex, cIdx) {
+    const topico = topicos.find(t => t.id === topicoId);
+    if (!topico) return;
+
+    const cardMestre = topico.anotacoes[parentIndex];
+    const alvo = (cIdx !== null && cIdx !== undefined) 
+        ? cardMestre.itensCorrelacionados[cIdx] 
+        : cardMestre;
+    
+    if (alvo.tipo !== 'audio') return;
+
+    if (!window.TopicsManager || typeof window.TopicsManager.obterDadosAudioSeguros !== 'function') {
+        if(window.exibirToast) exibirToast('Erro: Módulo de áudio não acessível.', 'erro');
+        return;
+    }
+
+    const dadosAudio = window.TopicsManager.obterDadosAudioSeguros(alvo);
+
+    if (!dadosAudio || dadosAudio.isCorrompido) {
+        if(window.exibirToast) exibirToast('Áudio corrompido ou sem dados legíveis.', 'erro');
+        return;
+    }
+
+    if (!dadosAudio.transcricao || !dadosAudio.transcricao.trim()) {
+        if(window.exibirToast) exibirToast('Aviso: Este áudio não possui degravação salva para ser citada.', 'aviso');
+        return;
+    }
+
+    let textoSeguro = dadosAudio.transcricao.replace(/\n/g, ' ').replace(/"/g, "'").trim();
+    if (window.JurisUtils && window.JurisUtils.limparTextoPDF) {
+        textoSeguro = window.JurisUtils.limparTextoPDF(textoSeguro);
+    }
+
+    const docNome = alvo.documento || alvo.polo || 'Ata de Audiência';
+    const orador = dadosAudio.orador || "Orador";
+    const tempoFormatado = dadosAudio.rotuloTempo || "Tempo indefinido";
+
+    const comandoLiteral = `Transcreva expressamente o trecho do depoimento de **${orador}** (${docNome}), conforme extraído do registro audiovisual (${tempoFormatado}), inserindo a seguinte citação literal entre aspas e em itálico:\n\n*"${textoSeguro}"*`;
+
+    const novoNoComando = {
+        uuid: gerarUUIDSeguro(),
+        texto: comandoLiteral,
+        intencao: 'degravacao', 
+        revisada: false,
+        timestamp: Date.now()
+    };
+
+    if (!alvo.subAnotacoes) alvo.subAnotacoes = [];
+    alvo.subAnotacoes.push(novoNoComando);
+
+    renderizarTopicos();
+    if(window.salvarBackupAutomatico) salvarBackupAutomatico();
+    if(window.exibirToast) exibirToast('Degravação expressa vinculada à oitiva!', 'sucesso');
+
+    window.JurisUX.scrollToLastSubNode(`timeline-wrapper-${cardMestre.uuid || parentIndex}`);
 };
 
 // NOVO: Função Global e Segura de Cópia da Degravação
