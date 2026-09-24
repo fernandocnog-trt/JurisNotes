@@ -473,35 +473,100 @@ window.adicionarCitacaoExpressa = function(topicoId, parentIndex, cIdx) {
     if(window.exibirToast) exibirToast('Citação expressa vinculada ao Card!', 'sucesso');
 
     // 8. MICROINTERAÇÃO DE UX (Scroll Suave e Destaque Visual)
+    window.JurisUX.scrollToLastSubNode(`timeline-wrapper-${cardMestre.uuid || parentIndex}`);
+};
+
+// ================================================
+// HELPER DE MICROINTERAÇÃO GLOBAL (JURIS UX)
+// ================================================
+window.JurisUX = window.JurisUX || {};
+window.JurisUX.scrollToLastSubNode = function(masterWrapperId) {
     requestAnimationFrame(() => {
         requestAnimationFrame(() => {
-            const masterWrapper = document.getElementById(`timeline-wrapper-${cardMestre.uuid || parentIndex}`);
+            const masterWrapper = document.getElementById(masterWrapperId);
             if (!masterWrapper) return;
 
-            // Busca o último sub-nó adicionado a este master
             const subNodes = masterWrapper.querySelectorAll('.sub-annotations-wrapper .sub-annotation-item');
             if (subNodes.length === 0) return;
             const targetNode = subNodes[subNodes.length - 1];
             
             const scrollContainer = document.getElementById('history-container');
             if (targetNode && scrollContainer) {
-                // Cálculo matemático seguro para scroll relativo
                 const containerRect = scrollContainer.getBoundingClientRect();
                 const targetRect = targetNode.getBoundingClientRect();
                 const offset = (targetRect.top - containerRect.top) + scrollContainer.scrollTop - 20;
                 
                 scrollContainer.scrollTo({ top: offset, behavior: 'smooth' });
                 
-                // Aplica a classe de flash visual
                 const innerCard = targetNode.querySelector('.sub-annotation-card');
                 if (innerCard) {
                     innerCard.classList.remove('card-flash-focus');
-                    void innerCard.offsetWidth; // Força reflow
+                    void innerCard.offsetWidth;
                     innerCard.classList.add('card-flash-focus');
                 }
             }
         });
     });
+};
+
+// ================================================
+// FUNÇÃO GLOBAL: DEGRAVAÇÃO EXPRESSA
+// ================================================
+window.adicionarDegravacaoExpressa = function(topicoId, parentIndex, cIdx) {
+    const topico = topicos.find(t => t.id === topicoId);
+    if (!topico) return;
+
+    const cardMestre = topico.anotacoes[parentIndex];
+    const alvo = (cIdx !== null && cIdx !== undefined) 
+        ? cardMestre.itensCorrelacionados[cIdx] 
+        : cardMestre;
+    
+    if (alvo.tipo !== 'audio') return;
+
+    if (!window.TopicsManager || typeof window.TopicsManager.obterDadosAudioSeguros !== 'function') {
+        if(window.exibirToast) exibirToast('Erro: Módulo de áudio não acessível.', 'erro');
+        return;
+    }
+
+    const dadosAudio = window.TopicsManager.obterDadosAudioSeguros(alvo);
+
+    if (!dadosAudio || dadosAudio.isCorrompido) {
+        if(window.exibirToast) exibirToast('Áudio corrompido ou sem dados legíveis.', 'erro');
+        return;
+    }
+
+    if (!dadosAudio.transcricao || !dadosAudio.transcricao.trim()) {
+        if(window.exibirToast) exibirToast('Aviso: Este áudio não possui degravação salva para ser citada.', 'aviso');
+        return;
+    }
+
+    let textoSeguro = dadosAudio.transcricao.replace(/\n/g, ' ').replace(/"/g, "'").trim();
+    if (window.JurisUtils && window.JurisUtils.limparTextoPDF) {
+        textoSeguro = window.JurisUtils.limparTextoPDF(textoSeguro);
+    }
+
+    const docNome = alvo.documento || alvo.polo || 'Ata de Audiência';
+    const orador = dadosAudio.orador || "Orador";
+    const tempoFormatado = dadosAudio.rotuloTempo || "Tempo indefinido";
+
+    const comandoLiteral = `Transcreva expressamente o trecho do depoimento de **${orador}** (${docNome}), conforme extraído do registro audiovisual (${tempoFormatado}), inserindo a seguinte citação literal entre aspas e em itálico:\n\n*"${textoSeguro}"*`;
+
+    const novoNoComando = {
+        uuid: 'id-' + Math.random().toString(36).substr(2, 9) + '-' + Date.now().toString(36),
+        texto: comandoLiteral,
+        intencao: 'degravacao', 
+        revisada: false,
+        timestamp: Date.now()
+    };
+
+    if (!alvo.subAnotacoes) alvo.subAnotacoes = [];
+    alvo.subAnotacoes.push(novoNoComando);
+
+    if(window.renderizarTopicos) renderizarTopicos();
+    if(window.salvarBackupAutomatico) salvarBackupAutomatico();
+    if(window.exibirToast) exibirToast('Degravação expressa vinculada à oitiva!', 'sucesso');
+
+    window.JurisUX.scrollToLastSubNode(`timeline-wrapper-${cardMestre.uuid || parentIndex}`);
 };
 
 window.criarPilhaDeIdeias = function() {

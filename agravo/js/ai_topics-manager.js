@@ -713,6 +713,12 @@ window.TopicsManager = (function () {
                    </button>` 
                 : '';
 
+            const btnDegravacaoExpressa = (tipoDoItem === 'audio') 
+                ? `<button class="btn-degravacao-expressa" title="Adicionar Degravação Expressa" onclick="window.adicionarDegravacaoExpressa(${paramCitacao})">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                   </button>` 
+                : '';
+
             const isElegivelParaPilha = isCorrelacionado && cIdx != null && !anotacao.itensCorrelacionados[cIdx].pilhaProcId;
             const btnAgrupar = isElegivelParaPilha 
                 ? `<button title="Criar Pilha Processual" onclick="TopicsManager.abrirModalPilhaProcessual('${activeTabId}', ${index}, ${cIdx})">🗂️</button>` 
@@ -724,6 +730,7 @@ window.TopicsManager = (function () {
                 ${btnLeitura}
                 ${btnEditar}
                 ${btnCitacaoExpressa}
+                ${btnDegravacaoExpressa}
                 <button title="Adicionar Nó de Ideia" onclick="_menuAnotacaoCtx={topicoId:'${activeTabId}', index:${index}${ctxCidx}}; acionarNovoNoIdeia()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg></button>
                 <button title="Mover / Reordenar" onclick="abrirModalSmartMove(${paramMove})"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="8 17 12 21 16 17"></polyline><line x1="12" y1="12" x2="12" y2="21"></line><polyline points="8 7 12 3 16 7"></polyline><line x1="12" y1="12" x2="12" y2="3"></line></svg></button>
                 <button class="delete-btn" title="Excluir" onclick="${isCorrelacionado ? `excluirItemCorrelacionado('${activeTabId}', ${index}, ${cIdx})` : `_menuAnotacaoCtx={topicoId:'${activeTabId}', index:${index}}; excluirAnotacao()`}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg></button>
@@ -1975,8 +1982,26 @@ window.TopicsManager = (function () {
         if(typeof exibirToast === 'function') exibirToast('Pilha desagrupada com sucesso.', 'info');
     }
 
+    function _obterDadosAudioSeguros(alvo) {
+        if (!alvo || alvo.tipo !== 'audio') return { isCorrompido: true };
+        try {
+            const dados = JSON.parse(alvo.conteudo);
+            return {
+                isCorrompido: false,
+                transcricao: dados.transcricao || '',
+                orador: dados.role || dados.oradorStr || 'Orador',
+                rotuloTempo: window.AudioManager?.formatTime 
+                    ? `${window.AudioManager.formatTime(dados.inicio)} a ${window.AudioManager.formatTime(dados.fim)}` 
+                    : `${Math.floor(dados.inicio/60)}' ${Math.floor(dados.inicio%60)}'' a ${Math.floor(dados.fim/60)}' ${Math.floor(dados.fim%60)}''`
+            };
+        } catch (e) {
+            return { isCorrompido: true };
+        }
+    }
+
     // API pública do módulo
     return {
+        obterDadosAudioSeguros: _obterDadosAudioSeguros,
         suprimirProximaRestauracao,
         toggleDiretrizesGlobais,
         resetVisibilidadeGlobais,
