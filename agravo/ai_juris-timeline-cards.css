@@ -161,6 +161,44 @@
 .card-actions-bar button.delete-btn:hover { background: #ffebee; color: #c62828; }
 .card-actions-bar button svg { width: 14px; height: 14px; pointer-events: none; }
 
+:root {
+    --degrav-fuchsia: #D500B5;
+    --degrav-fuchsia-dark: #A3008A;
+    --degrav-fuchsia-glow: rgba(213, 0, 181, 0.25);
+}
+
+/* ================================================
+   BOTÕES DE AÇÃO EXPRESSA (CITAÇÃO E DEGRAVAÇÃO)
+   ================================================ */
+.card-actions-bar .btn-degravacao-expressa {
+    background-color: var(--degrav-fuchsia) !important; 
+    color: #ffffff !important;           
+    border-radius: 50%;                  
+    width: 26px;                         
+    height: 26px;
+    padding: 0;
+    margin-left: 4px;
+    box-shadow: 0 2px 4px var(--degrav-fuchsia-glow);
+    transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), background-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.card-actions-bar .btn-degravacao-expressa:hover {
+    background-color: var(--degrav-fuchsia-dark) !important; 
+    transform: scale(1.15);               
+    box-shadow: 0 4px 8px var(--degrav-fuchsia-glow);
+    color: #ffffff !important;
+}
+
+.card-actions-bar .btn-degravacao-expressa:active {
+    transform: scale(0.95);
+}
+
+.card-actions-bar .btn-degravacao-expressa svg {
+    width: 14px;
+    height: 14px;
+    pointer-events: none;
+}
+
 /* ================================================
    BOTÃO DE CITAÇÃO EXPRESSA (REFINADO)
    ================================================ */
