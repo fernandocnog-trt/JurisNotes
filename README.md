@@ -1,4 +1,4 @@
-# Juris Notes — Assistente de Mapeamento Estruturado para Elaboração de Acórdãos
+# Juris Notes (1.0.2) — Assistente de Mapeamento Estruturado para Elaboração de Acórdãos
 
 ## Evolução do Ecossistema (Nota de Implantação)
 O Juris Notes foi concebido inicialmente focado no painel de Recursos Ordinários (RO), visando estruturar a análise de mérito e provas[cite: 1]. Atualmente, a ferramenta encontra-se em fase de expansão e implantação de novos silos funcionais isolados, incorporando os ecossistemas dedicados aos Embargos de Declaração (ED) e ao Agravo de Instrumento (AI), garantindo que cada incidente processual possua seu próprio viés cognitivo e roteiro de análise focado em fluxos específicos da jurisdição trabalhista[cite: 1, 2].
