@@ -479,9 +479,9 @@
             <span style="font-size: 0.8rem;">Premissa Lógica</span>
         </button>
         
-        <button class="ann-action-btn btn-intent btn-intent-fundamentacao" data-intent="fundamentacao" style="justify-content: flex-start; gap: 8px; width: 100%;" title="Base Legal Obrigatória" onclick="definirIntencaoSubAnotacao('fundamentacao')">
+        <button class="ann-action-btn btn-intent btn-intent-fundamentacao" data-intent="fundamentacao" style="justify-content: flex-start; gap: 8px; width: 100%;" title="Lei Seca" onclick="definirIntencaoSubAnotacao('fundamentacao')">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path></svg>
-            <span style="font-size: 0.8rem;">Fundamentação Legal</span>
+            <span style="font-size: 0.8rem;">Lei Seca</span>
         </button>
 
         <hr style="width: 100%; border: 0; border-top: 1px solid #eee; margin: 4px 0;">
@@ -549,7 +549,7 @@
         <!-- Contêiner centralizado para ergonomia de leitura -->
         <div class="tarefas-container-interno">
             <!-- Blindagem Flexbox + Scroll Indicator nativo -->
-            <div class="doc-list-container scroll-indicator-container native-obs-list-amplo" id="native-obs-list">
+            <div class="scroll-indicator-container native-obs-list-amplo" id="native-obs-list">
                 <!-- Tarefas dinâmicas -->
             </div>
             
@@ -768,6 +768,21 @@
                 <span class="toggle-slider"></span>
             </label>
         </div>
+        <!-- NOVO: Toggle do Layout Vertical Ergonômico -->
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 12px; margin-bottom: 4px;">
+            <span style="display: flex; align-items: center; gap: 6px; font-size: 0.8rem; color: #555; font-weight: 600;" title="Centraliza os atalhos para monitores verticais">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px; height:14px; flex-shrink:0;">
+                    <rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect>
+                    <line x1="12" y1="18" x2="12.01" y2="18"></line>
+                </svg>
+                Menu Vertical
+            </span>
+            <label class="toggle-switch-minimal">
+                <input type="checkbox" id="toggle-fab-layout">
+                <span class="toggle-slider"></span>
+            </label>
+        </div>
+        <hr style="border: 0; border-top: 1px solid #eee; margin: 4px 0;">
         <button class="doc-btn" style="border:none; text-align:left; margin-bottom: 4px;" onclick="abrirModalGerenciarAbas()">📑 Gerenciar Abas</button>
         
         <!-- Novo Submenu de Temas -->
