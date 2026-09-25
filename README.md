@@ -117,7 +117,7 @@ Para manter o foco no fluxo de trabalho e evitar distrações, a interface adota
 
 ### v1.0 a v3.0 — Fundação e Extração
 - Carregamento assíncrono de PDFs via PDF.js com renderização lazy load.
-- Recorte de imagens, textos e mapeamento de audiências em MP3. Para assegurar a precisão no manuseio de provas orais, o sistema dá prioridade a funções que transcrevem diretamente o áudio com alta exatidão, superando edições focadas em polimento estilístico.
+- Recorte de imagens, textos e mapeamento de audiências em MP3.
 - Integração LLM (Exportação em Markdown) e Validação Anti-Corrupção SHA-256.
 
 ### v4.0 — Ergonomia e Nós de Ideia
@@ -125,14 +125,24 @@ Para manter o foco no fluxo de trabalho e evitar distrações, a interface adota
 - Separação entre a Prova Bruta (Main Card) e a Conclusão do Assessor (Nós de Ideia/Sub-anotações).
 
 ### v5.0 — Inteligência Metodológica e Zonas Visuais
-- Modal de Extração por Mini-Abas: Categorização das peças nas 4 fases diretamente no momento do recorte.
-- Smart Sort (Reordenação Inteligente): O sistema realoca o card automaticamente para a Zona (Fase) correta, independentemente da ordem em que o assessor lê o PDF.
-- Dashboard de Maturidade Padrão: Indicador de completude de teses no RO.
+- Modal de Extração por Mini-Abas: Categorização das peças nas 4 fases.
+- Smart Sort (Reordenação Inteligente) e Dashboard de Maturidade Padrão.
 
-### v6.0 — Arquitetura Hub, Modo ED e Integração de Gabinete (Atual)
-- Hub e Silos Separados: Divisão entre o ambiente Padrão (RO), o ambiente restrito para Embargos de Declaração (ED) e o ambiente para Agravo de Instrumento (AI).
-- Arquitetura "Roteiro do Diretor": O arquivo exportado funciona como um payload cognitivo estruturado, entregando o "esqueleto" (matriz dialética) para o LLM via tags XML.
-- Fila de Download Sequencial Segura: Download de imagens-prova via fila assíncrona encadeada.
+### v6.0 — Arquitetura Hub, Modo ED e Integração de Gabinete
+- Hub e Silos Separados: Divisão entre o ambiente Padrão (RO), Embargos (ED) e Agravo (AI).
+- Arquitetura "Roteiro do Diretor": O arquivo exportado entrega a matriz dialética estruturada em XML para o LLM.
+
+### v7.0 — Controle de Contexto, Visões de Documento e Automação (Atual)
+A maturidade da ferramenta trouxe recursos avançados focados em auditoria humana, automação de tarefas e prevenção de fadiga contextual da IA:
+- **A Tesoura (Checkpoint IA / Smart Handoff):** Implementação do particionamento de tópicos massivos. O sistema corta tópicos longos em volumes (Vol. I, Vol. II) e injeta tags de *Handoff* (`checkpoint_saida` e `checkpoint_entrada`), garantindo que o LLM não perca o contexto da causa por excesso de tokens ("alucinação por fadiga").
+- **Auditoria Pré-Exportação (Visão Estruturada e Minuta):** Novos modais interativos permitem ao usuário ler o fluxo do processo em duas óticas antes de exportar:
+  - *Visão Estruturada:* Exibe a árvore lógica exata que será enviada à máquina (Markdown formatado e hierárquico).
+  - *Visão de Minuta:* Uma leitura fluida, emulando o texto final para leitura humana, ocultando comandos excessivos.
+- **Ilha de Ferramentas Minimalista (Header):** Reestruturação de UX que moveu controles vitais (Cronômetro de Eficiência, Playback de Áudio Oculto e Gestão de Diretrizes Globais) para uma barra de ferramentas persistente e não-intrusiva anexada às abas.
+- **Inteligência PJe Parser (Heurística Reversa):** O motor agora escaneia automaticamente o sumário do PDF (de trás para frente) no momento do upload, populando atalhos de navegação flutuantes (Contestação, Sentença) sem intervenção humana.
+- **Recomendação de IA (Groq API):** Integração com modelos ultra-rápidos (LLaMA/Qwen via Groq) que analisam a tese digitada e sugerem automaticamente peças correspondentes do Acervo de Modelos do Gabinete.
+- **Gerenciador de Tarefas Nativo:** Checklist operacional integrado diretamente na UI, ancorado ao estado do backup, emitindo alertas visuais se houverem pendências antes de uma exportação.
+- **Diretrizes Globais e Pilhas Processuais:** Capacidade de criar "pastas" de provas agrupadas e aplicar comandos jurídicos universais que regem todo o tópico, independente da tese específica analisada.
 
 ## 8. Guia de Uso Rápido
 
@@ -152,8 +162,10 @@ Para manter o foco no fluxo de trabalho e evitar distrações, a interface adota
 ### Desenvolvendo a Tese e Exportando para a IA
 1. Extraia e agrupe os recortes sob as teses criadas. Observe o Dashboard de Maturidade sinalizar o progresso ou apontar falhas cognitivas.
 2. Nos Nós de Ideia, classifique a intenção processual (Premissa, Fundamentação, Validação de Preparo, etc.).
-3. Clique em Exportar (Seta para Cima) para gerar o pacote (`.md` estruturado + imagens).
-4. No modelo de IA de sua escolha, faça o upload do Pacote, dos PDFs e das imagens em conjunto.
+3. Utilize a **Ferramenta de Tesoura** caso o tópico atinja o limite de provas, criando um novo Volume.
+4. Audite seu raciocínio utilizando os botões de **Visão de Minuta** ou **Visão Estruturada** no cabeçalho.
+5. Clique em Exportar (Seta para Cima) para gerar o pacote (`.md` estruturado + imagens).
+6. No modelo de IA de sua escolha, faça o upload do Pacote, dos PDFs e das imagens em conjunto.
 
 ## 9. Estrutura de Arquivos do Repositório (Por Silo)
 Cada diretório (`/ro`, `/ed` e `/ai`) possui sua própria estrutura modular espelhada, garantindo isolamento. O código se mantém fiel ao padrão Inline Script já adotado em seu projeto, prescindindo da chamada de arquivos externos genéricos que poderiam quebrar o escopo de cada silo individual.
@@ -163,12 +175,14 @@ Cada diretório (`/ro`, `/ed` e `/ai`) possui sua própria estrutura modular esp
 | `index.html` | Estrutura semântica, importação de dependências e modais. |
 | `juris-core.css` | Variáveis globais, Z-Index, paletas e estrutura base responsiva. |
 | `juris-workspace.css` | Sistema das Zonas Visuais (Cores), Dashboard e UI do PDF. |
-| `app.js` | Orquestrador global, Smart Sort e motor heurístico. |
-| `topics-manager.js` | Renderização do fichário, painel de teses (maturidade). |
+| `app-core.js` | Orquestrador global, Motor do JurisPrompt e UX. |
+| `topics-manager.js` | Renderização do fichário, painel de teses (maturidade) e UI Handoff. |
 | `backup-manager.js` | Persistência local (API File System) e Hashes Criptográficos. |
 | `export-manager.js` | Geração do payload estruturado e injeção de tags XML para o LLM. |
 | `audio-manager.js` | Controle de playback, reconexão de MP3 e marcações. |
 | `interaction-tools.js`| Wizards de captura, configuração das fases (DOC_CONFIG) e modais. |
-| `annotation-actions.js`| CRUD de anotações e reordenação manual de cards. |
-
-***
+| `annotation-actions.js`| CRUD de anotações, Menu Contextual e reordenação de cards. |
+| `document-views.js`| Controladores dos modais de Visão Estruturada e Minuta Fluida. |
+| `pje-parser.js` | Heurística de leitura de PDF (Sumário) para ancoragem automática. |
+| `recommendation-service.js` | Integração de API Groq (LLM) para sugestões do Acervo. |
+| `balanca-manager.js` | Isolamento de Iframe e roteamento do Dossiê Recursal. |
