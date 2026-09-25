@@ -677,6 +677,52 @@ window.ContratoManager = (function() {
 })();
 
 /* ================================================
+   MÓDULO DE LAYOUT ERGONÔMICO (FAB LAYOUT MANAGER)
+   ================================================= */
+window.FabLayoutManager = (function() {
+    const STORAGE_KEY = 'juris_fab_vertical';
+    let isVertical = false;
+
+    function init() {
+        // 1. Recupera o estado persistido do usuário
+        const savedState = localStorage.getItem(STORAGE_KEY);
+        isVertical = savedState === 'true';
+        _applyState();
+
+        // 2. Programação Defensiva: Busca o elemento e vincula o evento (Unobtrusive JS)
+        const toggleEl = document.getElementById('toggle-fab-layout');
+        if (toggleEl) {
+            toggleEl.checked = isVertical;
+            // Vinculação segura do evento
+            toggleEl.addEventListener('change', _handleToggle);
+        } else {
+            console.warn('[FabLayoutManager] Checkbox de layout não encontrado no DOM.');
+        }
+    }
+
+    function _handleToggle(event) {
+        isVertical = event.target.checked;
+        localStorage.setItem(STORAGE_KEY, isVertical);
+        _applyState();
+        
+        const msg = isVertical ? 'Atalhos centralizados (Modo Vertical).' : 'Atalhos no rodapé (Modo Padrão).';
+        if (typeof exibirToast === 'function') exibirToast(msg, 'info');
+    }
+
+    function _applyState() {
+        // Usa a classe no body como uma "Single Source of Truth" para o CSS
+        if (isVertical) {
+            document.body.classList.add('fab-layout-vertical');
+        } else {
+            document.body.classList.remove('fab-layout-vertical');
+        }
+    }
+
+    // Expõe apenas o init (encapsulamento estrito)
+    return { init };
+})();
+
+/* ================================================
    INICIALIZAÇÃO E INJEÇÃO DE DEPENDÊNCIAS
    ================================================ */
 document.addEventListener("DOMContentLoaded", () => {
@@ -685,6 +731,10 @@ document.addEventListener("DOMContentLoaded", () => {
     
     if (window.TimeTrackerManager) {
         TimeTrackerManager.init({ getTopicos: () => topicos });
+    }
+    
+    if (window.FabLayoutManager) {
+        FabLayoutManager.init();
     }
     
     if (window.PdfEngine) {

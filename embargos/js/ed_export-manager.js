@@ -141,7 +141,6 @@ window.ExportManager = (function () {
 
         // Coleta de escopo global (Bubble-up)
         const barreirasAdmissibilidade = [];
-        const jurisprudenciaVinculante = [];
         const vereditosLocaisInjetados = []; 
         const diretrizesGlobaisGerais = [];
 
@@ -335,6 +334,9 @@ window.ExportManager = (function () {
                         } else if (intencao === 'jurisprudencia') {
                             const textoExato = _stripInternalTags(sub.texto);
                             bufferDiretrizesLocais += `\n[INSTRUÇÃO: APLICAÇÃO DE JURISPRUDÊNCIA${refContexto}]\nTranscreva a ementa/julgado abaixo exatamente como fornecida (cópia literal). Em seguida, obrigatoriamente crie um parágrafo conectivo explicando de forma sucinta por que este julgado se amolda perfeitamente aos fatos incontroversos deste tópico.\n<texto_verbatim>\n${textoExato}\n</texto_verbatim>\n\n`;
+                        } else if (intencao === 'fundamentacao') {
+                            const textoExato = _stripInternalTags(sub.texto);
+                            bufferDiretrizesLocais += `\n[INSTRUÇÃO: APLICAÇÃO DE LEI SECA / NORMA${refContexto}]\nTranscreva a legislação abaixo exatamente como fornecida (cópia literal). Em seguida, obrigatoriamente crie um parágrafo conectivo explicando de forma sucinta como esta lei incide e se aplica aos fatos incontroversos específicos deste tópico.\n<texto_verbatim>\n${textoExato}\n</texto_verbatim>\n\n`;
                         } else if (intencao === 'degravacao') {
                             const textoExato = _stripInternalTags(sub.texto);
                             bufferDiretrizesLocais += `\n[INSTRUÇÃO: ANCORAGEM DE DEPOIMENTO ORAL${refContexto}]\nATENÇÃO: O trecho abaixo é um recorte curado pelo assessor extraído da transcrição da audiência já fornecida. Utilize este trecho exato entre aspas como a "prova cabal" (bala de prata) para sustentar a tese, atribuindo a fala ao orador correspondente.\n<texto_verbatim>\n${textoExato}\n</texto_verbatim>\n\n`;
@@ -351,9 +353,7 @@ window.ExportManager = (function () {
                                 bufferDiretrizesLocais += `[CONTEXTO FÁTICO COMPLEMENTAR PARA AUDITORIA${refContexto}]: ${textoSanitizado}\n`;
                             } 
                             // Escopo Global: Bubble-up
-                            else if (intencao === 'fundamentacao') {
-                                jurisprudenciaVinculante.push(`[Aplicável ao item ${numIdeia}${refContexto}]: ${textoSanitizado}`);
-                            } else if (intencao === 'preliminar') {
+                            else if (intencao === 'preliminar') {
                                 barreirasAdmissibilidade.push(`[Item ${numIdeia}${refContexto}]: ${textoSanitizado}`);
                             } else if (intencao === 'veredito') {
                                 vereditosLocaisInjetados.push(`[Auditoria da Ideia ${numIdeia}${refContexto}]: ${textoSanitizado}`);
@@ -393,12 +393,6 @@ window.ExportManager = (function () {
             md += `*Atenção IA: Resolva estes óbices (ex: intempestividade, inovação) ANTES de auditar o mérito dos embargos.*\n`;
             md += barreirasAdmissibilidade.map(c => `* 🛑 ${c}`).join('\n') + '\n';
             md += `</barreiras_de_admissibilidade_dos_embargos>\n\n`;
-        }
-
-        if (jurisprudenciaVinculante.length > 0) {
-            md += `<base_legal_e_jurisprudencial>\n`;
-            md += jurisprudenciaVinculante.map(c => `* ⚖️ ${c}`).join('\n') + '\n';
-            md += `</base_legal_e_jurisprudencial>\n\n`;
         }
 
         if ((topico.veredito && topico.veredito.trim() !== '') || vereditosLocaisInjetados.length > 0) {

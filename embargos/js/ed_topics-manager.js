@@ -1762,7 +1762,7 @@ window.TopicsManager = (function () {
                 'comando': { text: 'COMANDO', color: '#c62828', bg: '#ffebee' },
                 'texto': { text: 'TEXTO FIXO', color: '#1565c0', bg: '#e3f2fd' },
                 'premissa': { text: 'PREMISSA LÓGICA', color: '#7b1fa2', bg: '#f3e5f5' },
-                'fundamentacao': { text: 'FUNDAMENTAÇÃO LEGAL', color: '#00695c', bg: '#e0f2f1' },
+                'fundamentacao': { text: 'LEI SECA', color: '#00695c', bg: '#e0f2f1' },
                 'refutacao': { text: 'REFUTAÇÃO / MÉRITO', color: '#8B4513', bg: '#efebe9' },
                 'preliminar': { text: 'PREJUDICIAL / FILTRO', color: '#5d4037', bg: '#efebe9' },
                 'veredito': { text: 'VEREDITO', color: '#e65100', bg: '#fff3e0' },
