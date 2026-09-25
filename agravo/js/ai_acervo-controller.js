@@ -633,7 +633,7 @@ window.abrirEdicaoModeloAcervo = async function(event, modeloId) {
     const listaIntencoes = [
         { val: 'premissa', label: 'Premissa Lógica' }, { val: 'comando', label: 'Comando Direto' },
         { val: 'texto', label: 'Texto Fixo' }, { val: 'nota', label: 'Nota Oculta' },
-        { val: 'veredito', label: 'Veredito / Conclusão' }, { val: 'fundamentacao', label: 'Fundamentação Legal' },
+        { val: 'veredito', label: 'Veredito / Conclusão' }, { val: 'fundamentacao', label: 'Lei Seca' },
         { val: 'refutacao', label: 'Refutação (Mérito)' }, { val: 'preliminar', label: 'Filtro / Prejudicial' }
     ];
 

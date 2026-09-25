@@ -280,13 +280,14 @@ window.ExportManager = (function () {
                                 bufferDiretrizesLocais += `[AFASTAMENTO DO ÓBICE - PRESSUPOSTO ATENDIDO${refContexto}]: ${textoSanitizado}\n`;
                             } else if (intencao === 'comando') {
                                 bufferDiretrizesLocais += `[COMANDO DE REDAÇÃO ESTRITO${refContexto}]: ${textoSanitizado}\n`;
+                            } else if (intencao === 'fundamentacao') {
+                                const textoExato = _stripInternalTags(sub.texto);
+                                bufferDiretrizesLocais += `\n[INSTRUÇÃO: APLICAÇÃO DE LEI SECA / NORMA${refContexto}]\nTranscreva a legislação abaixo exatamente como fornecida (cópia literal). Em seguida, obrigatoriamente crie um parágrafo conectivo explicando de forma sucinta como esta lei incide e se aplica aos fatos incontroversos específicos deste tópico.\n<texto_verbatim>\n${textoExato}\n</texto_verbatim>\n\n`;
                             } else if (intencao === 'fallback') {
                                 bufferDiretrizesLocais += `[CONTEXTO COMPLEMENTAR${refContexto}]: ${textoSanitizado}\n`;
                             } 
                             // Escopo Global: Bubble-up
-                            else if (intencao === 'fundamentacao') {
-                                jurisprudenciaVinculante.push(`[Referente ao item ${numIdeia}${refContexto}]: ${textoSanitizado}`);
-                            } else if (intencao === 'preliminar') {
+                            else if (intencao === 'preliminar') {
                                 barreirasAdmissibilidade.push(`[Óbice extrínseco ${numIdeia}${refContexto}]: ${textoSanitizado}`);
                             } else if (intencao === 'veredito') {
                                 vereditosLocaisInjetados.push(`[Auditoria da Ideia ${numIdeia}${refContexto}]: ${textoSanitizado}`);

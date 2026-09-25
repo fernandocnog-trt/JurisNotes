@@ -122,7 +122,7 @@ function definirIntencaoSubAnotacao(intencaoStr) {
         'nota': 'Nota Oculta', 
         'premissa': 'Premissa Padrão',
         'veredito': 'Veredito / Conclusão',
-        'fundamentacao': 'Fundamentação Legal',
+        'fundamentacao': 'Lei Seca',
         'refutacao': 'Confirmação de Higidez',
         'preliminar': 'Filtro / Prejudicial'
     };
@@ -1117,7 +1117,7 @@ function exibirTooltipRapido(intencao, event) {
         'texto': { titulo: 'Texto Fixo', texto: 'A IA fará um "copia e cola" desta redação na minuta.' },
         'nota': { titulo: 'Nota Oculta', texto: 'A IA NÃO lerá isso. É apenas um lembrete para você.' },
         'veredito': { titulo: 'Veredito / Conclusão', texto: 'Força a IA a concluir o tópico recursal com esta decisão.' },
-        'fundamentacao': { titulo: 'Base Legal', texto: 'A IA priorizará esta lei/súmula acima de qualquer outra.' },
+        'fundamentacao': { titulo: 'Lei Seca', texto: 'A IA fará a transcrição exata da norma e a conectará aos fatos nesta exata posição da narrativa.' },
         'refutacao': { titulo: 'Confirmação de Higidez', texto: 'A IA usará este argumento para rejeitar o embargo e confirmar que a decisão não tem vícios.' },
         'preliminar': { titulo: 'Filtro / Prejudicial', texto: 'A IA redigirá este tópico antes de entrar no mérito.' }
     };
