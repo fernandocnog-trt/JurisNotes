@@ -57,6 +57,15 @@ window.BalancaManager = (function() {
             htmlState = event.data.html;
             iframe.removeAttribute('src'); 
             
+            // NOVO: Adiciona um gatilho para rolar até a trilha assim que o novo HTML renderizar
+            const triggerScroll = () => {
+                if (iframe.contentWindow) {
+                    iframe.contentWindow.postMessage({ type: 'SCROLL_TO_TRILHA' }, '*');
+                }
+                iframe.removeEventListener('load', triggerScroll);
+            };
+            iframe.addEventListener('load', triggerScroll);
+            
             // Esta mutação síncrona destrói o documento atual do iframe e renderiza o novo.
             // O feedback visual de sucesso para o usuário é a própria renderização do Dossiê.
             iframe.srcdoc = htmlState;     
@@ -99,8 +108,9 @@ window.BalancaManager = (function() {
         const onIframeLoad = () => {
             sincronizarContextoDossie(typeof topicos !== 'undefined' ? topicos : []);
             
-            if (irParaTrilha) {
-                aguardarDomERolarParaTrilha(iframe);
+            if (irParaTrilha && iframe.contentWindow) {
+                // IPC Delegado: Envia a ordem de scroll para o iframe executar de forma autônoma
+                iframe.contentWindow.postMessage({ type: 'SCROLL_TO_TRILHA' }, '*');
             }
 
             iframe.removeEventListener('load', onIframeLoad);
