@@ -45,6 +45,16 @@ function normalizeData(data) {
 // --- 2. GERAÇÃO E LIMPEZA ---
 async function generatePanel(isInternalGenerator = false) {
     try {
+        const btn = document.querySelector('.btn-generate');
+        
+        // Trava o botão imediatamente para evitar duplos cliques (UX)
+        if (btn) {
+            if (btn.classList.contains('is-loading')) return; // Impede duplo disparo
+            btn.innerText = "⏳ Processando...";
+            btn.style.backgroundColor = "#eab308"; // Amarelo de processamento
+            btn.classList.add('is-loading'); 
+        }
+
         const inputElement = document.getElementById('json-input');
         const input = inputElement.value;
         let data = JSON.parse(input);
@@ -73,24 +83,23 @@ async function generatePanel(isInternalGenerator = false) {
 
         renderContent(data);
         
-        const btn = document.querySelector('.btn-generate');
-        if (btn) {
-            const originalText = btn.innerText;
-            btn.innerText = "✅ Processando e Baixando...";
-            btn.style.backgroundColor = "#16a34a";
-            setTimeout(() => {
-                btn.innerText = originalText;
-                btn.style.backgroundColor = "";
-            }, 3000);
-        }
-
-        setTimeout(() => {
+        // Empacota e envia a mensagem para o Gatekeeper pai.
+        // Se der certo, este documento inteiro será destruído na próxima fração de segundo.
+        requestAnimationFrame(() => {
             downloadBundledHTML(isInternalGenerator);
-        }, 500);
+        });
 
     } catch (e) {
         console.error(e);
-        alert("Erro no JSON: " + e.message);
+        alert("Erro na leitura do JSON: " + e.message);
+        
+        // Em caso de erro local (JSON.parse), destrava o botão
+        const btn = document.querySelector('.btn-generate');
+        if (btn) {
+            btn.innerText = "Gerar Dossiê";
+            btn.style.backgroundColor = "";
+            btn.classList.remove('is-loading');
+        }
     }
 }
 
@@ -257,6 +266,20 @@ function renderContent(data) {
 }
 
 let windowAvailableTopics = [];
+
+// 0. OUVINTE DE ERROS DO GATEKEEPER (NACK)
+window.addEventListener('message', function(event) {
+    // Escuta apenas eventos de ERRO vindos do Gatekeeper do sistema principal
+    if (event.data && event.data.type === 'DOSSIE_ERROR') {
+        const btn = document.querySelector('.btn-generate');
+        if (btn) {
+            btn.innerText = "Gerar Dossiê"; // Retorna ao texto original
+            btn.style.backgroundColor = "";
+            btn.classList.remove('is-loading');
+        }
+        alert("Falha ao integrar o Dossiê: " + (event.data.message || "Erro desconhecido."));
+    }
+});
 
 // 1. OUVINTE DE MENSAGENS GLOBAL
 window.addEventListener('message', function(event) {

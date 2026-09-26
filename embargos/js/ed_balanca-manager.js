@@ -21,16 +21,44 @@ window.BalancaManager = (function() {
         }
     });
 
-    // NOVO: Validação estrita de segurança e listener de mensagens
+    // NOVO: Validação estrita de segurança (Zero Trust) e listener de mensagens
     window.addEventListener('message', function(event) {
-        const allowedOrigins = [window.location.origin, 'http://localhost', 'http://127.0.0.1'];
-        if (!allowedOrigins.some(origin => event.origin.startsWith(origin))) return;
+        const iframe = document.getElementById('balanca-iframe');
+        
+        // 1. GATEKEEPER: Validação Estrita de Identidade (Zero Trust para Sandboxes)
+        // Rejeita qualquer origem 'null' que não seja fisicamente a janela do nosso próprio iframe.
+        if (event.origin === "null") {
+            if (!iframe || event.source !== iframe.contentWindow) {
+                console.warn("[Juris Notes Security] postMessage rejeitado. Origem 'null' não corresponde ao iframe esperado.");
+                return;
+            }
+        } else {
+            // Validação de domínios de rede externos
+            const allowedOrigins = [window.location.origin, 'http://localhost', 'http://127.0.0.1'];
+            if (!allowedOrigins.some(origin => event.origin.startsWith(origin))) {
+                return;
+            }
+        }
 
+        // 2. PROCESSAMENTO: Tratamento do Evento do Dossiê
         if (event.data && event.data.type === 'DOSSIE_GENERATED') {
-            htmlState = event.data.html;
             
-            const iframe = document.getElementById('balanca-iframe');
+            // Validação de integridade do payload
+            if (!event.data.html || typeof event.data.html !== 'string') {
+                console.error('[Juris Notes Error] Payload do Dossiê corrompido.');
+                // Envia NACK (Feedback Negativo) para o iframe destravar o botão do usuário
+                if (iframe && iframe.contentWindow) {
+                    iframe.contentWindow.postMessage({ type: 'DOSSIE_ERROR', message: 'Payload inválido.' }, '*');
+                }
+                return;
+            }
+
+            // Sucesso: Aplica a transição
+            htmlState = event.data.html;
             iframe.removeAttribute('src'); 
+            
+            // Esta mutação síncrona destrói o documento atual do iframe e renderiza o novo.
+            // O feedback visual de sucesso para o usuário é a própria renderização do Dossiê.
             iframe.srcdoc = htmlState;     
 
             atualizarInterface();
