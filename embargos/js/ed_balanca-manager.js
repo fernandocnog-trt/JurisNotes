@@ -59,9 +59,7 @@ window.BalancaManager = (function() {
             
             // NOVO: Adiciona um gatilho para rolar até a trilha assim que o novo HTML renderizar
             const triggerScroll = () => {
-                if (iframe.contentWindow) {
-                    iframe.contentWindow.postMessage({ type: 'SCROLL_TO_TRILHA' }, '*');
-                }
+                aguardarDomERolarParaTrilha(iframe);
                 iframe.removeEventListener('load', triggerScroll);
             };
             iframe.addEventListener('load', triggerScroll);
@@ -108,9 +106,9 @@ window.BalancaManager = (function() {
         const onIframeLoad = () => {
             sincronizarContextoDossie(typeof topicos !== 'undefined' ? topicos : []);
             
-            if (irParaTrilha && iframe.contentWindow) {
-                // IPC Delegado: Envia a ordem de scroll para o iframe executar de forma autônoma
-                iframe.contentWindow.postMessage({ type: 'SCROLL_TO_TRILHA' }, '*');
+            if (irParaTrilha) {
+                // Removemos o IPC Delegado e voltamos a usar o controle direto (como no AI)
+                aguardarDomERolarParaTrilha(iframe);
             }
 
             iframe.removeEventListener('load', onIframeLoad);

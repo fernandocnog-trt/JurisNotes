@@ -347,33 +347,8 @@ window.addEventListener('message', function(event) {
         }
     }
 
-    // NOVO: Comando recebido do sistema principal para rolar até a Trilha
-    if (event.data && event.data.type === 'SCROLL_TO_TRILHA') {
-        let alvo = document.getElementById('secao-trilha-julgamento');
-        if (!alvo) {
-            const candidatos = Array.from(document.querySelectorAll('h1, h2, h3, h4, div.section-title'));
-            alvo = candidatos.find(el => el.textContent.trim().toLowerCase().includes('trilha de julgamento'));
-        }
-        if (alvo) {
-            alvo.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            alvo.classList.add('card-flash-focus');
-            setTimeout(() => alvo.classList.remove('card-flash-focus'), 1300);
-        }
-    }
-
-    // NOVO: Comando recebido do sistema principal para rolar até a Trilha
-    if (event.data && event.data.type === 'SCROLL_TO_TRILHA') {
-        let alvo = document.getElementById('secao-trilha-julgamento');
-        if (!alvo) {
-            const candidatos = Array.from(document.querySelectorAll('h1, h2, h3, h4, div.section-title'));
-            alvo = candidatos.find(el => el.textContent.trim().toLowerCase().includes('trilha de julgamento'));
-        }
-        if (alvo) {
-            alvo.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            alvo.classList.add('card-flash-focus');
-            setTimeout(() => alvo.classList.remove('card-flash-focus'), 1300);
-        }
-    }
+    // Blocos SCROLL_TO_TRILHA removidos: Controle de scroll migrado integralmente
+    // para o método aguardarDomERolarParaTrilha no ed_balanca-manager.js
 });
 
 // --- 3. INICIALIZAÇÃO LIMPA E ATUALIZAÇÃO DE LINHAS ---
