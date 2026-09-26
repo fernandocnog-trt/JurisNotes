@@ -130,47 +130,46 @@ window.BalancaManager = (function() {
     }
 
     /**
-     * Aguarda o DOM interno do iframe estar pronto (sem número mágico de tempo)
-     * e então executa a busca + scroll até a Trilha de Julgamento.
+     * Rastreador Blindado (Bulletproof Polling):
+     * Ignora o readyState e caça fisicamente o elemento no DOM para garantir
+     * que a rolagem só ocorra quando ele existir e o layout estiver desenhado.
      */
     function aguardarDomERolarParaTrilha(iframe, tentativas = 0) {
-        const MAX_TENTATIVAS = 20; // ~1s no total (20 x 50ms), suficiente para dossiês grandes
-        const doc = iframe.contentDocument;
+        const MAX_TENTATIVAS = 40; // ~2 segundos no total (40 x 50ms)
+        const doc = iframe.contentDocument || (iframe.contentWindow ? iframe.contentWindow.document : null);
 
-        if (!doc || doc.readyState !== 'complete') {
+        if (!doc) {
+            if (tentativas < MAX_TENTATIVAS) setTimeout(() => aguardarDomERolarParaTrilha(iframe, tentativas + 1), 50);
+            return;
+        }
+
+        // 1. Busca proativa pelo elemento alvo no DOM real
+        let alvo = doc.getElementById('secao-trilha-julgamento');
+        if (!alvo) {
+            const candidatos = Array.from(doc.querySelectorAll('h1, h2, h3, h4, div.section-title, span.item-title'));
+            alvo = candidatos.find(el => el.textContent.trim().toLowerCase().includes('trilha de julgamento'));
+        }
+
+        // 2. Se o elemento ainda não nasceu no DOM, continua caçando
+        if (!alvo) {
             if (tentativas < MAX_TENTATIVAS) {
                 setTimeout(() => aguardarDomERolarParaTrilha(iframe, tentativas + 1), 50);
+            } else {
+                console.warn('[Juris Notes ED] Trilha de Julgamento não encontrada a tempo.');
             }
             return;
         }
 
-        rolarParaTrilhaDeJulgamento(doc);
-    }
-
-    function rolarParaTrilhaDeJulgamento(doc) {
-        try {
-            // ESTRATÉGIA 1 (preferencial): ID fixo injetado pelo gerador
-            let alvo = doc.getElementById('secao-trilha-julgamento');
-
-            // ESTRATÉGIA 2 (fallback de compatibilidade retroativa):
-            // cobre dossiês antigos salvos sem o id, e também variações de
-            // numeração/rótulo (ex.: "4. Trilha de Julgamento (Arraste para Reordenar)").
-            if (!alvo) {
-                const candidatos = Array.from(doc.querySelectorAll('h1, h2, h3, h4, div.section-title'));
-                alvo = candidatos.find(el =>
-                    el.textContent.trim().toLowerCase().includes('trilha de julgamento')
-                );
-            }
-
-            if (alvo) {
+        // 3. Encontrou! Delay estratégico para garantir que o CSS (layout) terminou de pintar as alturas
+        setTimeout(() => {
+            try {
                 alvo.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                // Reaproveita a animação já existente no projeto
                 alvo.classList.add('card-flash-focus');
                 setTimeout(() => alvo.classList.remove('card-flash-focus'), 1300);
+            } catch (e) {
+                console.warn('[Juris Notes ED] Falha ao tentar rolar a página.', e);
             }
-        } catch (e) {
-            console.warn('[Juris Notes ED] Não foi possível localizar a Trilha de Julgamento no dossiê.', e);
-        }
+        }, 150);
     }
 
     // (abrirLembretes removido - transferido para TaskManager nativo)
