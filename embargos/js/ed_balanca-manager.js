@@ -70,6 +70,22 @@ window.BalancaManager = (function() {
                 window.exibirToast('Dossiê vinculado com sucesso!', 'sucesso');
             }
         }
+
+        // 3. ATUALIZAÇÃO REVERSA: Disparada pelo botão Salvar do Dossiê ou Fechamento de Painel
+        if (event.data && event.data.type === 'DOSSIE_UPDATED') {
+            if (event.data.html && typeof event.data.html === 'string') {
+                htmlState = event.data.html; // Atualiza em memória SEM recarregar o iframe (evita piscar a tela)
+                
+                if (typeof window.salvarBackupAutomatico === 'function') {
+                    window.salvarBackupAutomatico(); // Salva no banco/storage principal
+                }
+                
+                // Exibe feedback visual apenas se foi um salvamento manual (não-silencioso)
+                if (!event.data.silent && typeof window.exibirToast === 'function') {
+                    window.exibirToast('Alterações sincronizadas com o sistema principal!', 'sucesso');
+                }
+            }
+        }
     });
 
     function abrirPainel() {
@@ -257,12 +273,12 @@ window.BalancaManager = (function() {
         if (!iframe || !htmlState) return;
 
         try {
+            // Tenta o acesso direto clássico
             const doc = iframe.contentDocument || iframe.contentWindow.document;
             
             doc.querySelectorAll('textarea').forEach(el => el.textContent = el.value);
             doc.querySelectorAll('input[type="text"], input[type="number"], input[type="hidden"]').forEach(el => el.setAttribute('value', el.value));
             
-            // Tratamento Crítico de Checkboxes (Onde ficam as tarefas)
             doc.querySelectorAll('input[type="checkbox"], input[type="radio"]').forEach(el => {
                 if (el.checked) el.setAttribute('checked', 'checked');
                 else el.removeAttribute('checked');
@@ -278,7 +294,11 @@ window.BalancaManager = (function() {
             htmlState = doc.documentElement.outerHTML;
 
         } catch (e) {
-            console.error("[Juris Notes ED] Sincronização do painel falhou.", e);
+            // Plano B de Segurança: Acesso bloqueado. Solicita ao iframe que envie seus próprios dados.
+            console.warn("[Juris Notes ED] Acesso direto ao DOM bloqueado por segurança. Solicitando push via postMessage...");
+            if (iframe.contentWindow) {
+                iframe.contentWindow.postMessage({ type: 'REQUEST_SYNC' }, '*');
+            }
         }
     }
 

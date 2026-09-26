@@ -267,17 +267,30 @@ function renderContent(data) {
 
 let windowAvailableTopics = [];
 
-// 0. OUVINTE DE ERROS DO GATEKEEPER (NACK)
+// 0. OUVINTE DE EVENTOS DO SISTEMA PRINCIPAL (GATEKEEPER)
 window.addEventListener('message', function(event) {
-    // Escuta apenas eventos de ERRO vindos do Gatekeeper do sistema principal
+    // A) Tratamento de Erro na Geração (NACK)
     if (event.data && event.data.type === 'DOSSIE_ERROR') {
         const btn = document.querySelector('.btn-generate');
         if (btn) {
-            btn.innerText = "Gerar Dossiê"; // Retorna ao texto original
+            btn.innerText = "Gerar Dossiê";
             btn.style.backgroundColor = "";
             btn.classList.remove('is-loading');
         }
         alert("Falha ao integrar o Dossiê: " + (event.data.message || "Erro desconhecido."));
+    }
+    
+    // B) Sincronização Passiva: Quando o usuário fecha o painel no sistema principal
+    if (event.data && event.data.type === 'REQUEST_SYNC') {
+        document.querySelectorAll('input[type="checkbox"], input[type="radio"]').forEach(c => c.checked ? c.setAttribute('checked', 'checked') : c.removeAttribute('checked'));
+        document.querySelectorAll('input[type="text"], input[type="number"], input[type="hidden"]').forEach(i => i.setAttribute('value', i.value));
+        document.querySelectorAll('textarea').forEach(t => t.textContent = t.value);
+        
+        window.parent.postMessage({ 
+            type: 'DOSSIE_UPDATED', 
+            html: document.documentElement.outerHTML,
+            silent: true
+        }, '*');
     }
 });
 
@@ -1021,6 +1034,19 @@ window.triggerSave = async function(btn) {
     // UX: Garante que a animação seja percebida antes do thread lock do download
     await new Promise(r => setTimeout(r, 500)); 
     
+    // NOVO: Push ativo - Envia o estado atualizado para salvar no sistema principal (Backup)
+    if (window.parent && window.parent !== window) {
+        document.querySelectorAll('input[type="checkbox"], input[type="radio"]').forEach(c => c.checked ? c.setAttribute('checked', 'checked') : c.removeAttribute('checked'));
+        document.querySelectorAll('input[type="text"], input[type="number"], input[type="hidden"]').forEach(i => i.setAttribute('value', i.value));
+        document.querySelectorAll('textarea').forEach(t => t.textContent = t.value);
+        
+        window.parent.postMessage({ 
+            type: 'DOSSIE_UPDATED', 
+            html: document.documentElement.outerHTML 
+        }, '*');
+    }
+    
+    // Mantém o comportamento de baixar o HTML localmente (caso necessário)
     await downloadBundledHTML();
     
     btn.classList.remove('is-saving');
