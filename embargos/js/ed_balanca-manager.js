@@ -8,8 +8,7 @@ window.BalancaManager = (function() {
     let htmlState = null;
     let pendingTasksCount = 0;
 
-    // GESTÃO DE ESTADO SEGURA PARA GARBAGE COLLECTION
-    // Associa timers de animação a instâncias de iframes sem poluir o DOM.
+    // GESTÃO DE MEMÓRIA: Guarda os timers das animações vinculados aos iframes
     const scrollTimersMap = new WeakMap();
 
     // ATUALIZAÇÃO: Atalho Alt + B protegido e inteligente
@@ -104,32 +103,40 @@ window.BalancaManager = (function() {
         document.getElementById('balanca-painel').style.display = 'flex';
 
         const iframe = document.getElementById('balanca-iframe');
-        const irParaTrilha = !!htmlState; // só tenta scroll se já existir dossiê carregado
-        
-        // Listener seguro que se auto-destrói para evitar memory leak
-        const onIframeLoad = () => {
-            sincronizarContextoDossie(typeof topicos !== 'undefined' ? topicos : []);
-            
-            if (irParaTrilha) {
-                // Removemos o IPC Delegado e voltamos a usar o controle direto (como no AI)
-                aguardarDomERolarParaTrilha(iframe);
-            }
-
-            iframe.removeEventListener('load', onIframeLoad);
-        };
-        iframe.addEventListener('load', onIframeLoad);
+        const irParaTrilha = !!htmlState; 
 
         if (htmlState) {
-            // Força o navegador a tratar como nova navegação, garantindo que
-            // o evento 'load' dispare mesmo se o conteúdo for idêntico ao anterior.
+            let execucaoGarantida = false; // Trava contra dupla execução (Race Condition Lock)
+
+            // Closure atômica: Quem chamar primeiro executa, os demais são abortados.
+            const executarCargaUnica = () => {
+                if (execucaoGarantida) return;
+                execucaoGarantida = true;
+                
+                sincronizarContextoDossie(typeof topicos !== 'undefined' ? topicos : []);
+                if (irParaTrilha) {
+                    aguardarDomERolarParaTrilha(iframe);
+                }
+                
+                iframe.removeEventListener('load', executarCargaUnica);
+            };
+
+            // 1. Armamos o gatilho principal (via evento natural do DOM)
+            iframe.addEventListener('load', executarCargaUnica);
+
+            // Força recarga do Iframe
             iframe.removeAttribute('srcdoc');
             iframe.removeAttribute('src');
-            // Reflow síncrono necessário antes de reatribuir o mesmo srcdoc
-            void iframe.offsetWidth;
+            void iframe.offsetWidth; // Reflow síncrono
             iframe.srcdoc = htmlState;
+
+            // 2. Armamos o gatilho de resgate (Fallback para BFCache/Otimizações do Chrome)
+            // Se o navegador ignorar o load por ser o mesmo HTML, forçamos a execução.
+            setTimeout(executarCargaUnica, 200);
+
         } else {
             iframe.removeAttribute('srcdoc');
-            iframe.src = '../dossie/index.html'; // Puxa o gerador da raiz
+            iframe.src = '../dossie/index.html'; 
         }
     }
 
@@ -167,34 +174,22 @@ window.BalancaManager = (function() {
 
         const rolar = () => {
             try {
-                const win = iframe.contentWindow;
-                const offset = 80; // Respiro para o cabeçalho fixo
-
-                // 1. CLEANUP ISOLADO (Evita Shared State e DOM Pollution)
+                // 1. CLEANUP ISOLADO DE TIMERS ANTIGOS
                 const currentTimers = scrollTimersMap.get(iframe) || [];
                 currentTimers.forEach(clearTimeout);
                 
-                // 2. CÁLCULO DE POSIÇÃO ABSOLUTO
-                const atual = win.pageYOffset || doc.documentElement.scrollTop || 0;
-                const alvoTop = alvo.getBoundingClientRect().top;
-                const destino = Math.max(0, alvoTop + atual - offset);
-
-                // 3. ROLAGEM DETERMINÍSTICA E IMEDIATA
-                win.scrollTo({
-                    top: destino,
-                    behavior: 'instant' // Substitui o 'auto' para prevenir interpolações de UI
-                });
-
-                // Fallbacks estruturais
-                doc.documentElement.scrollTop = destino;
-                if (doc.body) doc.body.scrollTop = destino;
-
-                // 4. CSS SINGLETON INJECTION
+                // 2. CSS SINGLETON INJECTION (Ancoragem e Animação)
+                const doc = iframe.contentDocument || iframe.contentWindow.document;
                 const styleId = 'juris-highlight-fx';
                 if (!doc.getElementById(styleId)) {
                     const styleTag = doc.createElement('style');
                     styleTag.id = styleId;
                     styleTag.textContent = `
+                        /* Ancoragem de rolagem nativa para respeitar o cabeçalho fixo */
+                        .juris-scroll-anchor {
+                            scroll-margin-top: 90px;
+                        }
+                        /* Feedback visual que não quebra o Box Model */
                         .juris-focus-pulse {
                             animation: juris-pulse-anim 1.2s ease-out forwards;
                             border-radius: 4px;
@@ -208,19 +203,29 @@ window.BalancaManager = (function() {
                     doc.head.appendChild(styleTag);
                 }
 
-                // 5. ATIVAÇÃO DE ANIMAÇÃO VIA REFLOW
+                // 3. APLICAÇÃO DE CLASSES E ROLAGEM NATIVA
                 alvo.classList.remove('juris-focus-pulse');
-                void alvo.offsetWidth; // Força recálculo de layout para reiniciar a animação
-                alvo.classList.add('juris-focus-pulse');
+                alvo.classList.add('juris-scroll-anchor'); // Prepara o terreno para o scroll nativo
+                
+                void alvo.offsetWidth; // Força Reflow para reiniciar CSS Animations
+                
+                // A API nativa sobe a árvore DOM e rola o contêiner correto (resolvendo a falha silenciosa)
+                alvo.scrollIntoView({ behavior: 'instant', block: 'start' });
+                alvo.classList.add('juris-focus-pulse'); // Acende o feedback visual
 
-                // 6. REGISTRO DE TIMERS SEGURO
+                // Fallbacks estruturais para extrema retrocompatibilidade em iframes isolados
+                const fallbackDestino = Math.max(0, alvo.getBoundingClientRect().top + (iframe.contentWindow.pageYOffset || 0) - 90);
+                if (doc.documentElement.scrollTop === 0) doc.documentElement.scrollTop = fallbackDestino;
+                if (doc.body && doc.body.scrollTop === 0) doc.body.scrollTop = fallbackDestino;
+
+                // 4. REGISTRO DE TIMERS SEGURO (Cleanup após a animação)
                 const cleanupTimer = setTimeout(() => {
                     if (alvo && alvo.isConnected) {
                         alvo.classList.remove('juris-focus-pulse');
+                        // Mantém a âncora, remove apenas o efeito de pulso
                     }
                 }, 1300);
 
-                // Grava o timer associado unicamente a esta instância de iframe
                 scrollTimersMap.set(iframe, [cleanupTimer]);
 
             } catch (e) {
