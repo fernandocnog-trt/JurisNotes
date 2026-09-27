@@ -42,10 +42,10 @@ window.BalancaManager = (function() {
 
         // 2. PROCESSAMENTO: Tratamento do Evento do Dossiê
         if (event.data && event.data.type === 'DOSSIE_GENERATED') {
-            
             // Validação de integridade do payload
             if (!event.data.html || typeof event.data.html !== 'string') {
                 console.error('[Juris Notes Error] Payload do Dossiê corrompido.');
+                
                 // Envia NACK (Feedback Negativo) para o iframe destravar o botão do usuário
                 if (iframe && iframe.contentWindow) {
                     iframe.contentWindow.postMessage({ type: 'DOSSIE_ERROR', message: 'Payload inválido.' }, '*');
@@ -53,13 +53,13 @@ window.BalancaManager = (function() {
                 return;
             }
 
-            // Sucesso: Aplica a transição
+            // Sucesso: guarda o novo HTML do Dossiê
             htmlState = event.data.html;
-            iframe.removeAttribute('src'); 
-            
-            // Esta mutação síncrona destrói o documento atual do iframe e renderiza o novo.
-            // O feedback visual de sucesso para o usuário é a própria renderização do Dossiê.
-            iframe.srcdoc = htmlState;     
+
+            // CORREÇÃO:
+            // Centraliza o fluxo no mesmo caminho usado pelo AI:
+            // abrirPainel() -> render do iframe -> load -> scroll para a Trilha.
+            abrirPainel();
 
             atualizarInterface();
             
@@ -89,82 +89,204 @@ window.BalancaManager = (function() {
     });
 
     function abrirPainel() {
-        document.getElementById('balanca-modal-backdrop').style.display = 'block';
-        document.getElementById('balanca-painel').style.display = 'flex';
-
+        const backdrop = document.getElementById('balanca-modal-backdrop');
+        const painel = document.getElementById('balanca-painel');
         const iframe = document.getElementById('balanca-iframe');
-        const irParaTrilha = !!htmlState; // só tenta scroll se já existir dossiê carregado
-        
+
+        if (!backdrop || !painel || !iframe) return;
+
+        backdrop.style.display = 'block';
+        painel.style.display = 'flex';
+
+        // Só tenta rolar para a Trilha se já existir Dossiê carregado
+        const irParaTrilha = Boolean(htmlState);
+
         // Listener seguro que se auto-destrói para evitar memory leak
         const onIframeLoad = () => {
-            sincronizarContextoDossie(typeof topicos !== 'undefined' ? topicos : []);
-            
-            if (irParaTrilha) {
-                // UX FIX: Pequeno delay para garantir que o CSS do modal (display: flex) 
-                // e as alturas do iframe foram totalmente pintados na tela antes do cálculo de rolagem.
-                setTimeout(() => {
-                    aguardarDomERolarParaTrilha(iframe);
-                }, 150); 
-            }
-
             iframe.removeEventListener('load', onIframeLoad);
+
+            sincronizarContextoDossie(typeof topicos !== 'undefined' ? topicos : []);
+
+            if (irParaTrilha) {
+                aguardarDomERolarParaTrilha(iframe);
+            }
         };
+
         iframe.addEventListener('load', onIframeLoad);
 
         if (htmlState) {
+            // Força o navegador a tratar como nova navegação, garantindo que
+            // o evento 'load' dispare mesmo se o conteúdo for idêntico ao anterior.
             iframe.removeAttribute('srcdoc');
             iframe.removeAttribute('src');
+
             // Reflow síncrono necessário antes de reatribuir o mesmo srcdoc
             void iframe.offsetWidth;
+
             iframe.srcdoc = htmlState;
         } else {
             iframe.removeAttribute('srcdoc');
-            iframe.src = '../dossie/index.html'; 
+            iframe.src = '../dossie/index.html'; // Puxa o gerador da raiz
         }
     }
 
+    /**
+     * Rastreador blindado para rolagem até a Trilha de Julgamento.
+     *
+     * Estratégia:
+     * 1. Obtém o document interno do iframe com segurança.
+     * 2. Localiza a Trilha por ID fixo ou por busca textual.
+     * 3. Aguarda o documento ficar pronto.
+     * 4. Usa requestAnimationFrame + pequeno delay para rolar depois da pintura.
+     */
     function aguardarDomERolarParaTrilha(iframe, tentativas = 0) {
-        const MAX_TENTATIVAS = 20; 
-        const doc = iframe.contentDocument || (iframe.contentWindow ? iframe.contentWindow.document : null);
+        const MAX_TENTATIVAS = 40; // ~2 segundos no total
 
-        if (!doc || doc.readyState !== 'complete') {
+        let doc = null;
+
+        try {
+            doc = iframe.contentDocument || (iframe.contentWindow ? iframe.contentWindow.document : null);
+        } catch (e) {
+            doc = null;
+        }
+
+        if (!doc) {
             if (tentativas < MAX_TENTATIVAS) {
                 setTimeout(() => aguardarDomERolarParaTrilha(iframe, tentativas + 1), 50);
             }
             return;
         }
 
-        rolarParaTrilhaDeJulgamento(doc);
-    }
+        const alvo = localizarTrilhaDeJulgamento(doc);
 
-    function rolarParaTrilhaDeJulgamento(doc) {
-        try {
-            // ESTRATÉGIA 1: Tenta o ID fixo (Backups Novos)
-            let alvo = doc.getElementById('secao-trilha-julgamento');
-
-            // ESTRATÉGIA 2: Busca por texto (Compatibilidade com Backups Antigos)
-            if (!alvo) {
-                // Recoloquei o span.item-title para garantir compatibilidade com o passado
-                const candidatos = Array.from(doc.querySelectorAll('h1, h2, h3, h4, div.section-title, span.item-title'));
-                
-                alvo = candidatos.find(el => {
-                    const texto = el.textContent.trim().toLowerCase();
-                    // Garante que é exatamente a trilha, e não um item qualquer com a palavra solta
-                    return texto.includes('trilha de julgamento') || texto === '4. trilha de julgamento';
-                });
+        if (!alvo) {
+            if (tentativas < MAX_TENTATIVAS) {
+                setTimeout(() => aguardarDomERolarParaTrilha(iframe, tentativas + 1), 50);
+            } else {
+                console.warn('[Juris Notes ED] Trilha de Julgamento não encontrada a tempo.');
             }
+            return;
+        }
 
-            if (alvo) {
-                // Cálculo de scroll robusto
-                alvo.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                
+        const garantirAlvoVisivel = () => {
+            try {
+                // Se a Trilha estiver dentro de um <details>, abre automaticamente
+                const details = alvo.closest('details');
+                if (details && !details.open) {
+                    details.open = true;
+                }
+
+                // Caso esteja dentro de sanfona/acordeão do próprio Dossiê
+                const accordion = alvo.closest('.sync-accordion-wrapper');
+                if (accordion) {
+                    accordion.classList.add('is-open');
+                }
+            } catch (e) {
+                // Silencioso: apenas tentativa de garantir visibilidade
+            }
+        };
+
+        const executarScroll = () => {
+            try {
+                garantirAlvoVisivel();
+
+                alvo.scrollIntoView({
+                    behavior: 'smooth',
+                    block: 'start'
+                });
+
                 alvo.classList.add('card-flash-focus');
                 setTimeout(() => alvo.classList.remove('card-flash-focus'), 1300);
-            } else {
-                console.warn('[Juris Notes ED] Trilha de Julgamento não encontrada (Backups antigos podem não ter este cabeçalho exato).');
+            } catch (e) {
+                try {
+                    garantirAlvoVisivel();
+
+                    // Fallback para navegadores antigos ou comportamento inesperado
+                    alvo.scrollIntoView(true);
+                } catch (e2) {
+                    console.warn('[Juris Notes ED] Falha ao tentar rolar a página.', e2);
+                }
             }
+        };
+
+        const aguardarPintura = () => {
+            if (iframe.contentWindow && typeof iframe.contentWindow.requestAnimationFrame === 'function') {
+                iframe.contentWindow.requestAnimationFrame(() => {
+                    iframe.contentWindow.requestAnimationFrame(() => {
+                        setTimeout(executarScroll, 80);
+                    });
+                });
+            } else {
+                setTimeout(executarScroll, 150);
+            }
+        };
+
+        // Se o documento interno já estiver completo, espera apenas a pintura.
+        // Se ainda não estiver, aguarda até 1 segundo para não travar em recursos lentos.
+        if (doc.readyState === 'complete') {
+            aguardarPintura();
+        } else {
+            let espera = 0;
+
+            const esperarDocumento = () => {
+                espera += 50;
+
+                if (doc.readyState === 'complete' || espera >= 1000) {
+                    aguardarPintura();
+                } else {
+                    setTimeout(esperarDocumento, 50);
+                }
+            };
+
+            esperarDocumento();
+        }
+    }
+
+    /**
+     * Localiza a seção "Trilha de Julgamento" dentro do Dossiê.
+     *
+     * Prioridade:
+     * 1. ID fixo: #secao-trilha-julgamento
+     * 2. Busca textual por títulos e elementos compatíveis
+     */
+    function localizarTrilhaDeJulgamento(doc) {
+        try {
+            // Estratégia 1: ID fixo injetado pelo gerador
+            const alvoPorId = doc.getElementById('secao-trilha-julgamento');
+            if (alvoPorId) {
+                return alvoPorId;
+            }
+
+            const normalizar = (texto) => {
+                let t = texto || '';
+
+                if (typeof t.normalize === 'function') {
+                    t = t.normalize('NFKD');
+                }
+
+                return t
+                    .toLowerCase()
+                    .replace(/\u00a0/g, ' ') // espaço non-breaking
+                    .replace(/\s+/g, ' ')
+                    .trim();
+            };
+
+            // Estratégia 2: fallback textual para dossiês antigos ou variações de markup
+            const candidatos = Array.from(doc.querySelectorAll(`
+                h1,
+                h2,
+                h3,
+                h4,
+                div.section-title,
+                span.item-title,
+                [data-scroll-target="trilha-julgamento"]
+            `));
+
+            return candidatos.find(el =>
+                normalizar(el.textContent).includes('trilha de julgamento')
+            ) || null;
         } catch (e) {
-            console.warn('[Juris Notes ED] Erro interno ao tentar rolar a página.', e);
+            return null;
         }
     }
 
