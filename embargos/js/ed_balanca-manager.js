@@ -8,6 +8,10 @@ window.BalancaManager = (function() {
     let htmlState = null;
     let pendingTasksCount = 0;
 
+    // GESTÃO DE ESTADO SEGURA PARA GARBAGE COLLECTION
+    // Associa timers de animação a instâncias de iframes sem poluir o DOM.
+    const scrollTimersMap = new WeakMap();
+
     // ATUALIZAÇÃO: Atalho Alt + B protegido e inteligente
     document.addEventListener('keydown', function(e) {
         if (e.altKey && (e.key === 'b' || e.key === 'B')) {
@@ -130,15 +134,11 @@ window.BalancaManager = (function() {
     }
 
     /**
-     * Rola para a Trilha de Julgamento com busca segura:
-     * - ignora elementos escondidos;
-     * - ignora elementos dentro de sanfona fechada;
-     * - prioriza a seção 4;
-     * - usa #sortable-list como fallback.
+     * Rola para a Trilha de Julgamento com busca segura, scroll instantâneo
+     * e gestão de memória rigorosa (WeakMap + Cleanup).
      */
     function aguardarDomERolarParaTrilha(iframe, tentativas = 0) {
         const MAX_TENTATIVAS = 40;
-
         let doc = null;
 
         try {
@@ -168,31 +168,67 @@ window.BalancaManager = (function() {
         const rolar = () => {
             try {
                 const win = iframe.contentWindow;
-                const offset = 90;
+                const offset = 80; // Respiro para o cabeçalho fixo
 
-                alvo.scrollIntoView({
-                    behavior: 'smooth',
-                    block: 'start'
-                });
-
+                // 1. CLEANUP ISOLADO (Evita Shared State e DOM Pollution)
+                const currentTimers = scrollTimersMap.get(iframe) || [];
+                currentTimers.forEach(clearTimeout);
+                
+                // 2. CÁLCULO DE POSIÇÃO ABSOLUTO
                 const atual = win.pageYOffset || doc.documentElement.scrollTop || 0;
-                const destino = Math.max(0, alvo.getBoundingClientRect().top + atual - offset);
+                const alvoTop = alvo.getBoundingClientRect().top;
+                const destino = Math.max(0, alvoTop + atual - offset);
 
+                // 3. ROLAGEM DETERMINÍSTICA E IMEDIATA
                 win.scrollTo({
                     top: destino,
-                    behavior: 'smooth'
+                    behavior: 'instant' // Substitui o 'auto' para prevenir interpolações de UI
                 });
 
+                // Fallbacks estruturais
                 doc.documentElement.scrollTop = destino;
                 if (doc.body) doc.body.scrollTop = destino;
 
-                alvo.classList.add('card-flash-focus');
-                setTimeout(() => alvo.classList.remove('card-flash-focus'), 1300);
+                // 4. CSS SINGLETON INJECTION
+                const styleId = 'juris-highlight-fx';
+                if (!doc.getElementById(styleId)) {
+                    const styleTag = doc.createElement('style');
+                    styleTag.id = styleId;
+                    styleTag.textContent = `
+                        .juris-focus-pulse {
+                            animation: juris-pulse-anim 1.2s ease-out forwards;
+                            border-radius: 4px;
+                        }
+                        @keyframes juris-pulse-anim {
+                            0% { background-color: transparent; box-shadow: 0 0 0 0 transparent; }
+                            15% { background-color: #e0f2fe; box-shadow: 0 0 0 6px #e0f2fe; }
+                            100% { background-color: transparent; box-shadow: 0 0 0 0 transparent; }
+                        }
+                    `;
+                    doc.head.appendChild(styleTag);
+                }
+
+                // 5. ATIVAÇÃO DE ANIMAÇÃO VIA REFLOW
+                alvo.classList.remove('juris-focus-pulse');
+                void alvo.offsetWidth; // Força recálculo de layout para reiniciar a animação
+                alvo.classList.add('juris-focus-pulse');
+
+                // 6. REGISTRO DE TIMERS SEGURO
+                const cleanupTimer = setTimeout(() => {
+                    if (alvo && alvo.isConnected) {
+                        alvo.classList.remove('juris-focus-pulse');
+                    }
+                }, 1300);
+
+                // Grava o timer associado unicamente a esta instância de iframe
+                scrollTimersMap.set(iframe, [cleanupTimer]);
+
             } catch (e) {
                 console.warn('[Juris Notes ED] Falha ao tentar rolar até a Trilha.', e);
             }
         };
 
+        // Duplo requestAnimationFrame estabiliza o cálculo em iframes complexos
         if (iframe.contentWindow && typeof iframe.contentWindow.requestAnimationFrame === 'function') {
             iframe.contentWindow.requestAnimationFrame(() => {
                 iframe.contentWindow.requestAnimationFrame(() => {
