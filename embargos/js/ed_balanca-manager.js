@@ -100,8 +100,11 @@ window.BalancaManager = (function() {
             sincronizarContextoDossie(typeof topicos !== 'undefined' ? topicos : []);
             
             if (irParaTrilha) {
-                // Removemos o IPC Delegado e voltamos a usar o controle direto (como no AI)
-                aguardarDomERolarParaTrilha(iframe);
+                // UX FIX: Pequeno delay para garantir que o CSS do modal (display: flex) 
+                // e as alturas do iframe foram totalmente pintados na tela antes do cálculo de rolagem.
+                setTimeout(() => {
+                    aguardarDomERolarParaTrilha(iframe);
+                }, 150); 
             }
 
             iframe.removeEventListener('load', onIframeLoad);
@@ -109,8 +112,6 @@ window.BalancaManager = (function() {
         iframe.addEventListener('load', onIframeLoad);
 
         if (htmlState) {
-            // Força o navegador a tratar como nova navegação, garantindo que
-            // o evento 'load' dispare mesmo se o conteúdo for idêntico ao anterior.
             iframe.removeAttribute('srcdoc');
             iframe.removeAttribute('src');
             // Reflow síncrono necessário antes de reatribuir o mesmo srcdoc
@@ -118,19 +119,14 @@ window.BalancaManager = (function() {
             iframe.srcdoc = htmlState;
         } else {
             iframe.removeAttribute('srcdoc');
-            iframe.src = '../dossie/index.html'; // Puxa o gerador da raiz
+            iframe.src = '../dossie/index.html'; 
         }
     }
 
-    /**
-     * Aguarda o DOM interno do iframe estar pronto (sem número mágico de tempo)
-     * e então executa a busca + scroll até a Trilha de Julgamento.
-     */
     function aguardarDomERolarParaTrilha(iframe, tentativas = 0) {
-        const MAX_TENTATIVAS = 20; // ~1s no total (20 x 50ms), suficiente para dossiês grandes
+        const MAX_TENTATIVAS = 20; 
         const doc = iframe.contentDocument || (iframe.contentWindow ? iframe.contentWindow.document : null);
 
-        // UX: Garante que o CSS (CSSOM) e o Layout estejam montados antes de calcular o scroll
         if (!doc || doc.readyState !== 'complete') {
             if (tentativas < MAX_TENTATIVAS) {
                 setTimeout(() => aguardarDomERolarParaTrilha(iframe, tentativas + 1), 50);
@@ -143,26 +139,32 @@ window.BalancaManager = (function() {
 
     function rolarParaTrilhaDeJulgamento(doc) {
         try {
-            // ESTRATÉGIA 1 (preferencial): ID fixo injetado pelo gerador
+            // ESTRATÉGIA 1: Tenta o ID fixo (Backups Novos)
             let alvo = doc.getElementById('secao-trilha-julgamento');
 
-            // ESTRATÉGIA 2 (fallback de compatibilidade): busca textual restrita
-            // Cobre dossiês antigos salvos sem o id, e também variações de numeração
+            // ESTRATÉGIA 2: Busca por texto (Compatibilidade com Backups Antigos)
             if (!alvo) {
-                const candidatos = Array.from(doc.querySelectorAll('h1, h2, h3, h4, div.section-title'));
-                alvo = candidatos.find(el =>
-                    el.textContent.trim().toLowerCase().includes('trilha de julgamento')
-                );
+                // Recoloquei o span.item-title para garantir compatibilidade com o passado
+                const candidatos = Array.from(doc.querySelectorAll('h1, h2, h3, h4, div.section-title, span.item-title'));
+                
+                alvo = candidatos.find(el => {
+                    const texto = el.textContent.trim().toLowerCase();
+                    // Garante que é exatamente a trilha, e não um item qualquer com a palavra solta
+                    return texto.includes('trilha de julgamento') || texto === '4. trilha de julgamento';
+                });
             }
 
             if (alvo) {
+                // Cálculo de scroll robusto
                 alvo.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                // Reaproveita a animação já existente no projeto para dar feedback visual
+                
                 alvo.classList.add('card-flash-focus');
                 setTimeout(() => alvo.classList.remove('card-flash-focus'), 1300);
+            } else {
+                console.warn('[Juris Notes ED] Trilha de Julgamento não encontrada (Backups antigos podem não ter este cabeçalho exato).');
             }
         } catch (e) {
-            console.warn('[Juris Notes ED] Não foi possível localizar a Trilha de Julgamento no dossiê.', e);
+            console.warn('[Juris Notes ED] Erro interno ao tentar rolar a página.', e);
         }
     }
 
