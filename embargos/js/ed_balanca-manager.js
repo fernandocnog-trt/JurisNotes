@@ -42,10 +42,10 @@ window.BalancaManager = (function() {
 
         // 2. PROCESSAMENTO: Tratamento do Evento do Dossiê
         if (event.data && event.data.type === 'DOSSIE_GENERATED') {
+            
             // Validação de integridade do payload
             if (!event.data.html || typeof event.data.html !== 'string') {
                 console.error('[Juris Notes Error] Payload do Dossiê corrompido.');
-                
                 // Envia NACK (Feedback Negativo) para o iframe destravar o botão do usuário
                 if (iframe && iframe.contentWindow) {
                     iframe.contentWindow.postMessage({ type: 'DOSSIE_ERROR', message: 'Payload inválido.' }, '*');
@@ -53,13 +53,20 @@ window.BalancaManager = (function() {
                 return;
             }
 
-            // Sucesso: guarda o novo HTML do Dossiê
+            // Sucesso: Aplica a transição
             htmlState = event.data.html;
-
-            // CORREÇÃO:
-            // Centraliza o fluxo no mesmo caminho usado pelo AI:
-            // abrirPainel() -> render do iframe -> load -> scroll para a Trilha.
-            abrirPainel();
+            iframe.removeAttribute('src'); 
+            
+            // NOVO: Adiciona um gatilho para rolar até a trilha assim que o novo HTML renderizar
+            const triggerScroll = () => {
+                aguardarDomERolarParaTrilha(iframe);
+                iframe.removeEventListener('load', triggerScroll);
+            };
+            iframe.addEventListener('load', triggerScroll);
+            
+            // Esta mutação síncrona destrói o documento atual do iframe e renderiza o novo.
+            // O feedback visual de sucesso para o usuário é a própria renderização do Dossiê.
+            iframe.srcdoc = htmlState;     
 
             atualizarInterface();
             
@@ -89,29 +96,23 @@ window.BalancaManager = (function() {
     });
 
     function abrirPainel() {
-        const backdrop = document.getElementById('balanca-modal-backdrop');
-        const painel = document.getElementById('balanca-painel');
+        document.getElementById('balanca-modal-backdrop').style.display = 'block';
+        document.getElementById('balanca-painel').style.display = 'flex';
+
         const iframe = document.getElementById('balanca-iframe');
-
-        if (!backdrop || !painel || !iframe) return;
-
-        backdrop.style.display = 'block';
-        painel.style.display = 'flex';
-
-        // Só tenta rolar para a Trilha se já existir Dossiê carregado
-        const irParaTrilha = Boolean(htmlState);
-
+        const irParaTrilha = !!htmlState; // só tenta scroll se já existir dossiê carregado
+        
         // Listener seguro que se auto-destrói para evitar memory leak
         const onIframeLoad = () => {
-            iframe.removeEventListener('load', onIframeLoad);
-
             sincronizarContextoDossie(typeof topicos !== 'undefined' ? topicos : []);
-
+            
             if (irParaTrilha) {
+                // Removemos o IPC Delegado e voltamos a usar o controle direto (como no AI)
                 aguardarDomERolarParaTrilha(iframe);
             }
-        };
 
+            iframe.removeEventListener('load', onIframeLoad);
+        };
         iframe.addEventListener('load', onIframeLoad);
 
         if (htmlState) {
@@ -119,10 +120,8 @@ window.BalancaManager = (function() {
             // o evento 'load' dispare mesmo se o conteúdo for idêntico ao anterior.
             iframe.removeAttribute('srcdoc');
             iframe.removeAttribute('src');
-
             // Reflow síncrono necessário antes de reatribuir o mesmo srcdoc
             void iframe.offsetWidth;
-
             iframe.srcdoc = htmlState;
         } else {
             iframe.removeAttribute('srcdoc');
@@ -130,7 +129,7 @@ window.BalancaManager = (function() {
         }
     }
 
-/**
+    /**
      * Rola para a Trilha de Julgamento com busca segura:
      * - ignora elementos escondidos;
      * - ignora elementos dentro de sanfona fechada;
@@ -205,6 +204,9 @@ window.BalancaManager = (function() {
         }
     }
 
+    // ==========================================
+    // FUNÇÕES AUXILIARES DE BUSCA SEGURA
+    // ==========================================
     function normalizarTextoED(texto) {
         let t = texto || '';
 
@@ -310,87 +312,6 @@ window.BalancaManager = (function() {
             }
 
             return null;
-        } catch (e) {
-            return null;
-        }
-    }
-
-        const aguardarPintura = () => {
-            if (iframe.contentWindow && typeof iframe.contentWindow.requestAnimationFrame === 'function') {
-                iframe.contentWindow.requestAnimationFrame(() => {
-                    iframe.contentWindow.requestAnimationFrame(() => {
-                        setTimeout(executarScroll, 80);
-                    });
-                });
-            } else {
-                setTimeout(executarScroll, 150);
-            }
-        };
-
-        // Se o documento interno já estiver completo, espera apenas a pintura.
-        // Se ainda não estiver, aguarda até 1 segundo para não travar em recursos lentos.
-        if (doc.readyState === 'complete') {
-            aguardarPintura();
-        } else {
-            let espera = 0;
-
-            const esperarDocumento = () => {
-                espera += 50;
-
-                if (doc.readyState === 'complete' || espera >= 1000) {
-                    aguardarPintura();
-                } else {
-                    setTimeout(esperarDocumento, 50);
-                }
-            };
-
-            esperarDocumento();
-        }
-    }
-
-    /**
-     * Localiza a seção "Trilha de Julgamento" dentro do Dossiê.
-     *
-     * Prioridade:
-     * 1. ID fixo: #secao-trilha-julgamento
-     * 2. Busca textual por títulos e elementos compatíveis
-     */
-    function localizarTrilhaDeJulgamento(doc) {
-        try {
-            // Estratégia 1: ID fixo injetado pelo gerador
-            const alvoPorId = doc.getElementById('secao-trilha-julgamento');
-            if (alvoPorId) {
-                return alvoPorId;
-            }
-
-            const normalizar = (texto) => {
-                let t = texto || '';
-
-                if (typeof t.normalize === 'function') {
-                    t = t.normalize('NFKD');
-                }
-
-                return t
-                    .toLowerCase()
-                    .replace(/\u00a0/g, ' ') // espaço non-breaking
-                    .replace(/\s+/g, ' ')
-                    .trim();
-            };
-
-            // Estratégia 2: fallback textual para dossiês antigos ou variações de markup
-            const candidatos = Array.from(doc.querySelectorAll(`
-                h1,
-                h2,
-                h3,
-                h4,
-                div.section-title,
-                span.item-title,
-                [data-scroll-target="trilha-julgamento"]
-            `));
-
-            return candidatos.find(el =>
-                normalizar(el.textContent).includes('trilha de julgamento')
-            ) || null;
         } catch (e) {
             return null;
         }
