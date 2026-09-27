@@ -130,17 +130,15 @@ window.BalancaManager = (function() {
         }
     }
 
-    /**
-     * Rastreador blindado para rolagem até a Trilha de Julgamento.
-     *
-     * Estratégia:
-     * 1. Obtém o document interno do iframe com segurança.
-     * 2. Localiza a Trilha por ID fixo ou por busca textual.
-     * 3. Aguarda o documento ficar pronto.
-     * 4. Usa requestAnimationFrame + pequeno delay para rolar depois da pintura.
+/**
+     * Rola para a Trilha de Julgamento com busca segura:
+     * - ignora elementos escondidos;
+     * - ignora elementos dentro de sanfona fechada;
+     * - prioriza a seção 4;
+     * - usa #sortable-list como fallback.
      */
     function aguardarDomERolarParaTrilha(iframe, tentativas = 0) {
-        const MAX_TENTATIVAS = 40; // ~2 segundos no total
+        const MAX_TENTATIVAS = 40;
 
         let doc = null;
 
@@ -157,57 +155,165 @@ window.BalancaManager = (function() {
             return;
         }
 
-        const alvo = localizarTrilhaDeJulgamento(doc);
+        const alvo = localizarTrilhaVisivel(doc);
 
         if (!alvo) {
             if (tentativas < MAX_TENTATIVAS) {
                 setTimeout(() => aguardarDomERolarParaTrilha(iframe, tentativas + 1), 50);
             } else {
-                console.warn('[Juris Notes ED] Trilha de Julgamento não encontrada a tempo.');
+                console.warn('[Juris Notes ED] Trilha de Julgamento visível não encontrada.');
             }
             return;
         }
 
-        const garantirAlvoVisivel = () => {
+        const rolar = () => {
             try {
-                // Se a Trilha estiver dentro de um <details>, abre automaticamente
-                const details = alvo.closest('details');
-                if (details && !details.open) {
-                    details.open = true;
-                }
-
-                // Caso esteja dentro de sanfona/acordeão do próprio Dossiê
-                const accordion = alvo.closest('.sync-accordion-wrapper');
-                if (accordion) {
-                    accordion.classList.add('is-open');
-                }
-            } catch (e) {
-                // Silencioso: apenas tentativa de garantir visibilidade
-            }
-        };
-
-        const executarScroll = () => {
-            try {
-                garantirAlvoVisivel();
+                const win = iframe.contentWindow;
+                const offset = 90;
 
                 alvo.scrollIntoView({
                     behavior: 'smooth',
                     block: 'start'
                 });
 
+                const atual = win.pageYOffset || doc.documentElement.scrollTop || 0;
+                const destino = Math.max(0, alvo.getBoundingClientRect().top + atual - offset);
+
+                win.scrollTo({
+                    top: destino,
+                    behavior: 'smooth'
+                });
+
+                doc.documentElement.scrollTop = destino;
+                if (doc.body) doc.body.scrollTop = destino;
+
                 alvo.classList.add('card-flash-focus');
                 setTimeout(() => alvo.classList.remove('card-flash-focus'), 1300);
             } catch (e) {
-                try {
-                    garantirAlvoVisivel();
-
-                    // Fallback para navegadores antigos ou comportamento inesperado
-                    alvo.scrollIntoView(true);
-                } catch (e2) {
-                    console.warn('[Juris Notes ED] Falha ao tentar rolar a página.', e2);
-                }
+                console.warn('[Juris Notes ED] Falha ao tentar rolar até a Trilha.', e);
             }
         };
+
+        if (iframe.contentWindow && typeof iframe.contentWindow.requestAnimationFrame === 'function') {
+            iframe.contentWindow.requestAnimationFrame(() => {
+                iframe.contentWindow.requestAnimationFrame(() => {
+                    setTimeout(rolar, 80);
+                });
+            });
+        } else {
+            setTimeout(rolar, 150);
+        }
+    }
+
+    function normalizarTextoED(texto) {
+        let t = texto || '';
+
+        if (typeof t.normalize === 'function') {
+            t = t.normalize('NFKD');
+        }
+
+        return t
+            .toLowerCase()
+            .replace(/\u00a0/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
+    function elementoVisivelED(doc, el) {
+        try {
+            if (!el) return false;
+
+            if (!el.isConnected && !(doc.contains && doc.contains(el))) {
+                return false;
+            }
+
+            const win = doc.defaultView;
+
+            if (!win) return true;
+
+            const style = win.getComputedStyle(el);
+
+            if (style.display === 'none' || style.visibility === 'hidden') {
+                return false;
+            }
+
+            let node = el.parentElement;
+
+            while (node && node !== doc.documentElement) {
+                const nodeStyle = win.getComputedStyle(node);
+
+                if (nodeStyle.display === 'none' || nodeStyle.visibility === 'hidden') {
+                    return false;
+                }
+
+                // Se estiver dentro de sanfona fechada, considera invisível
+                if (node.classList && node.classList.contains('sync-accordion-body')) {
+                    const wrapper = node.closest('.sync-accordion-wrapper');
+
+                    if (wrapper && !wrapper.classList.contains('is-open')) {
+                        return false;
+                    }
+                }
+
+                node = node.parentElement;
+            }
+
+            return el.getBoundingClientRect().height > 0;
+        } catch (e) {
+            return false;
+        }
+    }
+
+    function localizarTrilhaVisivel(doc) {
+        try {
+            // 1) ID fixo — cenário ideal
+            const alvoPorId = doc.getElementById('secao-trilha-julgamento');
+
+            if (alvoPorId && elementoVisivelED(doc, alvoPorId)) {
+                return alvoPorId;
+            }
+
+            // 2) Busca apenas por títulos visíveis
+            const candidatos = Array.from(
+                doc.querySelectorAll('h1, h2, h3, h4, div.section-title')
+            ).filter(el => elementoVisivelED(doc, el));
+
+            // 3) Prioriza explicitamente a seção 4
+            const secao4 = candidatos.find(el =>
+                normalizarTextoED(el.textContent).includes('4. trilha de julgamento')
+            );
+
+            if (secao4) return secao4;
+
+            // 4) Prioriza o título completo da Trilha
+            const tituloCompleto = candidatos.find(el => {
+                const texto = normalizarTextoED(el.textContent);
+
+                return texto.includes('trilha de julgamento') &&
+                       texto.includes('arraste para reordenar');
+            });
+
+            if (tituloCompleto) return tituloCompleto;
+
+            // 5) Qualquer título visível da Trilha
+            const tituloTrilha = candidatos.find(el =>
+                normalizarTextoED(el.textContent).includes('trilha de julgamento')
+            );
+
+            if (tituloTrilha) return tituloTrilha;
+
+            // 6) Fallback para a lista de tópicos
+            const lista = doc.getElementById('sortable-list');
+
+            if (lista && elementoVisivelED(doc, lista)) {
+                return lista;
+            }
+
+            return null;
+        } catch (e) {
+            return null;
+        }
+    }
 
         const aguardarPintura = () => {
             if (iframe.contentWindow && typeof iframe.contentWindow.requestAnimationFrame === 'function') {
