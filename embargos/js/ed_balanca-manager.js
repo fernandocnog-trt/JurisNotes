@@ -57,13 +57,6 @@ window.BalancaManager = (function() {
             htmlState = event.data.html;
             iframe.removeAttribute('src'); 
             
-            // NOVO: Adiciona um gatilho para rolar até a trilha assim que o novo HTML renderizar
-            const triggerScroll = () => {
-                aguardarDomERolarParaTrilha(iframe);
-                iframe.removeEventListener('load', triggerScroll);
-            };
-            iframe.addEventListener('load', triggerScroll);
-            
             // Esta mutação síncrona destrói o documento atual do iframe e renderiza o novo.
             // O feedback visual de sucesso para o usuário é a própria renderização do Dossiê.
             iframe.srcdoc = htmlState;     
@@ -130,46 +123,47 @@ window.BalancaManager = (function() {
     }
 
     /**
-     * Rastreador Blindado (Bulletproof Polling):
-     * Ignora o readyState e caça fisicamente o elemento no DOM para garantir
-     * que a rolagem só ocorra quando ele existir e o layout estiver desenhado.
+     * Aguarda o DOM interno do iframe estar pronto (sem número mágico de tempo)
+     * e então executa a busca + scroll até a Trilha de Julgamento.
      */
     function aguardarDomERolarParaTrilha(iframe, tentativas = 0) {
-        const MAX_TENTATIVAS = 40; // ~2 segundos no total (40 x 50ms)
+        const MAX_TENTATIVAS = 20; // ~1s no total (20 x 50ms), suficiente para dossiês grandes
         const doc = iframe.contentDocument || (iframe.contentWindow ? iframe.contentWindow.document : null);
 
-        if (!doc) {
-            if (tentativas < MAX_TENTATIVAS) setTimeout(() => aguardarDomERolarParaTrilha(iframe, tentativas + 1), 50);
-            return;
-        }
-
-        // 1. Busca proativa pelo elemento alvo no DOM real
-        let alvo = doc.getElementById('secao-trilha-julgamento');
-        if (!alvo) {
-            const candidatos = Array.from(doc.querySelectorAll('h1, h2, h3, h4, div.section-title, span.item-title'));
-            alvo = candidatos.find(el => el.textContent.trim().toLowerCase().includes('trilha de julgamento'));
-        }
-
-        // 2. Se o elemento ainda não nasceu no DOM, continua caçando
-        if (!alvo) {
+        // UX: Garante que o CSS (CSSOM) e o Layout estejam montados antes de calcular o scroll
+        if (!doc || doc.readyState !== 'complete') {
             if (tentativas < MAX_TENTATIVAS) {
                 setTimeout(() => aguardarDomERolarParaTrilha(iframe, tentativas + 1), 50);
-            } else {
-                console.warn('[Juris Notes ED] Trilha de Julgamento não encontrada a tempo.');
             }
             return;
         }
 
-        // 3. Encontrou! Delay estratégico para garantir que o CSS (layout) terminou de pintar as alturas
-        setTimeout(() => {
-            try {
+        rolarParaTrilhaDeJulgamento(doc);
+    }
+
+    function rolarParaTrilhaDeJulgamento(doc) {
+        try {
+            // ESTRATÉGIA 1 (preferencial): ID fixo injetado pelo gerador
+            let alvo = doc.getElementById('secao-trilha-julgamento');
+
+            // ESTRATÉGIA 2 (fallback de compatibilidade): busca textual restrita
+            // Cobre dossiês antigos salvos sem o id, e também variações de numeração
+            if (!alvo) {
+                const candidatos = Array.from(doc.querySelectorAll('h1, h2, h3, h4, div.section-title'));
+                alvo = candidatos.find(el =>
+                    el.textContent.trim().toLowerCase().includes('trilha de julgamento')
+                );
+            }
+
+            if (alvo) {
                 alvo.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                // Reaproveita a animação já existente no projeto para dar feedback visual
                 alvo.classList.add('card-flash-focus');
                 setTimeout(() => alvo.classList.remove('card-flash-focus'), 1300);
-            } catch (e) {
-                console.warn('[Juris Notes ED] Falha ao tentar rolar a página.', e);
             }
-        }, 150);
+        } catch (e) {
+            console.warn('[Juris Notes ED] Não foi possível localizar a Trilha de Julgamento no dossiê.', e);
+        }
     }
 
     // (abrirLembretes removido - transferido para TaskManager nativo)
