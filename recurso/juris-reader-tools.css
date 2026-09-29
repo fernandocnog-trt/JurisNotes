@@ -1792,3 +1792,129 @@ MINI PLAYER DE ÁUDIO — MODAL FOCADO
     0% { opacity: 0; transform: translateY(-8px); }
     100% { opacity: 1; transform: translateY(0); }
 }
+
+/* ================================================
+   MODAL: SAFETY CHECKPOINT (PRÉ-CORTE TESOURA)
+   ================================================ */
+.safe-cut-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.75); /* Tom slate muito escuro para foco */
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    z-index: var(--z-safecut-backdrop);
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.25s ease, visibility 0.25s ease;
+}
+
+.safe-cut-backdrop.is-active {
+    opacity: 1;
+    visibility: visible;
+}
+
+.safe-cut-modal {
+    --safecut-accent: #B5543F; /* Terracota base */
+    --safecut-accent-dark: #8C3B2E; /* Carmim queimado para contraste seguro */
+    --safecut-bg-soft: #FDF8F5; /* Creme quente de fundo */
+    --safecut-border: #E8CFC8;
+    --safecut-ok: #4A7A59; /* Verde-sálvia (Estado de Liberação) */
+    
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -45%) scale(0.95);
+    background: #ffffff;
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.35);
+    z-index: var(--z-safecut-modal);
+    width: 90vw;
+    max-width: 520px;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.25s ease, transform 0.25s cubic-bezier(0.25, 0.8, 0.25, 1), visibility 0.25s ease;
+}
+
+.safe-cut-backdrop.is-active + .safe-cut-modal {
+    opacity: 1;
+    visibility: visible;
+    transform: translate(-50%, -50%) scale(1);
+}
+
+/* Header Refinado */
+.safe-cut-header {
+    display: flex; align-items: center; gap: 8px; 
+    padding: 16px 20px;
+    color: var(--safecut-accent-dark); 
+    border-bottom: 2px solid var(--safecut-bg-soft);
+}
+
+.safecut-icon { width: 16px; height: 16px; flex-shrink: 0; }
+.safecut-icon-small { width: 14px; height: 14px; flex-shrink: 0; }
+
+.safe-cut-body-text {
+    font-size: 0.95rem; color: #455a64; 
+    margin: 16px 20px; line-height: 1.6;
+}
+
+/* Caixa de Alerta (Terracota/Creme) */
+.safe-cut-warning-box {
+    background: var(--safecut-bg-soft);
+    border-left: 4px solid var(--safecut-accent);
+    padding: 14px; margin: 16px 20px; border-radius: 4px;
+}
+
+.safe-cut-warning-box code {
+    background: rgba(0,0,0,0.05); padding: 2px 4px; border-radius: 4px; font-family: monospace;
+}
+
+.warning-title { font-size: 0.85rem; color: var(--safecut-accent-dark); margin: 0; font-weight: 800; display: flex; align-items: center; gap: 6px; }
+.warning-text { font-size: 0.82rem; color: #6B2E22; margin-top: 6px; line-height: 1.5; }
+
+/* Ações e Botões */
+.safe-cut-actions {
+    display: flex; justify-content: space-between; align-items: center; 
+    flex-wrap: wrap; gap: 12px;
+    border-top: 1px solid #eee; padding: 16px 20px; margin: 0; 
+    background: #fdfdfd; border-radius: 0 0 12px 12px;
+}
+.safe-cut-btn-group { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.btn-safe-backup {
+    background: #ffffff; border: 1px solid var(--safecut-border); color: var(--safecut-accent-dark);
+    font-weight: 700; display: flex; align-items: center; gap: 6px; transition: all 0.2s ease;
+}
+.btn-safe-backup:hover { background: var(--safecut-bg-soft); border-color: var(--safecut-accent); }
+.btn-safe-backup:focus-visible { outline: 2px solid var(--safecut-accent); outline-offset: 2px; }
+
+/* 
+   O seletor #modal-predivisao eleva a especificidade para (0,1,1,0),
+   garantindo que esta cor sobrescreva a classe global .chip-re 
+   sem uso abusivo de !important.
+*/
+#modal-predivisao .btn-confirmar-corte-guiado {
+    background: var(--safecut-accent-dark); color: white; border: none;
+    font-weight: 700; display: flex; align-items: center; gap: 6px; transition: all 0.2s ease;
+}
+#modal-predivisao .btn-confirmar-corte-guiado:hover { background: #6B2E22; transform: translateY(-1px); }
+#modal-predivisao .btn-confirmar-corte-guiado:focus-visible { outline: 2px solid var(--safecut-accent-dark); outline-offset: 2px; }
+
+/* Estado pós-backup ativado pelo JS. Sincroniza cor sólida com o pulso */
+#modal-predivisao .btn-confirmar-corte-guiado.ready-to-cut {
+    background: var(--safecut-ok);
+    animation: attention-pulse-savia 1.5s infinite;
+}
+
+@keyframes attention-pulse-savia {
+    0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(74, 122, 89, 0.6); }
+    70% { transform: scale(1.03); box-shadow: 0 0 0 8px rgba(74, 122, 89, 0); }
+    100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(74, 122, 89, 0); }
+}
+
+/* Proteção A11y: Desliga o pulso mas mantém o halo de status */
+@media (prefers-reduced-motion: reduce) {
+    #modal-predivisao .btn-confirmar-corte-guiado.ready-to-cut {
+        animation: none; transform: none; box-shadow: 0 0 0 4px rgba(74, 122, 89, 0.4);
+    }
+}

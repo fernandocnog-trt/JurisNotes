@@ -47,6 +47,8 @@
     --z-outline-modal: 4051;
     /* NOVO: Hierarquia do JurisPrompt - Acima dos modais de conteúdo */
     --z-juris-prompt: 5000;
+    --z-safecut-backdrop: 6000;
+    --z-safecut-modal: 6001;
     --z-splash: 9999;
     
     /* Variável da Espinha Dorsal (Vermelho sólido primário) */
