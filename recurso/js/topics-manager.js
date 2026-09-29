@@ -2225,152 +2225,99 @@ window.TopicsManager = (function () {
         }, 500);
     }
 
-    function abrirJurisPrompt(mensagem, titulo, callback) {
-        console.log("🔍 [Tesoura] Tentando abrir o modal customizado...");
-        const backdrop = document.getElementById('juris-prompt-backdrop');
-        
-        if (!backdrop) {
-            console.warn("⚠️ [Tesoura] Modal não encontrado no HTML. Usando alerta nativo.");
-            callback(confirm(mensagem)); 
-            return;
-        }
-        
-        document.getElementById('juris-prompt-title-text').textContent = titulo || 'Confirmação';
-        document.getElementById('juris-prompt-message').textContent = mensagem;
-        
-        const inputEl = document.getElementById('juris-prompt-input');
-        if (inputEl) inputEl.style.display = 'none';
-
-        // ========================================================
-        // BLINDAGEM VISUAL: Forçando o CSS via JavaScript
-        // ========================================================
-        backdrop.style.position = 'fixed';
-        backdrop.style.top = '0';
-        backdrop.style.left = '0';
-        backdrop.style.width = '100vw';
-        backdrop.style.height = '100vh';
-        backdrop.style.backgroundColor = 'rgba(0, 0, 0, 0.75)';
-        backdrop.style.zIndex = '99999';
-        backdrop.style.display = 'flex';
-        backdrop.style.justifyContent = 'center';
-        backdrop.style.alignItems = 'center';
-        
-        // 👉 NOVAS LINHAS: Garantindo que o CSS não oculte via opacidade
-        backdrop.style.opacity = '1';
-        backdrop.style.visibility = 'visible';
-        backdrop.style.pointerEvents = 'auto'; 
-
-        const modalBox = document.getElementById('juris-prompt-modal');
-        if (modalBox) {
-            modalBox.style.backgroundColor = '#ffffff';
-            modalBox.style.padding = '24px';
-            modalBox.style.borderRadius = '8px';
-            modalBox.style.boxShadow = '0 10px 25px rgba(0,0,0,0.5)';
-            modalBox.style.minWidth = '320px';
-            modalBox.style.maxWidth = '90vw';
-            modalBox.style.zIndex = '100000';
-            modalBox.style.display = 'flex';
-            modalBox.style.flexDirection = 'column';
-            modalBox.style.gap = '16px';
-            
-            // 👉 NOVAS LINHAS: Resetando transformações e forçando visibilidade
-            modalBox.style.opacity = '1';
-            modalBox.style.visibility = 'visible';
-            modalBox.style.transform = 'scale(1) translateY(0)'; 
-        }
-
-        console.log("✅ [Tesoura] Modal forçado para o centro da tela com opacidade total.");
-
-        const botoes = backdrop.querySelectorAll('[data-action]');
-        const onClick = function(e) {
-        const acao = e.currentTarget.getAttribute('data-action');
-        
-        // 👉 1. Ocultação IMEDIATA (Sem setTimeout para não enganar o app-core.js)
-        backdrop.style.display = 'none';
-        backdrop.style.opacity = '0';
-        backdrop.style.visibility = 'hidden';
-        backdrop.style.pointerEvents = 'none';
-        
-        // 👉 2. Limpeza de possíveis classes de trava que o app-core possa ler
-        backdrop.classList.remove('active', 'show', 'is-visible', 'in-use');
-        
-        // 👉 3. Destravamento Global: Se o app-core usar uma variável para trancar, nós a soltamos
-        if (window.JurisPrompt) {
-            window.JurisPrompt.ativo = false;
-            window.JurisPrompt.isOpen = false;
-            window.JurisPrompt.inUse = false;
-            window.JurisPrompt.busy = false;
-        }
-        
-        botoes.forEach(b => b.removeEventListener('click', onClick));
-        console.log("🎯 [Tesoura] Usuário clicou em:", acao, " - Modal liberado.");
-        callback(acao === 'confirm');
-    };
-        
-        botoes.forEach(b => b.addEventListener('click', onClick));
-    }
-
-    // CORREÇÃO CRÍTICA AQUI: Removido o "window."
-    // A função agora é local e será encontrada pelo "return" lá embaixo.
     function acionarDivisaoTopico() {
-        console.log("✂️ [Tesoura] O clique chegou com sucesso no JavaScript!");
-        
         if (!activeTabId) {
-            console.warn("[Tesoura] Bloqueado: Nenhum tópico selecionado.");
             if(window.exibirToast) window.exibirToast('Nenhum tópico selecionado.', 'aviso');
             return;
         }
+
+        // UX: Trava o scroll do fundo para evitar layout thrashing e bugs no mobile
+        if (window.RenderCycle) RenderCycle.bloquearScrollBody(true);
+
+        const backdrop = document.getElementById('safecut-backdrop');
         
-        abrirJurisPrompt('Deseja selar este tópico e continuar em um novo Volume? O sistema inserirá as pontes de IA automaticamente.', '✂️ Divisão de Tópico', (confirmado) => {
-            if (!confirmado) {
-                console.log("[Tesoura] Cancelado pelo usuário.");
-                return;
+        // Ativa via CSS Classes para aproveitar as animações de opacidade/transform
+        if (backdrop) backdrop.classList.add('is-active');
+        
+        // Garante que o botão de corte nasça com a atenção desativada (aguardando o backup)
+        const btnCortar = document.getElementById('btn-executar-tesoura');
+        if (btnCortar) btnCortar.classList.remove('ready-to-cut');
+    }
+
+    function fecharModalPreDivisao() {
+        const backdrop = document.getElementById('safecut-backdrop');
+        if (backdrop) backdrop.classList.remove('is-active');
+        
+        // Libera o scroll
+        if (window.RenderCycle) RenderCycle.bloquearScrollBody(false);
+    }
+
+    // Função ponte para assincronismo e feedback visual de UX
+    async function baixarBackupPreCorte() {
+        try {
+            // Dispara o motor global pedindo a injeção do sufixo especial
+            await acionarCriacaoBackup('_PRE_CORTE');
+            
+            // Sucesso: Informa o usuário e anima o botão de corte para guiar o fluxo
+            if (typeof exibirToast === 'function') {
+                exibirToast('Fotografia de segurança pré-corte salva com sucesso!', 'sucesso');
             }
             
-            console.log("[Tesoura] Confirmado. Processando...");
-            const topicoAtual = topicos.find(t => t.id === activeTabId);
-            if (!topicoAtual) return;
-
-            const volAtual = topicoAtual.volumeData && topicoAtual.volumeData.sequencia ? topicoAtual.volumeData.sequencia : 1;
-            const proxVol = volAtual + 1;
-            const nomeBase = topicoAtual.nome.replace(/\s*\(Vol\. [IVXLCDM]+\)$/, '');
-            const novoNome = `${nomeBase} (Vol. ${toRoman(proxVol)})`;
-            const novoId = 'topico-' + Date.now();
-            const slugA = nomeBase.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, '-');
-            const chkId = `CHK-${slugA}-v${volAtual}`;
-
-            topicoAtual.anotacoes.push({
-                uuid: 'id-chk-out-' + Date.now(),
-                tipo: 'checkpoint_saida',
-                conteudo: `CONTINUA NO TÓPICO: "${novoNome}" | ID: ${chkId}`,
-                metaHandoff: { alvo: novoNome, slug: slugA, versao: volAtual, chkId: chkId }
-            });
-
-            const novoTopico = {
-                id: novoId,
-                nome: novoNome,
-                cor: topicoAtual.cor,
-                alegacoes: topicoAtual.alegacoes,
-                fundamentos: topicoAtual.fundamentos,
-                veredito: topicoAtual.veredito, 
-                volumeData: { sequencia: proxVol, anteriorId: topicoAtual.id, chkId: chkId },
-                diretrizesGlobais: [], 
-                anotacoes: [{
-                    uuid: 'id-chk-in-' + Date.now(),
-                    tipo: 'checkpoint_entrada',
-                    conteudo: `CONTINUAÇÃO DO TÓPICO: "${topicoAtual.nome}" | ID: ${chkId}`,
-                    metaHandoff: { origem: topicoAtual.nome, slug: slugA, versao: volAtual, chkId: chkId }
-                }]
-            };
-
-            topicos.push(novoTopico);
-            activeTabId = novoId; 
-            renderizarFichario(topicos); 
+            const btnCortar = document.getElementById('btn-executar-tesoura');
+            if (btnCortar) btnCortar.classList.add('ready-to-cut');
             
-            if (typeof salvarBackupAutomatico === 'function') salvarBackupAutomatico();
-            if (typeof exibirToast === 'function') exibirToast('Novo volume criado com sucesso.', 'sucesso');
-            console.log("✅ [Tesoura] Novo volume criado e renderizado.");
+        } catch (err) {
+            // Falha silenciosa (o usuário já viu o toast de cancelamento do app-core)
+            console.log("[Tesoura] Backup de segurança cancelado pelo usuário.");
+        }
+    }
+
+    function executarDivisaoTopico() {
+        console.log("[Tesoura] Processando divisão de volume...");
+        const topicoAtual = topicos.find(t => t.id === activeTabId);
+        if (!topicoAtual) return;
+
+        const volAtual = topicoAtual.volumeData && topicoAtual.volumeData.sequencia ? topicoAtual.volumeData.sequencia : 1;
+        const proxVol = volAtual + 1;
+        const nomeBase = topicoAtual.nome.replace(/\s*\(Vol\. [IVXLCDM]+\)$/, '');
+        const novoNome = `${nomeBase} (Vol. ${toRoman(proxVol)})`;
+        const novoId = 'topico-' + Date.now();
+        const slugA = nomeBase.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, '-');
+        const chkId = `CHK-${slugA}-v${volAtual}`;
+
+        topicoAtual.anotacoes.push({
+            uuid: 'id-chk-out-' + Date.now(),
+            tipo: 'checkpoint_saida',
+            conteudo: `CONTINUA NO TÓPICO: "${novoNome}" | ID: ${chkId}`,
+            metaHandoff: { alvo: novoNome, slug: slugA, versao: volAtual, chkId: chkId }
         });
+
+        const novoTopico = {
+            id: novoId,
+            nome: novoNome,
+            cor: topicoAtual.cor,
+            alegacoes: topicoAtual.alegacoes,
+            fundamentos: topicoAtual.fundamentos,
+            veredito: topicoAtual.veredito, 
+            volumeData: { sequencia: proxVol, anteriorId: topicoAtual.id, chkId: chkId },
+            diretrizesGlobais: [], 
+            anotacoes: [{
+                uuid: 'id-chk-in-' + Date.now(),
+                tipo: 'checkpoint_entrada',
+                conteudo: `CONTINUAÇÃO DO TÓPICO: "${topicoAtual.nome}" | ID: ${chkId}`,
+                metaHandoff: { origem: topicoAtual.nome, slug: slugA, versao: volAtual, chkId: chkId }
+            }]
+        };
+
+        topicos.push(novoTopico);
+        activeTabId = novoId; 
+        renderizarFichario(topicos); 
+        
+        // Desmonta a interface visual após processamento
+        fecharModalPreDivisao();
+        
+        if (typeof salvarBackupAutomatico === 'function') salvarBackupAutomatico();
+        if (typeof exibirToast === 'function') exibirToast('Volume dividido. Estado salvo com sucesso.', 'sucesso');
     }
 
     // ==========================================
@@ -2407,7 +2354,10 @@ window.TopicsManager = (function () {
         salvarPilhaProcessual,
         desagruparPilhaProcessual,
         toRoman,
-        acionarDivisaoTopico
+        acionarDivisaoTopico,
+        fecharModalPreDivisao,
+        baixarBackupPreCorte,
+        executarDivisaoTopico
     };
 
 })();
