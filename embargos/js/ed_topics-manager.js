@@ -2152,54 +2152,97 @@ window.TopicsManager = (function () {
             if(window.exibirToast) window.exibirToast('Nenhum tópico selecionado.', 'aviso');
             return;
         }
+
+        // UX: Trava o scroll do fundo para evitar layout thrashing e bugs no mobile
+        if (window.RenderCycle) RenderCycle.bloquearScrollBody(true);
+
+        const backdrop = document.getElementById('safecut-backdrop');
         
-        abrirJurisPrompt('Deseja selar a análise deste vício e continuar em um novo Volume? O sistema inserirá as pontes de IA automaticamente.', '✂️ Divisão de Volume', (confirmado) => {
-            if (!confirmado) return;
+        // Ativa via CSS Classes para aproveitar as animações de opacidade/transform
+        if (backdrop) backdrop.classList.add('is-active');
+        
+        // Garante que o botão de corte nasça com a atenção desativada (aguardando o backup)
+        const btnCortar = document.getElementById('btn-executar-tesoura');
+        if (btnCortar) btnCortar.classList.remove('ready-to-cut');
+    }
+
+    function fecharModalPreDivisao() {
+        const backdrop = document.getElementById('safecut-backdrop');
+        if (backdrop) backdrop.classList.remove('is-active');
+        
+        // Libera o scroll
+        if (window.RenderCycle) RenderCycle.bloquearScrollBody(false);
+    }
+
+    // Função ponte para assincronismo e feedback visual de UX
+    async function baixarBackupPreCorte() {
+        try {
+            // Dispara o motor global pedindo a injeção do sufixo especial
+            await acionarCriacaoBackup('_PRE_CORTE');
             
-            const topicoAtual = topicos.find(t => t.id === activeTabId);
-            if (!topicoAtual) return;
+            // Sucesso: Informa o usuário e anima o botão de corte para guiar o fluxo
+            if (typeof exibirToast === 'function') {
+                exibirToast('Fotografia de segurança pré-corte salva com sucesso!', 'sucesso');
+            }
+            
+            const btnCortar = document.getElementById('btn-executar-tesoura');
+            if (btnCortar) btnCortar.classList.add('ready-to-cut');
+            
+        } catch (err) {
+            // Falha silenciosa (o usuário já viu o toast de cancelamento do app-core)
+            console.log("[Tesoura ED] Backup de segurança cancelado pelo usuário.");
+        }
+    }
 
-            const volAtual = topicoAtual.volumeData && topicoAtual.volumeData.sequencia ? topicoAtual.volumeData.sequencia : 1;
-            const proxVol = volAtual + 1;
-            const nomeBase = topicoAtual.nome.replace(/\s*\(Vol\. [IVXLCDM]+\)$/, '');
-            const novoNome = `${nomeBase} (Vol. ${toRoman(proxVol)})`;
-            const novoId = 'topico-' + Date.now();
-            const slugA = nomeBase.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, '-');
-            const chkId = `CHK-${slugA}-v${volAtual}`;
+    function executarDivisaoTopico() {
+        console.log("[Tesoura ED] Processando divisão de volume...");
+        const topicoAtual = topicos.find(t => t.id === activeTabId);
+        if (!topicoAtual) return;
 
-            topicoAtual.anotacoes.push({
-                uuid: 'id-chk-out-' + Date.now(),
-                tipo: 'checkpoint_saida',
-                conteudo: `CONTINUA NO TÓPICO: "${novoNome}" | ID: ${chkId}`,
-                metaHandoff: { alvo: novoNome, slug: slugA, versao: volAtual, chkId: chkId }
-            });
+        const volAtual = topicoAtual.volumeData && topicoAtual.volumeData.sequencia ? topicoAtual.volumeData.sequencia : 1;
+        const proxVol = volAtual + 1;
+        const nomeBase = topicoAtual.nome.replace(/\s*\(Vol\. [IVXLCDM]+\)$/, '');
+        const novoNome = `${nomeBase} (Vol. ${toRoman(proxVol)})`;
+        const novoId = 'topico-' + Date.now();
+        const slugA = nomeBase.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, '-');
+        const chkId = `CHK-${slugA}-v${volAtual}`;
 
-            // HERANÇA ESPECÍFICA DO ED: Herda também o vício e as diretrizesPorVicio
-            const novoTopico = {
-                id: novoId,
-                nome: novoNome,
-                cor: topicoAtual.cor,
-                alegacoes: topicoAtual.alegacoes,
-                fundamentos: topicoAtual.fundamentos,
-                veredito: topicoAtual.veredito, 
-                vicio: topicoAtual.vicio,
-                diretrizesPorVicio: topicoAtual.diretrizesPorVicio ? JSON.parse(JSON.stringify(topicoAtual.diretrizesPorVicio)) : {},
-                volumeData: { sequencia: proxVol, anteriorId: topicoAtual.id, chkId: chkId },
-                diretrizesGlobais: [], 
-                anotacoes: [{
-                    uuid: 'id-chk-in-' + Date.now(),
-                    tipo: 'checkpoint_entrada',
-                    conteudo: `CONTINUAÇÃO DO TÓPICO: "${topicoAtual.nome}" | ID: ${chkId}`,
-                    metaHandoff: { origem: topicoAtual.nome, slug: slugA, versao: volAtual, chkId: chkId }
-                }]
-            };
-
-            topicos.push(novoTopico);
-            activeTabId = novoId; 
-            renderizarFichario(topicos); 
-            if (typeof salvarBackupAutomatico === 'function') salvarBackupAutomatico();
-            if (typeof exibirToast === 'function') exibirToast('Novo volume criado com sucesso.', 'sucesso');
+        topicoAtual.anotacoes.push({
+            uuid: 'id-chk-out-' + Date.now(),
+            tipo: 'checkpoint_saida',
+            conteudo: `CONTINUA NO TÓPICO: "${novoNome}" | ID: ${chkId}`,
+            metaHandoff: { alvo: novoNome, slug: slugA, versao: volAtual, chkId: chkId }
         });
+
+        // HERANÇA ESPECÍFICA DO ED: Herda também o vício e as diretrizesPorVicio
+        const novoTopico = {
+            id: novoId,
+            nome: novoNome,
+            cor: topicoAtual.cor,
+            alegacoes: topicoAtual.alegacoes,
+            fundamentos: topicoAtual.fundamentos,
+            veredito: topicoAtual.veredito, 
+            vicio: topicoAtual.vicio,
+            diretrizesPorVicio: topicoAtual.diretrizesPorVicio ? JSON.parse(JSON.stringify(topicoAtual.diretrizesPorVicio)) : {},
+            volumeData: { sequencia: proxVol, anteriorId: topicoAtual.id, chkId: chkId },
+            diretrizesGlobais: [], 
+            anotacoes: [{
+                uuid: 'id-chk-in-' + Date.now(),
+                tipo: 'checkpoint_entrada',
+                conteudo: `CONTINUAÇÃO DO TÓPICO: "${topicoAtual.nome}" | ID: ${chkId}`,
+                metaHandoff: { origem: topicoAtual.nome, slug: slugA, versao: volAtual, chkId: chkId }
+            }]
+        };
+
+        topicos.push(novoTopico);
+        activeTabId = novoId; 
+        renderizarFichario(topicos); 
+        
+        // Desmonta a interface visual após processamento
+        fecharModalPreDivisao();
+        
+        if (typeof salvarBackupAutomatico === 'function') salvarBackupAutomatico();
+        if (typeof exibirToast === 'function') exibirToast('Novo volume criado com sucesso.', 'sucesso');
     }
 
     // ==========================================
@@ -2254,7 +2297,10 @@ window.TopicsManager = (function () {
         salvarPilhaProcessual,
         desagruparPilhaProcessual,
         toRoman,
-        acionarDivisaoTopico
+        acionarDivisaoTopico,
+        fecharModalPreDivisao,
+        baixarBackupPreCorte,
+        executarDivisaoTopico
     };
 
 })();

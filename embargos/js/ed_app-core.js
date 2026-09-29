@@ -1605,10 +1605,15 @@ document.addEventListener('keydown', function (e) {
         // NOVO: Delegação genérica para fechamento de modais
         const modaisFechaveis = document.querySelectorAll('.fechavel-por-esc');
         modaisFechaveis.forEach(modal => {
-            if (modal.style.display === 'flex' || modal.style.display === 'block') {
+            // Adaptação para nossa nova checagem via classe is-active (em vez de style.display)
+            if (modal.style.display === 'flex' || modal.style.display === 'block' || modal.classList.contains('is-active') || (modal.previousElementSibling && modal.previousElementSibling.classList.contains('is-active'))) {
+                
                 if (modal.id === 'outline-view-modal' && window.OutlineViewManager) OutlineViewManager.fechar();
                 if (modal.id === 'minuta-view-modal' && window.MinutaViewManager) MinutaViewManager.fechar();
                 if (modal.id === 'modal-tarefas' && window.TaskManager) TaskManager.fecharModal();
+                
+                // NOVO: Delegar o fechamento ao TopicsManager (Tesoura)
+                if (modal.id === 'modal-predivisao' && window.TopicsManager) TopicsManager.fecharModalPreDivisao();
             }
         });
     }
@@ -1911,12 +1916,18 @@ document.addEventListener('visibilitychange', () => {
 /* ================================================
    CRIAÇÃO EXPLÍCITA DE BACKUP (Resolve erro de ativação)
    ================================================ */
-async function acionarCriacaoBackup() {
+async function acionarCriacaoBackup(customNameSuffix = null) {
     console.log("[JURIS LOG] Usuário clicou em criar backup. Iniciando FileSystem API...");
     
     try {
+        // Manipulação limpa de string, sem tocar no DOM
+        let sugestaoNome = window._nomeArquivoSugerido || 'backup_processo.json';
+        if (customNameSuffix) {
+            sugestaoNome = sugestaoNome.replace('.json', `${customNameSuffix}.json`);
+        }
+
         const handle = await window.showSaveFilePicker({
-            suggestedName: window._nomeArquivoSugerido || 'backup_processo.json',
+            suggestedName: sugestaoNome,
             types: [{ description: 'Arquivo de Backup Juris Notes', accept: { 'application/json': ['.json'] } }]
         });
         
@@ -1928,22 +1939,28 @@ async function acionarCriacaoBackup() {
         
         await salvarBackupAutomatico();
         
-        document.getElementById('backup-modal-backdrop').style.display = 'none';
-        document.getElementById('modal-ativar-backup').style.display = 'none';
+        // Fechamento de modal genérico (caso o usuário tenha acionado do modal inicial)
+        const modalAtivar = document.getElementById('modal-ativar-backup');
+        if (modalAtivar && modalAtivar.style.display !== 'none') {
+            document.getElementById('backup-modal-backdrop').style.display = 'none';
+            modalAtivar.style.display = 'none';
+        }
+        
         exibirToast('Backup ancorado! Salvamento automático ativado.', 'sucesso');
         
     } catch (err) {
-        console.error("[JURIS LOG FATAL] Falha ao criar arquivo de backup:");
-        console.error("Nome do Erro:", err.name);
-        console.error("Mensagem:", err.message);
+        console.error("[JURIS LOG FATAL] Falha ao criar arquivo de backup:", err);
         
         if (err.name === 'AbortError') {
             console.log("[JURIS LOG] O usuário cancelou a janela de salvar.");
-            exibirToast('Você cancelou a criação do backup. Clique novamente para tentar.', 'aviso');
+            exibirToast('Operação cancelada.', 'aviso');
+            throw err; // Relança o erro para o TopicsManager saber que falhou
         } else if (err.name === 'SecurityError' || err.name === 'NotAllowedError') {
             exibirToast('O navegador bloqueou a gravação. Verifique as permissões de download.', 'erro');
+            throw err;
         } else {
             exibirToast('Erro desconhecido ao tentar criar o arquivo.', 'erro');
+            throw err;
         }
     }
 }
