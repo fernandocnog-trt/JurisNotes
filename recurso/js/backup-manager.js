@@ -324,6 +324,13 @@ window.BackupManager = (function () {
      */
     function setFileHandle(handle) { _fileHandle = handle; }
 
+    /**
+     * Atualiza o hash do PDF para a nova versão (Hot Swap / Retorno de Diligência)
+     */
+    async function atualizarHashPdf(arrayBuffer) {
+        _pdfHash = await _calcularHash(arrayBuffer);
+    }
+
     /* ── Exportação da API ───────────────────────────── */
     return {
         iniciarSessao,
@@ -333,6 +340,7 @@ window.BackupManager = (function () {
         encerrar,
         getProcessoId,
         isAtivo,
-        setFileHandle
+        setFileHandle,
+        atualizarHashPdf
     };
 })();
