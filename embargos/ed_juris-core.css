@@ -42,6 +42,8 @@
     --z-text-edit-modal: 4001;
     --z-abas-modal-backdrop: 4004;
     --z-abas-modal: 4005;
+    --z-temas-backdrop: 4006;
+    --z-temas-modal: 4007;
     /* NOVAS VARIÁVEIS DO OUTLINE */
     --z-outline-backdrop: 4050;
     --z-outline-modal: 4051;
@@ -947,3 +949,66 @@ body.theme-processo-jasmine {
         transition: background-color 0.3s ease;
     }
 }
+
+/* --- Grelha de Ícones e Espaçamento de Atalhos --- */
+.icon-picker-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 8px;
+}
+.icon-swatch {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    cursor: pointer;
+    border: 2px solid var(--border-color);
+    background: #fdfdfd;
+    color: #64748b;
+    transition: transform 0.2s, border-color 0.2s, box-shadow 0.2s, color 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.icon-swatch svg { width: 18px; height: 18px; }
+
+.icon-swatch:has(input:focus-visible) {
+    outline: 2px solid var(--trt-blue);
+    outline-offset: 2px;
+}
+.icon-swatch:has(input:checked) {
+    transform: scale(1.15);
+    border-color: var(--trt-blue);
+    color: var(--trt-blue);
+    background: #e3f2fd;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+}
+
+.is-last-shortcut { margin-bottom: 8px; }
+
+/* ================================================
+   MODAL DE TEMAS (FEEDBACK VISUAL)
+   ================================================ */
+.btn-tema-opcao {
+    transition: all 0.2s ease;
+}
+
+.btn-tema-opcao.is-active-theme {
+    background: #e8f5e9 !important; /* Verde folha muito suave */
+    border-color: #81c784 !important; /* Borda de destaque */
+    color: #2e7d32;
+    font-weight: 700;
+}
+
+/* ================================================
+   CONFIGURAÇÃO IA (PROVEDORES)
+   ================================================ */
+.btn-ia-opcao { transition: all 0.2s ease; }
+.btn-ia-opcao.is-active-provider {
+    background: #e8f5e9 !important; 
+    border-color: #81c784 !important; 
+    color: #2e7d32;
+}
+.api-status-success { color: #2e7d32; font-weight: bold; }
+.api-status-error { color: #c62828; font-weight: bold; }
+.api-status-loading { color: #f57c00; font-style: italic; }
