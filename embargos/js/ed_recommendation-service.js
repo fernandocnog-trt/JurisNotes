@@ -1,40 +1,142 @@
 /* ================================================
    ed_recommendation-service.js (Módulo Embargos)
-   Orquestra a chamada de IA para mapear o Acervo
+   Orquestrador Multi-Provider e Tratamento de Falhas
    ================================================ */
 
 window.AIRecommendationManager = (function() {
-    const STORAGE_KEY = 'juris_notes_groq_api_key';
-    const BASE_URL = `https://api.groq.com/openai/v1/chat/completions`;
-    // NOVA LISTA DE MODELOS (Ordem de prioridade: Velocidade -> Suporte -> Capacidade Máxima)
+    'use strict';
+
     const GROQ_MODELS = [
-        'openai/gpt-oss-20b',  // Prioridade 1: 1.000 t/s
-        'qwen/qwen3.6-27b',    // Prioridade 2: 500 t/s (Ótimo fallback geral)
-        'openai/gpt-oss-120b'  // Prioridade 3: 500 t/s (Raciocínio denso)
+        'openai/gpt-oss-20b', 
+        'qwen/qwen3.6-27b',   
+        'openai/gpt-oss-120b' 
     ];
 
-    function _obterChaveAPI() {
-        const key = localStorage.getItem(STORAGE_KEY);
-        if (!key) {
-            const novaKey = prompt("Autenticação IA (Groq API):\n\nInsira sua chave de API fornecida pela Groq para ativar os superpoderes de classificação e IA do sistema:");
-            if (novaKey && novaKey.trim() !== '') {
-                localStorage.setItem(STORAGE_KEY, novaKey.trim());
-                return novaKey.trim();
-            }
-            return null;
-        }
-        return key;
+    function emitirErroAuth(provedor) {
+        window.dispatchEvent(new CustomEvent('aiAuthError', { detail: { provider: provedor } }));
     }
+
+    // --- ESTRATÉGIAS DE EXECUÇÃO DE REDE ---
+    
+    async function executarGroq(prompt, key) {
+        for (let i = 0; i < GROQ_MODELS.length; i++) {
+            const model = GROQ_MODELS[i];
+            
+            if (i > 0) await new Promise(r => setTimeout(r, 1500)); // Rate limit prevention
+            
+            const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "Authorization": `Bearer ${key}` },
+                body: JSON.stringify({ 
+                    model: model, 
+                    messages: [{ role: "user", content: prompt }], 
+                    temperature: 0.1,
+                    max_tokens: 800 // Evita truncamento do chain-of-thought nos EDs
+                })
+            });
+
+            if (response.status === 401 || response.status === 403) {
+                emitirErroAuth('groq');
+                throw new Error("AUTH_ERROR"); 
+            }
+            if (response.ok) {
+                const data = await response.json();
+                return data.choices[0].message.content;
+            }
+        }
+        throw new Error("RATE_LIMIT_ERROR"); 
+    }
+
+    async function executarGemini(prompt, key) {
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+        });
+
+        if (response.status === 400) {
+            let isAuthError = false;
+            try {
+                const errorData = await response.json();
+                const errorMessage = errorData?.error?.message || '';
+                if (errorMessage.includes('API_KEY_INVALID') || errorMessage.includes('API_KEY_EXPIRED') || errorMessage.includes('API key not valid')) {
+                    isAuthError = true;
+                }
+            } catch (jsonErr) {
+                console.warn("[Juris IA - ED] Falha ao ler erro 400 do Gemini. Assumindo barreira de segurança.");
+            }
+
+            if (isAuthError) {
+                emitirErroAuth('gemini');
+                throw new Error("AUTH_ERROR");
+            } else {
+                throw new Error("PROMPT_BLOCKED_ERROR");
+            }
+        }
+
+        if (response.ok) {
+            const data = await response.json();
+            return data.candidates[0].content.parts[0].text;
+        }
+        throw new Error("RATE_LIMIT_ERROR");
+    }
+
+    // --- ORQUESTRADOR / DISPATCHER ---
+
+    async function processarIA(promptCompleto) {
+        if (!window.AIManager) throw new Error("AIManager não encontrado.");
+
+        const config = window.AIManager.getConfig();
+        const primary = config.provedor;
+        const secondary = primary === 'groq' ? 'gemini' : 'groq';
+        
+        // Identifica as chaves baseadas na escolha
+        const primaryKey = primary === 'groq' ? config.groqKey : config.geminiKey;
+        const secondaryKey = secondary === 'groq' ? config.groqKey : config.geminiKey;
+
+        // 1. BLOQUEIO IMEDIATO SE FALTAR A CHAVE PRINCIPAL
+        if (!primaryKey) {
+            window.AIManager.abrirModal();
+            throw new Error(`A chave do seu provedor selecionado (${primary.toUpperCase()}) não está configurada. Cole a chave e clique em "Testar".`);
+        }
+
+        // 2. TENTA PROVEDOR PRINCIPAL
+        try {
+            if (primary === 'groq') return await executarGroq(promptCompleto, primaryKey);
+            if (primary === 'gemini') return await executarGemini(promptCompleto, primaryKey);
+        } catch (e) {
+            // Se o erro for de validação da chave ou filtro de segurança, bloqueia aqui.
+            if (e.message === "AUTH_ERROR") throw new Error(`A chave do provedor ${primary.toUpperCase()} é inválida ou expirou.`);
+            if (e.message === "PROMPT_BLOCKED_ERROR") throw new Error("A IA recusou o texto (Filtro de Segurança). Reveja o conteúdo.");
+            
+            // 3. INICIA FALLBACK (Apenas se for erro de rede/queda do servidor 503 ou 429)
+            window.exibirToast?.(`Provedor ${primary.toUpperCase()} instável. A tentar usar o ${secondary.toUpperCase()}...`, 'aviso');
+            
+            // Verifica se tem a segunda chave configurada para fazer o fallback
+            if (!secondaryKey) {
+                throw new Error(`O serviço ${primary.toUpperCase()} falhou (erro de rede/sobrecarga), e não tem a chave do ${secondary.toUpperCase()} configurada para o sistema se auto-recuperar.`);
+            }
+
+            try {
+                // Executa a segunda opção
+                if (secondary === 'groq') return await executarGroq(promptCompleto, secondaryKey);
+                if (secondary === 'gemini') return await executarGemini(promptCompleto, secondaryKey);
+            } catch (fallbackError) {
+                if (fallbackError.message === "AUTH_ERROR") throw new Error(`A chave do provedor alternativo (${secondary.toUpperCase()}) é inválida.`);
+                if (fallbackError.message === "PROMPT_BLOCKED_ERROR") throw new Error("A IA alternativa também bloqueou o texto por filtros de segurança.");
+                throw new Error("Ambos os provedores de IA falharam por sobrecarga ou erro de rede.");
+            }
+        }
+    }
+
+    // --- LÓGICA DE NEGÓCIO DOS EMBARGOS ---
 
     async function buscarModelosCompativeis(topicoId, textoVicio) {
         if (!textoVicio || textoVicio.trim() === '') return window.exibirToast?.('Redija o Vício Alegado primeiro.', 'aviso');
         
-        const apiKey = _obterChaveAPI();
-        if (!apiKey) return;
-
         if (typeof window.AcervoManager === 'undefined') return window.exibirToast?.('Módulo do Acervo não está carregado.', 'erro');
 
-        const modelos = await AcervoManager.carregarModelos();
+        const modelos = await window.AcervoManager.carregarModelos();
         if (modelos.length === 0) return window.exibirToast?.('Seu acervo está vazio.', 'aviso');
 
         // PAYLOAD OTIMIZADO: Apenas ID e Título
@@ -42,7 +144,7 @@ window.AIRecommendationManager = (function() {
 
         const btnIcon = document.querySelector('.preamble-alegacao .ai-trigger-btn');
         if (btnIcon) btnIcon.classList.add('is-thinking');
-        if (window.exibirToast) exibirToast('IA analisando afinidades no Acervo...', 'info');
+        window.exibirToast?.('IA analisando afinidades no Acervo...', 'info');
 
         const fullPrompt = `Atue como um indexador jurídico. Analise a tese de Embargos de Declaração e encontre os modelos compatíveis.
 VÍCIO ALEGADO: "${textoVicio}"
@@ -54,98 +156,37 @@ REGRA ESTABELECIDA:
 Se houver modelos compatíveis, responda OBRIGATORIAMENTE no formato exato: [IDs: mod-xxx, mod-yyy]
 Se NÃO houver NENHUM modelo compatível com o tema, responda OBRIGATORIAMENTE: [IDs: NENHUM]`;
 
-        let respostaBruta = null;
-        let erroFinal = null;
-
-        // Tenta cada modelo da lista na ordem
-        for (let i = 0; i < GROQ_MODELS.length; i++) {
-            const currentModel = GROQ_MODELS[i];
-            
-            if (i > 0) {
-                if (window.exibirToast) exibirToast(`Redirecionando IA (Tentativa ${i+1}/${GROQ_MODELS.length})...`, 'info');
-                // Pequena pausa estratégica de 1.5s
-                await new Promise(r => setTimeout(r, 1500));
-            }
-
-            try {
-                const response = await fetch(BASE_URL, {
-                    method: "POST",
-                    headers: { 
-                        "Content-Type": "application/json",
-                        "Authorization": `Bearer ${apiKey}`
-                    },
-                    body: JSON.stringify({
-                        model: currentModel,
-                        messages: [{ role: "user", content: fullPrompt }],
-                        temperature: 0.1,
-                        max_tokens: 800 // Evita truncamento do chain-of-thought
-                    })
-                });
-
-                if (!response.ok) {
-                    // Erro 401 ou 403 é fatal (Chave errada/expirada)
-                    if (response.status === 401 || response.status === 403) {
-                        localStorage.removeItem(STORAGE_KEY);
-                        throw new Error("Chave de API inválida ou expirada. A chave foi limpa.");
-                    }
-                    // Outros erros (429, 503) disparam o erro para ir ao próximo modelo
-                    throw new Error(`Erro ${response.status} no modelo ${currentModel}`);
-                }
-
-                const data = await response.json();
-                respostaBruta = data?.choices?.[0]?.message?.content || "";
-                
-                // Sucesso absoluto! Interrompe o loop
-                break; 
-
-            } catch (error) {
-                console.warn(`[Juris IA - ED] Falha na tentativa com ${currentModel}:`, error.message);
-                erroFinal = error;
-                
-                // Se o erro for de chave inválida, quebra o loop inteiro imediatamente
-                if (error.message.includes("inválida")) {
-                    break;
-                }
-            }
-        }
-
-        // Se o loop terminou e não temos resposta, a IA falhou completamente
-        if (!respostaBruta) {
-            if (btnIcon) btnIcon.classList.remove('is-thinking');
-            if (window.exibirToast) exibirToast(`Falha na IA após várias tentativas: ${erroFinal ? erroFinal.message : 'Erro desconhecido'}`, 'erro');
-            return;
-        }
-
-        // PIPELINE DE SANITIZAÇÃO ESTRUTURAL BLINDADO
         try {
+            let respostaBruta = await processarIA(fullPrompt);
+
+            // Sanitização de resposta (Clean Tags)
             respostaBruta = respostaBruta.replace(/<think>[\s\S]*?(?:<\/think>|$)\s*/gi, '').trim();
-            if (respostaBruta.includes('</think>')) {
-                respostaBruta = respostaBruta.split('</think>').pop().trim();
-            }
+            if (respostaBruta.includes('</think>')) respostaBruta = respostaBruta.split('</think>').pop().trim();
             respostaBruta = respostaBruta.replace(/^```(?:markdown|text|json)?\r?\n?([\s\S]*?)\r?\n?```[\s\S]*$/i, '$1').trim();
 
             if (respostaBruta.includes("NENHUM")) {
-                if (window.exibirToast) exibirToast('Nenhum modelo de alta afinidade encontrado.', 'aviso');
+                window.exibirToast?.('Nenhum modelo de alta afinidade encontrado.', 'aviso');
                 return; 
             }
 
             const idsExtraidos = respostaBruta.match(/mod-[a-zA-Z0-9_-]+/g);
 
             if (!idsExtraidos || idsExtraidos.length === 0) {
-                if (window.exibirToast) exibirToast('A IA não retornou IDs válidos. Tente reformular o vício.', 'aviso');
+                window.exibirToast?.('A IA não retornou IDs válidos. Tente reformular o vício.', 'aviso');
                 console.warn("[Juris IA - ED] Resposta da IA fora do padrão:", respostaBruta);
                 return;
             }
 
-            console.log("[Juris IA - ED] Recomendações (Groq):", idsExtraidos);
+            console.log("[Juris IA - ED] Recomendações extraídas:", idsExtraidos);
 
-            if (typeof aplicarFiltroIAAcervo === 'function') {
-                aplicarFiltroIAAcervo(idsExtraidos);
-                if (window.exibirToast) exibirToast('Filtro de Inteligência Artificial aplicado ✨', 'sucesso');
+            if (typeof window.aplicarFiltroIAAcervo === 'function') {
+                window.aplicarFiltroIAAcervo(idsExtraidos);
+                window.exibirToast?.('Filtro de Inteligência Artificial aplicado ✨', 'sucesso');
             }
+
         } catch (error) {
-            console.error("[Juris IA Error - ED]", error);
-            if (window.exibirToast) exibirToast(`Erro ao processar resposta: ${error.message}`, 'erro');
+            console.warn("[Juris IA Error - ED]", error);
+            window.exibirToast?.(error.message, 'erro');
         } finally {
             if (btnIcon) btnIcon.classList.remove('is-thinking');
         }

@@ -1474,3 +1474,201 @@ document.addEventListener('mouseout', (e) => {
         _cachedTooltip.style.display = 'none'; 
     }, 200);
 });
+
+// =========================================================
+// MÓDULO DE GERENCIAMENTO DO MODAL DE TEMAS
+// =========================================================
+
+window.abrirModalTemas = function() {
+    // 1. Oculta o menu suspenso de origem, se aberto
+    const jurisMenu = document.getElementById('juris-menu');
+    if (jurisMenu) jurisMenu.style.display = 'none';
+
+    // 2. State Sync: Lê a Fonte da Verdade Renderizada (DOM)
+    const bodyClasses = Array.from(document.body.classList);
+    
+    // Define fallbacks seguros caso a inicialização ainda não tenha ocorrido
+    let temaProcessoRenderizado = 'jasmine'; 
+    let temaAnotacoesRenderizado = 'white'; 
+
+    // Varre o body em busca das classes de contrato do tema
+    bodyClasses.forEach(cls => {
+        if (cls.startsWith('theme-processo-')) temaProcessoRenderizado = cls.replace('theme-processo-', '');
+        if (cls.startsWith('theme-anotacoes-')) temaAnotacoesRenderizado = cls.replace('theme-anotacoes-', '');
+    });
+
+    // 3. Pinta a UI de acordo com a realidade antes de exibir o modal
+    atualizarFeedbackVisualTemas('processo', temaProcessoRenderizado);
+    atualizarFeedbackVisualTemas('anotacoes', temaAnotacoesRenderizado);
+
+    // 4. Exibe o modal
+    document.getElementById('temas-modal-backdrop').style.display = 'block';
+    document.getElementById('modal-temas').style.display = 'flex';
+};
+
+window.fecharModalTemas = function() {
+    document.getElementById('temas-modal-backdrop').style.display = 'none';
+    document.getElementById('modal-temas').style.display = 'none';
+};
+
+window.selecionarTemaComFeedback = function(categoria, tema) {
+    // 1. Invoca a lógica principal de negócio
+    if (typeof aplicarTema === 'function') {
+        aplicarTema(categoria, tema); 
+    }
+    
+    // 2. Atualiza os componentes visuais do modal de forma atômica
+    atualizarFeedbackVisualTemas(categoria, tema);
+};
+
+// Utilitário de pintura e Acessibilidade (a11y)
+function atualizarFeedbackVisualTemas(categoria, temaAtivo) {
+    const botoes = document.querySelectorAll(`.btn-tema-opcao[data-categoria="${categoria}"]`);
+    
+    botoes.forEach(btn => {
+        const spanCheck = btn.querySelector('.tema-check');
+        
+        if (btn.dataset.tema === temaAtivo) {
+            btn.classList.add('is-active-theme');
+            btn.setAttribute('aria-pressed', 'true');
+            if (spanCheck) spanCheck.style.display = 'block';
+        } else {
+            btn.classList.remove('is-active-theme');
+            btn.setAttribute('aria-pressed', 'false');
+            if (spanCheck) spanCheck.style.display = 'none';
+        }
+    });
+}
+
+// =========================================================
+// MÓDULO DE GESTÃO DA INTERFACE DE IA (AIManager) - ED
+// =========================================================
+window.AIManager = (function() {
+    const STORAGE_CONFIG = 'juris_ia_config'; // Compartilha as credenciais globalmente com a outra tela
+    
+    let config = {
+        provedor: 'gemini',
+        groqKey: '',
+        geminiKey: ''
+    };
+
+    function carregarConfig() {
+        const salva = localStorage.getItem(STORAGE_CONFIG);
+        if (salva) config = { ...config, ...JSON.parse(salva) };
+        return config;
+    }
+
+    function salvarConfig() {
+        localStorage.setItem(STORAGE_CONFIG, JSON.stringify(config));
+    }
+
+    function syncUI() {
+        const inputGroq = document.getElementById('input-api-groq');
+        const inputGemini = document.getElementById('input-api-gemini');
+        
+        if(inputGroq) inputGroq.value = config.groqKey || '';
+        if(inputGemini) inputGemini.value = config.geminiKey || '';
+        
+        document.querySelectorAll('.btn-ia-opcao').forEach(btn => {
+            const check = btn.querySelector('.ia-check');
+            if (btn.dataset.provedor === config.provedor) {
+                btn.classList.add('is-active-provider');
+                if (check) check.style.display = 'block';
+            } else {
+                btn.classList.remove('is-active-provider');
+                if (check) check.style.display = 'none';
+            }
+        });
+    }
+
+    function abrirModal() {
+        carregarConfig();
+        syncUI();
+        
+        const jurisMenu = document.getElementById('juris-menu');
+        if (jurisMenu) jurisMenu.style.display = 'none';
+
+        const backdrop = document.getElementById('ia-modal-backdrop');
+        const modal = document.getElementById('modal-ia-config');
+        if (backdrop) backdrop.style.display = 'block';
+        if (modal) modal.style.display = 'flex';
+    }
+
+    function fecharModal() {
+        // Apenas sincroniza a UI para remover digitações não salvas (sem testar) e fecha
+        syncUI(); 
+        const backdrop = document.getElementById('ia-modal-backdrop');
+        const modal = document.getElementById('modal-ia-config');
+        if (backdrop) backdrop.style.display = 'none';
+        if (modal) modal.style.display = 'none';
+    }
+
+    function selecionarProvedor(prov) {
+        config.provedor = prov;
+        salvarConfig(); 
+        syncUI();
+    }
+
+    async function testarChave(prov) {
+        const inputId = prov === 'groq' ? 'input-api-groq' : 'input-api-gemini';
+        const statusId = prov === 'groq' ? 'status-groq' : 'status-gemini';
+        
+        const inputEl = document.getElementById(inputId);
+        const statusEl = document.getElementById(statusId);
+        
+        if(!inputEl || !statusEl) return;
+        
+        const key = inputEl.value.trim();
+        
+        if (!key) {
+            statusEl.textContent = 'Insira uma chave antes de testar.';
+            statusEl.className = 'api-status-error';
+            statusEl.style.display = 'block';
+            return;
+        }
+
+        statusEl.textContent = 'A testar conexão...';
+        statusEl.className = 'api-status-loading';
+        statusEl.style.display = 'block';
+
+        try {
+            let url, options;
+            if (prov === 'groq') {
+                url = 'https://api.groq.com/openai/v1/models';
+                options = { headers: { 'Authorization': `Bearer ${key}` } };
+            } else {
+                url = `https://generativelanguage.googleapis.com/v1beta/models?key=${key}`;
+                options = {};
+            }
+
+            const response = await fetch(url, options);
+            
+            if (response.ok) {
+                statusEl.textContent = 'Conexão estabelecida! Chave guardada.';
+                statusEl.className = 'api-status-success';
+                
+                // Salva a chave apenas se a API a validar
+                if (prov === 'groq') config.groqKey = key;
+                if (prov === 'gemini') config.geminiKey = key;
+                salvarConfig();
+            } else {
+                throw new Error();
+            }
+        } catch (e) {
+            statusEl.textContent = 'Falha na conexão. Verifique a chave.';
+            statusEl.className = 'api-status-error';
+        }
+    }
+
+    // Escuta eventos de erro do serviço de IA para purgar chaves invalidadas na cloud
+    window.addEventListener('aiAuthError', (e) => {
+        const p = e.detail?.provider;
+        if (p === 'groq') config.groqKey = '';
+        if (p === 'gemini') config.geminiKey = '';
+        salvarConfig();
+    });
+
+    carregarConfig();
+
+    return { abrirModal, fecharModal, selecionarProvedor, testarChave, getConfig: () => config };
+})();
