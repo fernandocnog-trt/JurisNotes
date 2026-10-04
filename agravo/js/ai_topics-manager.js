@@ -178,6 +178,20 @@ window.TopicsManager = (function () {
             .replace(/'/g, '&#39;');
     }
 
+    /**
+     * Conector visual entre cartões correlacionados: duas hastes finas em sentidos opostos.
+     * Toda a geometria é CSS (.correlated-link); aqui só se emite o markup.
+     * @param {string} titulo - Tooltip exibido ao passar o mouse (texto livre, é escapado).
+     */
+    function _htmlConectorCorrelacao(titulo) {
+        return `<div class="correlated-link correlated-drag-handle" title="${escaparHTML(titulo)}" aria-hidden="true">
+            <div class="correlated-link__lines">
+                <span class="correlated-link__line correlated-link__line--up"></span>
+                <span class="correlated-link__line correlated-link__line--down"></span>
+            </div>
+        </div>`;
+    }
+
     function renderizarMarkdownSeguro(strEscapada) {
         if (!strEscapada) return '';
         let processado = strEscapada;
@@ -387,8 +401,8 @@ window.TopicsManager = (function () {
         const descPilha = sub.grupoDescricao || (teorAutomatico !== "" ? teorAutomatico : "Nós vazios.");
         const source = sub.viewSource || 'main';
 
-        return `
-        <div class="sub-annotation-item sub-stack-wrapper" data-source="${source}">
+                return `
+                <div class="sub-annotation-item sub-stack-wrapper" data-source="${escaparHTML(source)}">
             <div class="sub-annotation-card sub-annotation-stack tema-agravo">
                 <div class="stack-roman-badge" title="Desagrupar Pilha" onclick="TopicsManager.desagruparPilha('${activeTabId}', '${sub.grupoId}')">
                     ${numRomano}
@@ -574,8 +588,8 @@ window.TopicsManager = (function () {
         const styleAttr = ctx.bordaStyle ? ` style="${ctx.bordaStyle}"` : '';
 
         return `
-            <div class="${itemWrapperClass}" data-source="${ctx.viewSource}">
-                <div class="sub-annotation-card${classFase}${classBorda}"${styleAttr}>
+                    <div class="${itemWrapperClass}" data-source="${escaparHTML(ctx.viewSource)}">
+                        <div class="sub-annotation-card${classFase}${classBorda}"${styleAttr}>
                     <div class="${badgeClass}"
                          title="Opções deste nó/diretriz"
                          onclick="${clickSubMenu}">
@@ -821,9 +835,7 @@ window.TopicsManager = (function () {
                          ondragleave="DnDManager.dragLeave(event)"
                          ondragend="DnDManager.dragEnd(event)">
                          
-                        <div class="two-way-arrow-container correlated-drag-handle" title="Arraste a pasta inteira para reordenar">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 16V4m0 0L3 8m4-4l4 4m6 4v12m0 0l-4-4m4 4l4-4" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                        </div>
+                        ${_htmlConectorCorrelacao('Arraste a pasta inteira para reordenar')}
                         
                         <div class="annotation-card correlated-card pilha-processual-card ${faseClass}">
                             <div class="card-header">
@@ -874,11 +886,7 @@ window.TopicsManager = (function () {
                      ondragenter="DnDManager.dragEnter(event)"
                      ondragleave="DnDManager.dragLeave(event)"
                      ondragend="DnDManager.dragEnd(event)">
-                    <div class="two-way-arrow-container correlated-drag-handle" title="Arraste para reordenar">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M7 16V4m0 0L3 8m4-4l4 4m6 4v12m0 0l-4-4m4 4l4-4" stroke-linecap="round" stroke-linejoin="round"/>
-                        </svg>
-                    </div>
+                    ${_htmlConectorCorrelacao('Arraste para reordenar')}
                     <div class="annotation-card correlated-card fase-${typeof identificarFaseMetodologica === 'function' ? identificarFaseMetodologica(item.documento) : 4}">
                         <div class="card-header">
                             <div style="display:flex; gap:6px;">
@@ -1421,57 +1429,121 @@ window.TopicsManager = (function () {
     }
 
     /**
-     * Motor de Posicionamento Absoluto dos Nós de Ideia
-     * Evita Layout Thrashing através de leitura em massa (Passe A) seguida de mutação (Passe B)
+     * Motor de Slots Elásticos.
+     * Cada origem (cartão principal ou correlacionado) reserva a altura que seus nós exigem,
+     * metade acima e metade abaixo. Os nós são então centralizados na origem.
+     * Idempotente: a medição usa offsetHeight do cartão, que as folgas não alteram.
+     * Passes: A (lê) → B (escreve folgas) → C (lê posições) → D (escreve tops).
      */
     function posicionarNosDeIdeia(container) {
-        const masterItems = container.querySelectorAll('.timeline-item-master');
-        
-        masterItems.forEach(master => {
-            const mainCard = master.querySelector('.main-card-wrapper > .annotation-card');
-            const subWrapper = master.querySelector('.sub-annotations-wrapper');
-            const subItems = master.querySelectorAll('.sub-annotation-item');
+        const GAP_NOS = 20; // espaçamento vertical entre nós do mesmo grupo
 
-            if (!mainCard || subItems.length === 0 || !subWrapper) return;
+        // PASSE A: LEITURA
+        const planos = [];
+        container.querySelectorAll('.timeline-item-master').forEach(master => {
+            if (master.offsetParent === null) return; // aba oculta: não muta
 
-            const wrapperRect = subWrapper.getBoundingClientRect();
-            
-            // Passe A: Leituras (Evita Layout Thrashing)
-            const measurements = Array.from(subItems).map(subItem => {
-                const sourceRef = subItem.dataset.source;
-                let sourceCard = mainCard;
-                if (sourceRef !== 'main') {
-                    const correlatedWrapper = master.querySelector(`.correlated-item-wrapper[data-cidx="${sourceRef}"]`);
-                    if (correlatedWrapper) sourceCard = correlatedWrapper.querySelector('.annotation-card');
-                }
-                
-                // TRAVA DE SEGURANÇA: Previne o bug de sobreposição ao trocar abas no navegador
-                if (sourceCard.offsetHeight === 0) return null;
+            const mainWrapper = master.querySelector(':scope > .main-card-wrapper');
+            const subWrapper = master.querySelector(':scope > .sub-annotations-wrapper');
+            if (!mainWrapper || !subWrapper) return;
 
-                return {
-                    el: subItem,
-                    sourceCenterY: (sourceCard.getBoundingClientRect().top - wrapperRect.top) + (sourceCard.getBoundingClientRect().height / 2),
-                    height: subItem.offsetHeight
-                };
-            }).filter(m => m !== null); // Remove os itens inválidos da contagem
+            const wrappers = [mainWrapper, ...mainWrapper.querySelectorAll(':scope > .correlated-item-wrapper')];
+            const origens = wrappers.map((wrapper, i) => ({
+                wrapper,
+                key: i === 0 ? 'main' : wrapper.dataset.cidx,
+                card: wrapper.querySelector(':scope > .annotation-card'),
+                itens: [],
+                total: 0,
+                pad: 0
+            }));
 
-            if (measurements.length === 0) return; // Aborta mutação em views ocultas
+            // Trava de segurança: cartão sem altura = view oculta ou desmontada
+            if (origens.some(o => !o.card || o.card.offsetHeight === 0)) return;
 
-            // Passe B: Mutações
-            let currentY = 0;
-            measurements.forEach(m => {
-                let desiredTop = m.sourceCenterY - (m.height / 2);
-                if (desiredTop < currentY) desiredTop = currentY;
-                
-                m.el.style.position = 'absolute';
-                m.el.style.top = desiredTop + 'px';
-                m.el.style.width = '100%';
-                
-                currentY = desiredTop + m.height + 16;
+            const porChave = new Map(origens.map(o => [o.key, o]));
+            const principal = origens[0];
+
+            subWrapper.querySelectorAll(':scope > .sub-annotation-item').forEach(el => {
+                const alvo = porChave.get(el.dataset.source || 'main') || principal; // órfãos ancoram no principal
+                alvo.itens.push({ el, h: el.offsetHeight });
             });
 
-            subWrapper.style.minHeight = currentY + 'px';
+            origens.forEach(o => {
+                if (o.itens.length === 0) return;
+                o.total = o.itens.reduce((soma, it) => soma + it.h, 0) + GAP_NOS * (o.itens.length - 1);
+                o.pad = Math.ceil(Math.max(0, o.total - o.card.offsetHeight) / 2);
+            });
+
+            planos.push({ subWrapper, origens });
         });
+
+        // PASSE B: ESCRITA DAS FOLGAS (sempre grava, inclusive 0px, para limpar resíduos)
+        planos.forEach(({ origens }) => {
+            origens.forEach((o, i) => {
+                const valor = `${o.pad}px`;
+                if (o.wrapper.style.getPropertyValue('--slot-pad') !== valor) {
+                    o.wrapper.style.setProperty('--slot-pad', valor);
+                }
+
+                // Folga da origem anterior: soma-se à própria para que o conector
+                // alcance o cartão de cima, por maior que seja o vão.
+                if (i > 0) {
+                    const valorPrev = `${origens[i - 1].pad}px`;
+                    if (o.wrapper.style.getPropertyValue('--slot-pad-prev') !== valorPrev) {
+                        o.wrapper.style.setProperty('--slot-pad-prev', valorPrev);
+                    }
+                }
+            });
+        });
+
+        // PASSE C: LEITURA (um único reflow)
+        const posicoes = [];
+        const alturas = [];
+        planos.forEach(({ subWrapper, origens }) => {
+            const topoBase = subWrapper.getBoundingClientRect().top;
+            let cursor = 0;
+
+            origens.forEach(o => {
+                if (o.itens.length === 0) return;
+                const centro = (o.card.getBoundingClientRect().top - topoBase) + (o.card.offsetHeight / 2);
+                // Defesa: nunca abaixo de 0 nem sobre o grupo anterior
+                let y = Math.max(cursor, centro - (o.total / 2));
+                o.itens.forEach(({ el, h }) => {
+                    posicoes.push({ el, y });
+                    y += h + GAP_NOS;
+                });
+                cursor = y;
+            });
+
+            alturas.push({ subWrapper, altura: Math.max(0, cursor - GAP_NOS) });
+        });
+
+        // PASSE D: ESCRITA
+        posicoes.forEach(({ el, y }) => {
+            el.style.position = 'absolute';
+            el.style.width = '100%';
+            el.style.top = `${y}px`;
+        });
+        alturas.forEach(({ subWrapper, altura }) => {
+            subWrapper.style.minHeight = altura > 0 ? `${altura}px` : '';
+        });
+    }
+
+    /**
+     * Resolve o cartão de origem de um nó pela chave data-source, sem montar seletor CSS
+     * com texto livre (títulos de Tese podem conter aspas).
+     * Chaves sem correspondência ('global', 'tese:…') ancoram no cartão principal.
+     */
+    function _obterCardOrigem(master, chave) {
+        const mainWrapper = master.querySelector(':scope > .main-card-wrapper');
+        if (!mainWrapper) return null;
+        const mainCard = mainWrapper.querySelector(':scope > .annotation-card');
+        if (!chave || chave === 'main') return mainCard;
+
+        for (const w of mainWrapper.querySelectorAll(':scope > .correlated-item-wrapper')) {
+            if (w.dataset.cidx === chave) return w.querySelector(':scope > .annotation-card') || mainCard;
+        }
+        return mainCard;
     }
 
     /**
@@ -1526,48 +1598,63 @@ window.TopicsManager = (function () {
         }
 
         // VOLTAMOS A SELECIONAR TODOS AQUI, PARA A LINHA TRACEJADA FUNCIONAR NAS DIRETRIZES
-        const masterItems = container.querySelectorAll('.timeline-item-master');
-        masterItems.forEach(master => {
-            const mainCard = master.querySelector('.main-card-wrapper > .annotation-card');
-            const subItems = master.querySelectorAll('.sub-annotation-item');
-            if (!mainCard || subItems.length === 0) return;
+        const FAN_STEP = 14;    // distância máxima entre pontos de saída no lado do cartão
+        const FAN_MARGIN = 20;  // respiro mantido nas bordas superior/inferior do cartão
+
+        container.querySelectorAll('.timeline-item-master').forEach(master => {
+            const subWrapper = master.querySelector(':scope > .sub-annotations-wrapper');
+            if (!subWrapper) return;
+
+            const subItems = subWrapper.querySelectorAll(':scope > .sub-annotation-item');
+            if (subItems.length === 0) return;
 
             const isRightAligned = master.classList.contains('align-right');
-            
+
+            // Agrupa os nós pelo cartão de origem
+            const porOrigem = new Map();
             subItems.forEach(subItem => {
+                const sourceCard = _obterCardOrigem(master, subItem.dataset.source);
                 const subCard = subItem.querySelector('.sub-annotation-card');
-                const subRect = subCard.getBoundingClientRect();
-                const sourceRef = subItem.dataset.source;
-                
-                let sourceCard = mainCard;
-                if (sourceRef !== 'main') {
-                    const correlatedWrapper = master.querySelector(`.correlated-item-wrapper[data-cidx="${sourceRef}"]`);
-                    if (correlatedWrapper) sourceCard = correlatedWrapper.querySelector('.annotation-card');
-                }
+                if (!sourceCard || !subCard) return;
+                if (!porOrigem.has(sourceCard)) porOrigem.set(sourceCard, []);
+                porOrigem.get(sourceCard).push({ subItem, subRect: subCard.getBoundingClientRect() });
+            });
+
+            porOrigem.forEach((grupo, sourceCard) => {
+                // Ordem vertical dos nós = ordem dos pontos de saída (evita cruzamentos)
+                grupo.sort((a, b) => a.subRect.top - b.subRect.top);
+
                 const sourceRect = sourceCard.getBoundingClientRect();
+                const n = grupo.length;
+                const passo = n > 1
+                    ? Math.min(FAN_STEP, Math.max(0, sourceRect.height - 2 * FAN_MARGIN) / (n - 1))
+                    : 0;
+                const centroY = (sourceRect.top + sourceRect.height / 2) - containerRect.top;
 
-                const startX = isRightAligned ? sourceRect.left - containerRect.left : sourceRect.right - containerRect.left;
-                const endX = isRightAligned ? subRect.right - containerRect.left : subRect.left - containerRect.left;
-                const startY = (sourceRect.top + sourceRect.height / 2) - containerRect.top;
-                const endY   = (subRect.top + subRect.height / 2) - containerRect.top;
-                const ctrlX  = (startX + endX) / 2;
+                grupo.forEach(({ subItem, subRect }, k) => {
+                    const startX = isRightAligned ? sourceRect.left - containerRect.left : sourceRect.right - containerRect.left;
+                    const endX = isRightAligned ? subRect.right - containerRect.left : subRect.left - containerRect.left;
+                    const startY = centroY + (k - (n - 1) / 2) * passo;
+                    const endY = (subRect.top + subRect.height / 2) - containerRect.top;
+                    const ctrlX = (startX + endX) / 2;
 
-                let strokeColor = "#777";
-                let strokeOpacity = "1";
-                let strokeWidth = "1.5";
-                let dashArray = "5 4";
+                    let strokeColor = "#777";
+                    let strokeOpacity = "1";
+                    let strokeWidth = "1.5";
+                    let dashArray = "5 4";
 
-                if (isZenActive) {
-                    if (subItem.classList.contains('is-zen-focused')) {
-                        strokeColor = _activeTopicoCor;
-                        strokeWidth = "2.5";
-                        dashArray = "none";
-                    } else {
-                        strokeOpacity = "0.15";
+                    if (isZenActive) {
+                        if (subItem.classList.contains('is-zen-focused')) {
+                            strokeColor = _activeTopicoCor;
+                            strokeWidth = "2.5";
+                            dashArray = "none";
+                        } else {
+                            strokeOpacity = "0.15";
+                        }
                     }
-                }
 
-                svgContent += `<path d="M ${startX},${startY} C ${ctrlX},${startY} ${ctrlX},${endY} ${endX},${endY}" stroke="${strokeColor}" stroke-width="${strokeWidth}" stroke-dasharray="${dashArray}" opacity="${strokeOpacity}" fill="none" stroke-linecap="round"/>`;
+                    svgContent += `<path d="M ${startX},${startY} C ${ctrlX},${startY} ${ctrlX},${endY} ${endX},${endY}" stroke="${strokeColor}" stroke-width="${strokeWidth}" stroke-dasharray="${dashArray}" opacity="${strokeOpacity}" fill="none" stroke-linecap="round"/>`;
+                });
             });
         });
 

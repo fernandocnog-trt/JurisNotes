@@ -346,28 +346,29 @@ window.toggleLoginMenu = function(event) {
    MÓDULO DE ATALHOS FLUTUANTES (SHORTCUT MANAGER V2.1 - SMART FABS AI)
    ================================================ */
 window.ShortcutManager = (function() {
-    // Estado Rico: Suporta objetos { page, isCustom, label, color }
     let state = { fav1: null, fav2: null, fav3: null, embargosAutora: null, embargosReu: null, embargosReu2: null, acordao: null };
     let currentEditingType = null;
     let isCustomizing = false;
-    let hoveredType = null;
+    let hoveredType = null; 
     
-    // IconRegistry: Blindagem contra State Leak
     const originalIcons = {};
+    const baseOrder = ['fav1', 'fav2', 'fav3', 'embargosAutora', 'embargosReu', 'embargosReu2', 'acordao'];
+    const ICON_KEYS  = ['star', 'search', 'cash', 'chat', 'clock', 'sun'];
+    const COLOR_KEYS = ['fuchsia', 'purple', 'teal', 'orange', 'cyan'];
+    
+    const safeIcon  = i => ICON_KEYS.includes(i) ? i : 'star';
+    const safeColor = c => COLOR_KEYS.includes(c) ? c : 'fuchsia';
 
     const baseColors = { 
         fav1: 'is-active-fav1', fav2: 'is-active-fav2', fav3: 'is-active-fav3', 
         embargosAutora: 'is-active-alvo-autora', embargosReu: 'is-active-alvo-re', 
         embargosReu2: 'is-active-alvo-re2', acordao: 'is-active-acordao' 
     };
-    
     const baseRotulos = { 
         fav1: 'Favorito 1 (Ouro)', fav2: 'Favorito 2 (Fúcsia)', fav3: 'Favorito 3 (Pastel)', 
         embargosAutora: 'Agravo (Recorrente)', embargosReu: 'Agravo (Recorrido 1)', 
         embargosReu2: 'Agravo (Recorrido 2)', acordao: 'Decisão Denegatória' 
     };
-
-    const STAR_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>`;
 
     function init() {
         Object.keys(state).forEach(type => {
@@ -376,46 +377,34 @@ window.ShortcutManager = (function() {
                 originalIcons[type] = btn.innerHTML;
             }
         });
-        
         bindSmartFabEvents();
         updateUI();
     }
     
     function getTypeFromFabId(id) {
         const map = {
-            fav1: 'fab-fav1', fav2: 'fab-fav2', fav3: 'fab-fav3',
-            embargosAutora: 'fab-embargos-autora', embargosReu: 'fab-embargos-reu',
-            embargosReu2: 'fab-embargos-reu2', acordao: 'fab-acordao'
+            'fab-fav1': 'fav1', 'fab-fav2': 'fav2', 'fab-fav3': 'fav3',
+            'fab-embargos-autora': 'embargosAutora', 'fab-embargos-reu': 'embargosReu',
+            'fab-embargos-reu2': 'embargosReu2', 'fab-acordao': 'acordao'
         };
-        return Object.keys(map).find(type => map[type] === id) || null;
+        return map[id] || null;
     }
     
     function bindSmartFabEvents() {
         Object.keys(state).forEach(type => {
             const btn = document.getElementById(getFabId(type));
             if (!btn) return;
-
             btn.addEventListener('mouseenter', () => { hoveredType = type; });
             btn.addEventListener('mouseleave', () => { if (hoveredType === type) hoveredType = null; });
-
             btn.addEventListener('contextmenu', (event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                abrirCustomizacao(type);
+                event.preventDefault(); event.stopPropagation(); abrirCustomizacao(type);
             });
         });
 
         document.addEventListener('keydown', (event) => {
             if (!event.ctrlKey || !event.shiftKey || event.code !== 'KeyK') return;
-
             const activeEl = document.activeElement;
-            if (activeEl && (
-                activeEl.tagName === 'INPUT' ||
-                activeEl.tagName === 'TEXTAREA' ||
-                activeEl.tagName === 'SELECT' ||
-                activeEl.isContentEditable
-            )) { return; }
-
+            if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'SELECT' || activeEl.isContentEditable)) return;
             const modal = document.getElementById('shortcut-modal');
             if (modal && modal.style.display === 'flex') return;
 
@@ -423,32 +412,53 @@ window.ShortcutManager = (function() {
             if (!targetType && activeEl && activeEl.classList.contains('fab-shortcut')) {
                 targetType = getTypeFromFabId(activeEl.id);
             }
-
-            if (!targetType) {
-                exibirToast('Passe o mouse sobre o botão que deseja customizar.', 'aviso');
-                return;
-            }
-
-            event.preventDefault();
-            event.stopPropagation();
-            abrirCustomizacao(targetType);
+            if (!targetType) return;
+            event.preventDefault(); event.stopPropagation(); abrirCustomizacao(targetType);
         });
     }
 
     async function _commitShortcut(type, payload) {
         state[type] = payload;
         updateUI();
-        const pageNum = payload ? payload.page : null;
-        const msg = pageNum === null ? 'Atalho removido.' : `Atalho atualizado para fl. ${pageNum}!`;
+        const msg = !payload ? 'Atalho revertido para o padrão.' : `Atalho configurado para fl. ${payload.page}!`;
         exibirToast(msg, 'sucesso');
         if (typeof salvarBackupAutomatico === 'function') await salvarBackupAutomatico();
+    }
+
+    function _buildTooltipText(type, rotulo, page, isEmpty, isCustom) {
+        const prefix = isCustom ? '' : '⭐ ';
+        let tooltip = isEmpty ? `${prefix}${rotulo} — sem página` : `${prefix}${rotulo} (fl. ${page})`;
+        tooltip += isEmpty ? `\n[Ctrl+Clique] Capturar página\n[Botão direito] Customizar` : `\n[Shift+Clique] Editar\n[Botão direito] Customizar`;
+        return tooltip;
+    }
+
+    function _reorderDOM() {
+        const container = document.getElementById('scroll-fab-container');
+        const anchor = document.getElementById('btn-scroll-top');
+        if (!container || !anchor) return;
+
+        const custom = [], padrao = [];
+        baseOrder.forEach(t => (state[t]?.isCustom ? custom : padrao).push(t));
+        custom.sort((a, b) => (state[a].customizedAt || 0) - (state[b].customizedAt || 0));
+
+        const desired = [...padrao, ...custom].map(t => document.getElementById(getFabId(t))).filter(Boolean);
+        const current = [...container.children].filter(el => desired.includes(el));
+        const same = desired.length === current.length && desired.every((el, i) => el === current[i]);
+
+        if (!same) {
+            const focado = document.activeElement;
+            desired.forEach(el => container.insertBefore(el, anchor));
+            if (focado && focado !== document.activeElement) focado.focus({ preventScroll: true });
+        }
+        
+        desired.forEach(el => el.classList.remove('is-last-shortcut'));
+        if (desired.length > 0) desired[desired.length - 1].classList.add('is-last-shortcut');
     }
 
     function updateUI() {
         Object.keys(state).forEach(type => {
             const btn = document.getElementById(getFabId(type));
             if (!btn) return;
-            
             if (!originalIcons[type]) originalIcons[type] = btn.innerHTML;
 
             btn.className = 'fab-btn fab-shortcut'; 
@@ -457,64 +467,56 @@ window.ShortcutManager = (function() {
             
             const data = state[type];
             const config = (typeof data === 'number') ? { page: data } : data;
+            const isEmpty = !config || !config.page;
+            const isCustom = !isEmpty && config.isCustom;
+            
+            const rotulo = isCustom ? (config.label || 'Favorito') : baseRotulos[type];
+            const tooltipText = _buildTooltipText(type, rotulo, config?.page, isEmpty, isCustom);
 
-            if (!config || !config.page) {
+            if (isEmpty) {
                 btn.classList.add('is-empty');
-                btn.setAttribute(
-                    'data-tooltip', 
-                    `${baseRotulos[type]} — sem página\n[Ctrl+Clique] Capturar página atual\n[Botão direito] ou [Ctrl+Shift+K] Customizar`
-                );
+                btn.setAttribute('data-tooltip', tooltipText);
                 btn.innerHTML = originalIcons[type];
             } else {
-                const isCustom = config.isCustom;
-                const corClass = isCustom ? `is-active-${config.color}` : baseColors[type];
-                const rotulo = isCustom ? (config.label || 'Favorito') : baseRotulos[type];
-
+                const colorSegura = isCustom ? safeColor(config.color) : '';
+                const corClass = isCustom ? `is-active-${colorSegura}` : baseColors[type];
                 btn.classList.add(corClass);
-                btn.setAttribute(
-                    'data-tooltip', 
-                    `⭐ ${rotulo} (fl. ${config.page})\n[Shift+Clique] Editar\n[Botão direito] ou [Ctrl+Shift+K] Customizar/Remover`
-                );
-                btn.innerHTML = isCustom ? STAR_SVG : originalIcons[type];
+                btn.setAttribute('data-tooltip', tooltipText);
+                
+                if (isCustom) {
+                    const iconSeguro = safeIcon(config.icon);
+                    btn.innerHTML = `<svg viewBox="0 0 24 24"><use href="#icon-fab-${iconSeguro}"></use></svg>`;
+                } else {
+                    btn.innerHTML = originalIcons[type];
+                }
             }
         });
+        _reorderDOM();
     }
     
     function abrirCustomizacao(type) {
-        if (!window.PdfEngine || !PdfEngine.getPdfDoc()) {
-            exibirToast('Carregue um documento primeiro.', 'aviso');
-            return;
-        }
+        if (!window.PdfEngine || !PdfEngine.getPdfDoc()) { exibirToast('Carregue um PDF.', 'aviso'); return; }
         const currentPage = PdfEngine.getCurrentPage();
         const dadoAtual = state[type];
-        const paginaAtualDoAtalho = dadoAtual === null || dadoAtual === undefined
-            ? currentPage
-            : (typeof dadoAtual === 'number' ? dadoAtual : dadoAtual.page);
-
-        abrirModal(type, true, paginaAtualDoAtalho || currentPage);
+        const paginaAtual = (!dadoAtual || !dadoAtual.page) ? currentPage : (typeof dadoAtual === 'number' ? dadoAtual : dadoAtual.page);
+        abrirModal(type, true, paginaAtual);
     }
 
     async function handleClick(type, event) {
-        if (!window.PdfEngine || !PdfEngine.getPdfDoc()) { 
-            exibirToast('Carregue um documento primeiro.', 'aviso'); 
-            return; 
-        }
-
+        if (!window.PdfEngine || !PdfEngine.getPdfDoc()) { exibirToast('Carregue um PDF.', 'aviso'); return; }
         const currentPage = PdfEngine.getCurrentPage();
 
         if (event.ctrlKey && !event.shiftKey && !event.altKey) {
-            event.preventDefault(); 
-            event.stopPropagation();
+            event.preventDefault(); event.stopPropagation();
             if (currentPage > 0) {
-                await _commitShortcut(type, { page: currentPage });
+                const payload = state[type]?.isCustom ? { ...state[type], page: currentPage } : { page: currentPage };
+                await _commitShortcut(type, payload);
             }
             return; 
         }
 
         if (state[type] === null || event.shiftKey) {
-            const paginaExistente = state[type] === null
-                ? ''
-                : (typeof state[type] === 'number' ? state[type] : state[type].page);
+            const paginaExistente = state[type] === null ? '' : (typeof state[type] === 'number' ? state[type] : state[type].page);
             abrirModal(type, false, paginaExistente);
         } else {
             const targetPage = typeof state[type] === 'number' ? state[type] : state[type].page;
@@ -527,30 +529,31 @@ window.ShortcutManager = (function() {
         isCustomizing = customMode || (state[type] && state[type].isCustom);
 
         const titleEl = document.getElementById('shortcut-modal-title');
-        if(titleEl) titleEl.textContent = isCustomizing ? 'Customizar Favorito - Página:' : `Página para: ${baseRotulos[type]}`;
+        if(titleEl) titleEl.textContent = isCustomizing ? 'Customizar Botão - Página:' : `Página para: ${baseRotulos[type]}`;
         
-        const inputEl = document.getElementById('shortcut-page-input');
-        if(inputEl) inputEl.value = suggestedPage;
-        
-        const customFields = document.getElementById('shortcut-custom-fields');
-        if(customFields) customFields.style.display = isCustomizing ? 'block' : 'none';
+        document.getElementById('shortcut-page-input').value = suggestedPage;
+        document.getElementById('shortcut-custom-fields').style.display = isCustomizing ? 'block' : 'none';
         
         if (isCustomizing && state[type] && state[type].isCustom) {
-            const labelInput = document.getElementById('shortcut-label-input');
-            if(labelInput) labelInput.value = state[type].label || '';
-            
-            const radio = document.querySelector(`input[name="shortcut_color"][value="${state[type].color}"]`);
-            if(radio) radio.checked = true;
+            document.getElementById('shortcut-label-input').value = state[type].label || '';
+            const colorVal = safeColor(state[type].color);
+            const radioColor = document.querySelector(`input[name="shortcut_color"][value="${colorVal}"]`);
+            if(radioColor) radioColor.checked = true;
+
+            const iconVal = safeIcon(state[type].icon);
+            const radioIcon = document.querySelector(`input[name="shortcut_icon"][value="${iconVal}"]`);
+            if(radioIcon) radioIcon.checked = true;
         } else {
-            const labelInput = document.getElementById('shortcut-label-input');
-            if(labelInput) labelInput.value = '';
-            const firstRadio = document.querySelector('input[name="shortcut_color"]');
-            if(firstRadio) firstRadio.checked = true;
+            document.getElementById('shortcut-label-input').value = '';
+            const firstColor = document.querySelector('input[name="shortcut_color"][value="fuchsia"]');
+            if(firstColor) firstColor.checked = true;
+            const firstIcon = document.querySelector('input[name="shortcut_icon"][value="star"]');
+            if(firstIcon) firstIcon.checked = true;
         }
         
         document.getElementById('shortcut-modal-backdrop').style.display = 'block';
         document.getElementById('shortcut-modal').style.display = 'flex';
-        setTimeout(() => inputEl?.focus(), 50);
+        setTimeout(() => document.getElementById('shortcut-page-input').focus(), 50);
     }
 
     async function salvarModal() {
@@ -565,9 +568,17 @@ window.ShortcutManager = (function() {
             
             if (isCustomizing) {
                 const label = document.getElementById('shortcut-label-input').value.trim() || 'Favorito';
-                const colorRadio = document.querySelector('input[name="shortcut_color"]:checked');
-                const color = colorRadio ? colorRadio.value : 'fuchsia';
-                payload = { page: parsedPage, isCustom: true, label, color };
+                const colorRaw = document.querySelector('input[name="shortcut_color"]:checked')?.value;
+                const iconRaw = document.querySelector('input[name="shortcut_icon"]:checked')?.value;
+                
+                payload = { 
+                    page: parsedPage, 
+                    isCustom: true, 
+                    label, 
+                    color: safeColor(colorRaw), 
+                    icon: safeIcon(iconRaw),
+                    customizedAt: Date.now()
+                };
             }
             
             await _commitShortcut(currentEditingType, payload);
