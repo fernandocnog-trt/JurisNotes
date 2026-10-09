@@ -8,6 +8,18 @@ window.BalancaManager = (function() {
     let htmlState = null;
     let pendingTasksCount = 0;
 
+    // Helper para orquestrar passagem de tema via URL (Design Tokens)
+    function urlDoGerador() {
+        const metaModulo = document.querySelector('meta[name="juris-module"]');
+        const module = metaModulo ? metaModulo.content : 'ro';
+        
+        // Whitelist de segurança
+        const theme = ['ro', 'ed', 'ai'].includes(module) ? module : 'ro';
+        if (!metaModulo) console.warn('[Juris Notes] Meta tag juris-module ausente. Usando tema padrão (RO).');
+        
+        return `../dossie/index.html?theme=${theme}`;
+    }
+
     // Active Element Guard: Atalho Alt + B (Balança) protegido
     document.addEventListener('keydown', function(e) {
         if (e.altKey && (e.key === 'b' || e.key === 'B')) {
@@ -74,7 +86,7 @@ window.BalancaManager = (function() {
             iframe.srcdoc = htmlState;
         } else {
             iframe.removeAttribute('srcdoc');
-            iframe.src = '../dossie/index.html'; // Caminho realocado do gerador
+            iframe.src = urlDoGerador(); 
         }
     }
 
@@ -153,7 +165,7 @@ window.BalancaManager = (function() {
         const iframe = document.getElementById('balanca-iframe');
         if (iframe) {
             iframe.removeAttribute('srcdoc');
-            iframe.src = '../dossie/index.html';
+            iframe.src = urlDoGerador();
         }
         abrirPainel();
         atualizarInterface();
