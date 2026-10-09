@@ -7,6 +7,11 @@
    1. VARIÁVEIS, Z-INDEX CENTRALIZADO E RESET
    ================================================ */
 :root {
+    /* DEFINIÇÃO GLOBAL SEMÂNTICA (Imutável) */
+    --semantic-danger: #ef4444;      /* Botões de excluir/alerta */
+    --semantic-info-bg: #e0f2fe;     /* Fundo de badges informativos */
+    --semantic-info-text: #0369a1;   /* Texto de badges informativos */
+
     /* Design Tokens Bases */
     --theme-bg-jasmine: #FFD580;
     --theme-border-jasmine: #fbc02d;
@@ -55,6 +60,13 @@
     
     /* Variável da Espinha Dorsal (Vermelho sólido primário) */
     --theme-spine-line: #d32f2f;
+
+    /* Alias Theming (Shared Modals) - ED */
+    --theme-primary: #D500B5;
+    --theme-hover: #A3008A;
+    --theme-light-bg: rgba(213, 0, 181, 0.06);
+    --theme-light-border: rgba(213, 0, 181, 0.35);
+    --theme-text-on-primary: #ffffff;
 }
 
 *, *::before, *::after {
