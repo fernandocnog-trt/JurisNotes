@@ -1,0 +1,188 @@
+<style>
+    /* Estilos escopados para o Juris Prompts */
+    /* 1. Wrapper da Barra de Pesquisa */
+    .jp-search-wrapper {
+        position: relative; 
+        width: 100%;
+        margin-bottom: 1.5rem;
+        display: flex;
+        align-items: center;
+    }
+    .jp-search-icon {
+        position: absolute;
+        left: 1rem;
+        top: 50%;
+        transform: translateY(-50%);
+        width: 18px;
+        height: 18px;
+        color: #64748b;
+        pointer-events: none; /* Impede que a lupa intercepte cliques do input */
+    }
+
+    /* 2. Barra de pesquisa sem background image e ajustada */
+    .jp-search { 
+        width: 100%; 
+        padding: 1rem 2.8rem 1rem 2.8rem; 
+        border-radius: 8px; 
+        border: 1px solid #e2e8f0; 
+        font-size: 1rem; 
+        background-color: #ffffff;
+        transition: box-shadow 0.2s ease, border-color 0.2s ease;
+        font-family: inherit;
+    }
+    
+    .jp-search-clear {
+        position: absolute;
+        right: 0.8rem;
+        background: transparent;
+        border: none;
+        color: #94a3b8;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 4px;
+        border-radius: 50%;
+        transition: color 0.2s, background-color 0.2s;
+    }
+
+    .jp-search-clear:hover {
+        color: var(--semantic-danger, #ef4444);
+        background-color: #f1f5f9;
+    }
+
+    .jp-search-clear svg {
+        width: 16px;
+        height: 16px;
+    }
+    .jp-search:focus { 
+        outline: none; 
+        border-color: var(--theme-primary, #ffc107); 
+        box-shadow: 0 0 0 3px var(--theme-light-border, rgba(255, 193, 7, 0.2)); 
+    }
+
+    /* 3. Scrollbar estritamente escopada ao Modal Juris Prompts */
+    #modal-juris-prompts .doc-modal__content {
+        scrollbar-width: thin;
+        scrollbar-color: #cbd5e0 transparent;
+    }
+    #modal-juris-prompts .doc-modal__content::-webkit-scrollbar {
+        width: 6px;
+    }
+    #modal-juris-prompts .doc-modal__content::-webkit-scrollbar-track {
+        background: transparent;
+    }
+    #modal-juris-prompts .doc-modal__content::-webkit-scrollbar-thumb {
+        background-color: #cbd5e0;
+        border-radius: 10px;
+    }
+    #modal-juris-prompts .doc-modal__content::-webkit-scrollbar-thumb:hover {
+        background-color: #94a3b8;
+    }
+
+    .jp-card { background-color: #ffffff; color: #1e293b; border-radius: 8px; padding: 1.25rem; border: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; }
+    .jp-card-info { display: flex; flex-direction: column; gap: 4px; overflow: hidden; width: 70%; }
+    .jp-title { font-weight: 600; font-size: 1.1rem; }
+    .jp-preview { font-size: 0.85rem; color: #64748b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .jp-actions { display: flex; gap: 5px; }
+    .jp-icon-btn { background: none; border: 1px solid transparent; cursor: pointer; padding: 8px; border-radius: 6px; display: flex; align-items: center; justify-content: center; }
+    .jp-icon-btn svg { width: 18px; height: 18px; stroke: #64748b; stroke-width: 2; fill: none; }
+    .jp-icon-btn:hover { background-color: #f1f5f9; }
+    .jp-play:hover svg { stroke: var(--theme-text-on-primary, #000); fill: var(--theme-primary, #ffc107); }
+    .jp-edit:hover svg { stroke: #0284c7; }
+    .jp-del:hover svg { stroke: var(--semantic-danger, #ef4444); }
+    
+    .jp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; }
+    @media (max-width: 768px) { .jp-grid { grid-template-columns: 1fr; } }
+    .jp-form-group { margin-bottom: 1.25rem; }
+    .jp-form-group label { display: block; margin-bottom: 0.5rem; font-size: 0.85rem; font-weight: 600; color: #64748b; text-transform: uppercase; }
+    .jp-input { width: 100%; padding: 0.75rem; background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 1rem; font-family: inherit; }
+    .jp-builder-area { background-color: #f8fafc; padding: 1.5rem; border-radius: 8px; border: 1px dashed #e2e8f0; }
+    .jp-field-card { background: #ffffff; border: 1px solid #e2e8f0; padding: 1rem; border-radius: 8px; margin-bottom: 1rem; }
+    .jp-btn-add { background-color: var(--theme-primary, #ffc107); color: var(--theme-text-on-primary, #000); padding: 0.5rem 1rem; border-radius: 6px; border: none; font-weight: bold; cursor: pointer; display: flex; align-items: center; gap: 5px; transition: background-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease; }
+</style>
+
+<!-- MODAL 1: LISTAGEM PRINCIPAL -->
+<div class="modal-backdrop-modern" id="backdrop-juris-prompts" onclick="PromptUIController.fecharModalPrincipal()"></div>
+<div class="doc-modal" id="modal-juris-prompts" style="display: none; z-index: var(--z-outline-modal, 1000); max-width: 800px; width: 95%;">
+    <div class="jp-builder-area" style="display: flex; justify-content: space-between; align-items: center;">
+        <label style="color: #1e293b; font-weight:bold; margin: 0;"><span style="color:var(--theme-primary, #ffc107);">✦</span> Acervo de Prompts Especiais</label>
+        <div style="display: flex; gap: 10px; align-items: center;">
+            <button class="jp-btn-add" onclick="PromptUIController.openAddModal()">+ Novo Modelo</button>
+            <button class="doc-modal__close-btn" onclick="PromptUIController.fecharModalPrincipal()">✕</button>
+        </div>
+    </div>
+    <div class="doc-modal__content" style="background-color: #f1f5f9; padding: 20px; overflow-y: auto; max-height: 70vh;">
+        <!-- NOVO WRAPPER COM SVG ACESSÍVEL E INPUT SEM ONINPUT -->
+        <div class="jp-search-wrapper">
+            <svg class="jp-search-icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="11" cy="11" r="8"></circle>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+            <input type="text" id="jp-search" class="jp-search" placeholder="Buscar por nome ou conteúdo...">
+            <button id="jp-btn-clear-search" class="jp-search-clear" aria-label="Limpar termo de busca" onclick="PromptUIController.clearSearch()" style="display: none;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+            </button>
+        </div>
+        <div id="jp-list"></div>
+    </div>
+</div>
+
+<!-- MODAL 2: CRIAR/EDITAR -->
+<div class="modal-backdrop-modern jp-elevated-backdrop" id="backdrop-jp-form" onclick="PromptUIController.closeAddModal()"></div>
+<div class="doc-modal jp-elevated-modal" id="modal-jp-form" role="dialog" aria-modal="true" style="display: none; max-width: 900px; width: 95%;">
+    <div class="doc-modal__header">
+        <h3 class="doc-modal__title" id="jp-form-title">Novo Modelo</h3>
+        <button class="doc-modal__close-btn" onclick="PromptUIController.closeAddModal()">✕</button>
+    </div>
+    <div class="doc-modal__content" style="padding: 20px; overflow-y: auto; max-height: 80vh;">
+        <input type="hidden" id="jp-id">
+        <div class="jp-grid">
+            <div>
+                <div class="jp-form-group">
+                    <label>Nome do Modelo</label>
+                    <input type="text" id="jp-title-input" class="jp-input" required>
+                </div>
+                <div class="jp-form-group">
+                    <label>Teor do Prompt Base (Obrigatório)</label>
+                    <textarea id="jp-content-input" class="jp-input" style="min-height: 250px;" required></textarea>
+                </div>
+            </div>
+            <div class="jp-builder-area">
+                <label style="color: #1e293b; font-weight:bold;"><span style="color:#ffc107;">✦</span> Acervo de Prompts Especiais</label>
+                <p style="font-size: 0.8rem; color: #64748b; margin-bottom: 1rem;">Crie campos específicos para preencher ao gerar o texto.</p>
+                <div id="jp-builder-container"></div>
+                <button type="button" class="jp-btn-add" style="background:#fff; border: 1px dashed #cbd5e0; color:#1e293b;" onclick="PromptUIController.addField('text')">+ Texto</button>
+                <button type="button" class="jp-btn-add" style="background:#fff; border: 1px dashed #cbd5e0; color:#1e293b; margin-top:5px;" onclick="PromptUIController.addField('checkbox')">+ Múltipla Escolha</button>
+            </div>
+        </div>
+        <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; border-top: 1px solid #e2e8f0; padding-top: 15px;">
+            <button class="jp-btn-add" style="background: transparent; border: 1px solid #e2e8f0; color: #64748b;" onclick="PromptUIController.closeAddModal()">← Voltar</button>
+            <button class="jp-btn-add" onclick="PromptUIController.savePrompt()">Salvar Modelo</button>
+        </div>
+    </div>
+</div>
+
+<!-- MODAL 3: GERAR E COPIAR -->
+<div class="modal-backdrop-modern jp-elevated-backdrop" id="backdrop-jp-gen" onclick="PromptUIController.closeGenModal()"></div>
+<div class="doc-modal jp-elevated-modal" id="modal-jp-gen" role="dialog" aria-modal="true" style="display: none; max-width: 700px; width: 95%;">
+    <div class="doc-modal__header">
+        <h3 class="doc-modal__title">Gerar e Copiar para IA</h3>
+        <button class="doc-modal__close-btn" onclick="PromptUIController.closeGenModal()">✕</button>
+    </div>
+    <div class="doc-modal__content" style="padding: 20px; overflow-y: auto; max-height: 80vh;">
+        <div class="jp-form-group">
+            <label>Instrução Base (Bloqueada)</label>
+            <textarea id="jp-gen-base" class="jp-input" style="background: #f8fafc; color: #64748b; border-style: dashed; min-height: 80px;" readonly></textarea>
+        </div>
+        <div id="jp-gen-dynamic" style="padding: 1.5rem; background: #fffcf0; border: 1px solid #fde08b; border-radius: 8px; display: none;">
+            <!-- Campos extras aqui -->
+        </div>
+        <button class="jp-btn-add" style="width: 100%; justify-content: center; margin-top: 15px;" onclick="PromptUIController.copyToClipboard()">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+            Copiar Definitivo
+        </button>
+    </div>
+</div>
