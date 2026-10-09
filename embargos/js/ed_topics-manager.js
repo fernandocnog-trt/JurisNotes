@@ -28,6 +28,23 @@ window.TopicsManager = (function () {
 
     const _topicosComGlobaisAbertas = new Set();
 
+    /* --- INÍCIO DO BLOCO DE FUNÇÕES AUXILIARES --- */
+    function _ehCheckpoint(anotacao) {
+        return !!(anotacao && anotacao.tipo && anotacao.tipo.startsWith('checkpoint'));
+    }
+
+    function _mapNumerosVisuais(anotacoes) {
+        const mapa = new Map();
+        let contador = 1;
+        anotacoes.forEach((an, idx) => {
+            if (!_ehCheckpoint(an)) {
+                mapa.set(idx, contador++);
+            }
+        });
+        return mapa;
+    }
+    /* --- FIM DO BLOCO DE FUNÇÕES AUXILIARES --- */
+
     /* ================================================
        SCROLL GUARD v2 (Context-Aware Viewport Manager)
        ================================================
@@ -1179,13 +1196,16 @@ window.TopicsManager = (function () {
         const corTexto = obterCorContraste(_activeTopicoCor);
         
         const fragment = document.createDocumentFragment(); // Otimização de reflow
+        const mapaVisuais = _mapNumerosVisuais(topico.anotacoes);
 
         topico.anotacoes.forEach((anotacao, index) => {
+            if (_ehCheckpoint(anotacao)) return; // Ignora checkpoints na barra lateral
+
             const btn = document.createElement('div');
             btn.className = 'fab-idea-marker';
             btn.style.backgroundColor = _activeTopicoCor;
             btn.style.color = corTexto;
-            btn.textContent = index + 1;
+            btn.textContent = mapaVisuais.get(index);
             
             // UX Rica: Tooltip injeta o título da tese se existir
             const nomeTese = anotacao.tese ? ` - ${escaparHTML(anotacao.tese)}` : '';
@@ -1357,6 +1377,7 @@ window.TopicsManager = (function () {
         if (tesesValidas.length > 0) {
             sumarioHtml = `
             <div class="thesis-summary-panel">`;
+            const mapaVisuais = _mapNumerosVisuais(topicoAtivo.anotacoes);
 
             topicoAtivo.anotacoes.forEach((an, idx) => {
                 if (an.tese && an.tese.trim() !== '') {
@@ -1405,6 +1426,7 @@ window.TopicsManager = (function () {
                     }
 
                     const matureClass = isMature ? 'mature' : '';
+                    const numeroVisualCorreto = mapaVisuais.get(idx);
                     
                     const teseEscapada = an.tese ? escaparHTML(an.tese) : '';
                     const textoPainelRenderizado = window.JurisUtils.obterBadgeTeseCompleto(an.vicio || tipoVicio, teseEscapada, true);
@@ -1412,7 +1434,7 @@ window.TopicsManager = (function () {
                     sumarioHtml += `
                         <div class="thesis-badge ${matureClass}" onclick="abrirModalTese('${activeTabId}', ${idx})">
                             <div class="thesis-badge-inner" ${bgStyle}>
-                                <span class="num" style="background-color: ${_activeTopicoCor}; color: ${corTextoTese};">${idx + 1}</span> 
+                                <span class="num" style="background-color: ${_activeTopicoCor}; color: ${corTextoTese};">${numeroVisualCorreto}</span> 
                                 <span class="texto-tese">${textoPainelRenderizado}</span>
                             </div>
                         </div>`;
@@ -1434,8 +1456,11 @@ window.TopicsManager = (function () {
             htmlDiretrizes += renderizarNivelHierarquico('global', null, diretrizesGlobaisSeguras, activeTabId, [], 0, renderContext);
         }
 
+        // 1. Criamos três "baldes" distintos para ancoragem magnética (ED View)
+        let checkpointTopoHTML = '';
         let cardsHTML = '';
-        let checkpointsHTML = '';
+        let checkpointRodapeHTML = '';
+        
         let temCheckpoint = false;
         let ultimaTeseRenderizada = null;
 
@@ -1445,7 +1470,7 @@ window.TopicsManager = (function () {
             const vicioRaw = anotacao.vicio || topicoAtivo.vicio || 'omissao';
             const vicioFormatado = window.JurisUtils.formatarVicioED(vicioRaw);
 
-            if (chaveTeseCrua !== ultimaTeseRenderizada) {
+            if (!_ehCheckpoint(anotacao) && chaveTeseCrua !== ultimaTeseRenderizada) {
                 const diretrizesDoVicio = (topicoAtivo.diretrizesPorVicio && topicoAtivo.diretrizesPorVicio[vicioRaw])
                                           ? topicoAtivo.diretrizesPorVicio[vicioRaw]
                                           : [];
@@ -1470,11 +1495,17 @@ window.TopicsManager = (function () {
             }
             
             const htmlGerado = criarCard(anotacao, index, topicoAtivo.anotacoes, renderContext);
-            if (anotacao.tipo && anotacao.tipo.startsWith('checkpoint')) {
-                checkpointsHTML += htmlGerado;
+            
+            // 2. Roteamento Inteligente (Sanduíche Magnético)
+            if (_ehCheckpoint(anotacao)) {
                 temCheckpoint = true;
+                if (anotacao.tipo === 'checkpoint_entrada') {
+                    checkpointTopoHTML += htmlGerado; // Força no topo absoluto
+                } else {
+                    checkpointRodapeHTML += htmlGerado; // Força no rodapé absoluto
+                }
             } else {
-                cardsHTML += htmlGerado;
+                cardsHTML += htmlGerado; // Cards comuns ao centro
             }
         });
 
@@ -1491,8 +1522,9 @@ window.TopicsManager = (function () {
             <div class="timeline-container" id="timeline-container">
                 <svg id="connections-canvas"></svg>
                 ${htmlDiretrizes}
+                ${checkpointTopoHTML}
                 ${cardsHTML}
-                ${checkpointsHTML}
+                ${checkpointRodapeHTML}
                 ${fabHtml}
             </div>`;
 
@@ -1544,6 +1576,15 @@ window.TopicsManager = (function () {
         
         _sincronizarBtnGlobais(temGlobais, forcadoAberto);
         atualizarAlertaCapacidadeTopico(topicoAtivo);
+        
+        // ASSERT DE ENGENHARIA (Validação silenciosa pós-renderização)
+        requestAnimationFrame(() => {
+            const markers = document.querySelectorAll('.fab-idea-marker').length;
+            const masters = document.querySelectorAll('.timeline-item-master:not(.is-checkpoint):not(.nivel-global):not(.nivel-vicio)').length;
+            if (markers !== masters) {
+                console.warn('⚠️ ED Divergência arquitetural detectada: Marcadores (' + markers + ') vs Masters Renderizados (' + masters + ').');
+            }
+        });
     }
 
     /**
