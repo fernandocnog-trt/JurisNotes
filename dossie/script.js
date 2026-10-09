@@ -49,10 +49,10 @@ async function generatePanel(isInternalGenerator = false) {
         
         // Trava o botão imediatamente para evitar duplos cliques (UX)
         if (btn) {
-            if (btn.classList.contains('is-loading')) return; // Impede duplo disparo
-            btn.innerText = "⏳ Processando...";
-            btn.style.backgroundColor = "#eab308"; // Amarelo de processamento
+            if (btn.classList.contains('is-loading')) return; 
             btn.classList.add('is-loading'); 
+            const span = btn.querySelector('span');
+            if (span) span.innerText = "⏳ Processando...";
         }
 
         const inputElement = document.getElementById('json-input');
@@ -96,9 +96,9 @@ async function generatePanel(isInternalGenerator = false) {
         // Em caso de erro local (JSON.parse), destrava o botão
         const btn = document.querySelector('.btn-generate');
         if (btn) {
-            btn.innerText = "Gerar Dossiê";
-            btn.style.backgroundColor = "";
             btn.classList.remove('is-loading');
+            const span = btn.querySelector('span');
+            if (span) span.innerText = "Gerar Dossiê";
         }
     }
 }
@@ -267,89 +267,20 @@ function renderContent(data) {
 
 let windowAvailableTopics = [];
 
-// 0. OUVINTE DE EVENTOS DO SISTEMA PRINCIPAL (GATEKEEPER)
+// 0. OUVINTE DE ERROS DO GATEKEEPER (NACK)
 window.addEventListener('message', function(event) {
-    // A) Tratamento de Erro na Geração (NACK)
     if (event.data && event.data.type === 'DOSSIE_ERROR') {
         const btn = document.querySelector('.btn-generate');
         if (btn) {
-            btn.innerText = "Gerar Dossiê";
-            btn.style.backgroundColor = "";
             btn.classList.remove('is-loading');
+            const span = btn.querySelector('span');
+            if (span) span.innerText = "Gerar Dossiê";
         }
         alert("Falha ao integrar o Dossiê: " + (event.data.message || "Erro desconhecido."));
     }
-    
-    // B) Sincronização Passiva: Quando o usuário fecha o painel no sistema principal
-    if (event.data && event.data.type === 'REQUEST_SYNC') {
-        document.querySelectorAll('input[type="checkbox"], input[type="radio"]').forEach(c => c.checked ? c.setAttribute('checked', 'checked') : c.removeAttribute('checked'));
-        document.querySelectorAll('input[type="text"], input[type="number"], input[type="hidden"]').forEach(i => i.setAttribute('value', i.value));
-        document.querySelectorAll('textarea').forEach(t => t.textContent = t.value);
-        
-        window.parent.postMessage({ 
-            type: 'DOSSIE_UPDATED', 
-            html: document.documentElement.outerHTML,
-            silent: true
-        }, '*');
-    }
 });
 
-// 1. OUVINTE DE MENSAGENS GLOBAL
-window.addEventListener('message', function(event) {
-    if (event.data && event.data.type === 'SYNC_TOPICS') {
-        windowAvailableTopics = event.data.topicos || [];
-        hydrateReminders(); // Hidrata lembretes antigos garantindo a nova UI
-        
-        // MOTOR DE AUTO-CURA POR ID (Resolução de Bug de Renomeação)
-        const circles = document.querySelectorAll('.topic-circle-indicator');
-        circles.forEach(circle => {
-            // Se não tem ID, assumimos estado legado/global.
-            const topicId = circle.dataset.topicId || 'global';
-            
-            if (topicId !== 'global') {
-                const topicExists = windowAvailableTopics.find(t => t.id === topicId);
-                
-                if (topicExists) {
-                    // Tópico existe: Atualiza Cor E Nome (Caso tenha sido renomeado)
-                    circle.style.backgroundColor = topicExists.cor;
-                    circle.style.border = '2px solid transparent';
-                    circle.style.boxShadow = `0 0 6px ${topicExists.cor}40`;
-                    circle.setAttribute('title', topicExists.nome); // Sync do Tooltip
-                    circle.setAttribute('style', circle.style.cssText); // Persiste no HTML exportado
-                } else {
-                    // Tópico apagado: Reverte para estado Global com segurança
-                    circle.dataset.topicId = 'global';
-                    circle.setAttribute('data-topic-id', 'global');
-                    circle.style.backgroundColor = '#ffffff';
-                    circle.style.border = '2px solid #cbd5e1';
-                    circle.style.boxShadow = 'none';
-                    circle.setAttribute('title', 'Global (Todo o Processo)');
-                    circle.setAttribute('style', circle.style.cssText); 
-                }
-            }
-        });
-    }
-    
-    if (event.data && event.data.type === 'SCROLL_TO_TASKS') {
-        // Busca resiliente pelo título da seção
-        const headers = Array.from(document.querySelectorAll('.section-title'));
-        const obsTitle = headers.find(el => el.textContent.toLowerCase().includes('observações gerais'));
-        
-        if (obsTitle) {
-            obsTitle.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            // Feedback visual sutil (pisca o bloco para guiar o olhar)
-            const obsContainer = document.getElementById('obs-list');
-            if (obsContainer) {
-                obsContainer.style.transition = 'box-shadow 0.3s ease';
-                obsContainer.style.boxShadow = '0 0 0 2px #3b82f6'; // Azul destaque
-                setTimeout(() => obsContainer.style.boxShadow = 'none', 1000);
-            }
-        }
-    }
-
-    // Blocos SCROLL_TO_TRILHA removidos: Controle de scroll migrado integralmente
-    // para o método aguardarDomERolarParaTrilha no ed_balanca-manager.js
-});
+// 1. Ouvintes de mensagens obsoletos removidos (Clean Code)
 
 // --- 3. INICIALIZAÇÃO LIMPA E ATUALIZAÇÃO DE LINHAS ---
 document.addEventListener('DOMContentLoaded', () => {
@@ -359,8 +290,6 @@ document.addEventListener('DOMContentLoaded', () => {
         updateTreeLines();
     }
     window.addEventListener('resize', updateTreeLines);
-    
-    updateTaskCounters();
 });
 
 function updateTreeLines() {
@@ -394,7 +323,6 @@ function updateTreeLines() {
             }
         }
     });
-    syncSentenceTopics();
 }
 
 // --- 4. HELPERS DE INTERAÇÃO ---
@@ -454,39 +382,15 @@ function rotateBadge(el) {
     el.classList.remove(...states);
     el.classList.add(states[nextIdx]);
     el.innerText = texts[nextIdx];
-    syncSentenceTopics(); // propaga a mudança de polo para a seção de Sentenças
 }
 
 // ATUALIZAR: Garante que o checkbox funcione em listas ou no wrapper isolado
 function toggleRow(chk) {
     const item = chk.closest('.checklist-item') || chk.closest('.tempestividade-wrapper');
     if(item) chk.checked ? item.classList.add('completed') : item.classList.remove('completed');
-    
-    if(item && item.closest('#obs-list')) updateTaskCounters();
 }
 
-// Função moderna de controle de estado visual via classe
-window.toggleMainSyncPanel = function(headerEl) {
-    const wrapper = headerEl.closest('.sync-accordion-wrapper');
-    if (wrapper) {
-        wrapper.classList.toggle('is-open');
-    }
-};
-
-// NOVA FUNÇÃO: Manipulador visual do componente sanfonado
-window.toggleSyncItem = function(headerDiv) {
-    // Busca os nós relativos dentro do card atual
-    const body = headerDiv.nextElementSibling;
-    const icon = headerDiv.querySelector('.chevron-icon');
-    
-    if (body.style.display === 'none') {
-        body.style.display = 'block';
-        icon.style.transform = 'rotate(90deg)'; // Seta aponta para baixo
-    } else {
-        body.style.display = 'none';
-        icon.style.transform = 'rotate(0deg)'; // Seta aponta para a direita
-    }
-};
+/* Funções de sanfona obsoletas removidas */
 
 function editTopicTitle(btn) {
     const contentDiv = btn.closest('.checklist-item').querySelector('.item-content');
@@ -530,128 +434,7 @@ function toggleSubtopic(btn) {
     updateTreeLines();
 }
 
-// 2. HIDRATAÇÃO DE DOM (Retrocompatibilidade)
-function hydrateReminders() {
-    const obsList = document.getElementById('obs-list');
-    if (!obsList) return;
-
-    const items = obsList.querySelectorAll('.checklist-item');
-    items.forEach(item => {
-        // Se já tem o indicador, ignora
-        if (item.querySelector('.topic-circle-indicator')) return;
-        
-        item.style.position = 'relative'; // Garante contexto para o menu absoluto
-
-        // Cria e injeta o indicador antes do input de texto
-        const circle = document.createElement('div');
-        circle.className = 'topic-circle-indicator';
-        circle.title = 'Global (Todo o Processo)';
-        circle.setAttribute('style', 'background-color: #ffffff; border: 2px solid #cbd5e1;');
-        circle.onclick = function() { window.openObsTopicSelector(this); };
-
-        // Localiza a div que contém o input text
-        const textWrapper = item.querySelector('div[style*="flex:1"]');
-        if (textWrapper) {
-            item.insertBefore(circle, textWrapper);
-        }
-    });
-}
-
-// 3. ALTERAÇÃO DA CRIAÇÃO DE NOVOS LEMBRETES
-function addNewObs() {
-    const container = document.getElementById('obs-list');
-    const div = document.createElement('div');
-    div.className = 'checklist-item';
-    div.style.position = 'relative'; 
-    
-    div.innerHTML = `
-        <input type="checkbox" class="chk-input" onchange="toggleRow(this);">
-        <div class="topic-circle-indicator" title="Global (Todo o Processo)" style="background-color: #ffffff; border: 2px solid #cbd5e1;" onclick="window.openObsTopicSelector(this)"></div>
-        <div style="flex:1;">
-            <input type="text" class="input-details" placeholder="Escreva o lembrete aqui..." oninput="this.setAttribute('value', this.value);" style="width:100%">
-        </div>
-        <button onclick="this.parentElement.remove(); updateTaskCounters();" 
-                style="border:none; background:none; cursor:pointer; color:#cbd5e1;">✕</button>
-    `;
-    container.appendChild(div);
-    updateTaskCounters();
-}
-
-// 4. LÓGICA DO MENU FLUTUANTE DE SELEÇÃO
-window.openObsTopicSelector = function(circleEl) {
-    // BLINDAGEM 1: Impede que o clique atual vaze e feche o menu instantaneamente
-    if (window.event) {
-        window.event.stopPropagation();
-    }
-    
-    closeAllObsTopicSelectors();
-
-    const menu = document.createElement('div');
-    menu.className = 'obs-topic-selector-menu';
-    
-    const optionGlobal = document.createElement('div');
-    optionGlobal.className = 'obs-topic-option';
-    optionGlobal.innerHTML = `<div class="color-dot" style="background: #ffffff; border: 1px solid #ccc;"></div> Global`;
-    optionGlobal.addEventListener('click', () => {
-        window.applyObsTopic(circleEl, 'global', 'Global (Todo o Processo)', '#ffffff');
-    });
-    menu.appendChild(optionGlobal);
-
-    if (windowAvailableTopics.length > 0) {
-        const divider = document.createElement('div');
-        divider.className = 'obs-topic-divider';
-        menu.appendChild(divider);
-
-        windowAvailableTopics.forEach(t => {
-            const option = document.createElement('div');
-            option.className = 'obs-topic-option';
-            const safeName = t.nome.replace(/'/g, "\\'");
-            option.innerHTML = `<div class="color-dot" style="background: ${t.cor};"></div> ${safeName}`;
-            
-            option.addEventListener('click', () => {
-                window.applyObsTopic(circleEl, t.id, t.nome, t.cor);
-            });
-            menu.appendChild(option);
-        });
-    }
-
-    document.body.appendChild(menu);
-    
-    const rect = circleEl.getBoundingClientRect();
-    menu.style.top = (rect.bottom + window.scrollY + 8) + 'px';
-    menu.style.left = (rect.left + window.scrollX) + 'px';
-    
-    // BLINDAGEM 2: Espera 50 milissegundos (imperceptível) antes de ativar a armadilha de fechar
-    setTimeout(() => {
-        document.addEventListener('click', closeAllObsTopicSelectors);
-    }, 50);
-};
-
-window.applyObsTopic = function(circleEl, topicId, topicName, topicColor) {
-    if (!circleEl) return;
-    
-    circleEl.dataset.topicId = topicId;
-    circleEl.setAttribute('data-topic-id', topicId); 
-    
-    circleEl.style.backgroundColor = topicColor;
-    circleEl.setAttribute('title', topicName);
-    
-    if (topicId === 'global') {
-        circleEl.style.border = '2px solid #cbd5e1';
-        circleEl.style.boxShadow = 'none';
-    } else {
-        circleEl.style.border = '2px solid transparent';
-        circleEl.style.boxShadow = `0 0 6px ${topicColor}40`;
-    }
-    
-    circleEl.setAttribute('style', circleEl.style.cssText);
-};
-
-window.closeAllObsTopicSelectors = function() {
-    const menus = document.querySelectorAll('.obs-topic-selector-menu');
-    menus.forEach(menu => menu.remove());
-    document.removeEventListener('click', closeAllObsTopicSelectors);
-};
+/* Funções de manipulação de observações removidas */
 
 function addNewTopic() {
     const container = document.getElementById('sortable-list');
@@ -686,9 +469,6 @@ function addNewTopic() {
 
 // --- 5. EXPORTAÇÃO COMPLETA ---
 async function downloadBundledHTML(isInternalGenerator = false) {
-    // NOVA LINHA DE SEGURANÇA (Pre-Flight Cleanup)
-    if (typeof closeAllObsTopicSelectors === 'function') closeAllObsTopicSelectors();
-    
     document.querySelectorAll('input[type="checkbox"]').forEach(c => c.checked ? c.setAttribute('checked', 'checked') : c.removeAttribute('checked'));
     document.querySelectorAll('input[type="text"]').forEach(i => i.setAttribute('value', i.value));
     
@@ -709,12 +489,6 @@ async function downloadBundledHTML(isInternalGenerator = false) {
     
     const container = clone.querySelector('#panel-container');
     if(container) container.style.display = 'block';
-
-    // Garante que o dossiê exportado nasça com a sanfona fechada, ignorando o Live DOM
-    const mainAccordion = clone.querySelector('.sync-accordion-wrapper');
-    if (mainAccordion) {
-        mainAccordion.classList.remove('is-open');
-    }
 
     try {
         const cssLink = document.getElementById('main-css');
@@ -851,104 +625,7 @@ function setupDrag() {
 // --- 7. CONTROLE DE VERSÕES E HISTÓRICO ---
 // (Funcionalidades legadas de versão removidas para limpeza de dependências do Dossiê)
 
-// --- NOVA SEÇÃO 8: SINCRONIZAÇÃO INTELIGENTE DE SENTENÇAS ---
-
-/**
- * Atualização INCREMENTAL: nunca destrói dados já preenchidos.
- * Usa data-topic-id (na Trilha) e data-sync-id (nas Sentenças) como chave estável.
- * Opera em 3 fases: REMOVER itens obsoletos → CRIAR/ATUALIZAR itens → REORDENAR.
- */
-function syncSentenceTopics() {
-    // IMPORTANTE: Agora os itens dinâmicos são injetados no CORPO do acordeão.
-    const container = document.getElementById('dynamic-sentence-topics-body');
-    if (!container) return;
-
-    const trilhaItems = Array.from(
-        document.querySelectorAll('#sortable-list .checklist-item')
-    );
-
-    const placeholder = container.querySelector('.sync-placeholder');
-
-    // Fase 1 — REMOVER itens obsoletos
-    const activeIds = new Set(
-        trilhaItems.map(item => item.dataset.topicId).filter(Boolean)
-    );
-    container.querySelectorAll('.sentence-topic-sync[data-sync-id]').forEach(el => {
-        if (!activeIds.has(el.dataset.syncId)) el.remove();
-    });
-
-    // Controle do placeholder
-    if (trilhaItems.length === 0) {
-        if (placeholder) placeholder.style.display = 'block';
-        return;
-    }
-    if (placeholder) placeholder.style.display = 'none';
-
-    // Fase 2 — CRIAR ou ATUALIZAR cada sync item
-    trilhaItems.forEach(item => {
-        const id = item.dataset.topicId;
-        if (!id) return;
-
-        const titleSpan = item.querySelector('.item-title');
-        const title = titleSpan ? titleSpan.textContent.trim() : 'Tópico sem nome';
-        const isSub = item.classList.contains('is-subtopic');
-
-        const partyBadgeEl = item.querySelector('.badge-author, .badge-defendant, .badge-joint');
-        let partyClass = 'badge-author';
-        let partyText = 'AUTOR';
-        if (partyBadgeEl) {
-            if (partyBadgeEl.classList.contains('badge-defendant')) { partyClass = 'badge-defendant'; partyText = 'RÉU'; }
-            else if (partyBadgeEl.classList.contains('badge-joint')) { partyClass = 'badge-joint'; partyText = 'AMBOS'; }
-            else { partyText = partyBadgeEl.textContent.trim(); }
-        }
-
-        let syncItem = container.querySelector(`.sentence-topic-sync[data-sync-id="${id}"]`);
-
-        if (!syncItem) {
-            syncItem = document.createElement('div');
-            syncItem.className = 'checklist-item sentence-topic-sync';
-            syncItem.dataset.syncId = id;
-            syncItem.innerHTML = `
-                <div class="item-content" style="flex-direction: column; align-items: flex-start; gap: 0; width: 100%;">
-                    <div class="sync-header" onclick="toggleSyncItem(this)" style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; width: 100%; cursor: pointer; padding: 4px 0;">
-                        <svg class="chevron-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="transition: transform 0.2s; flex-shrink: 0;"><polyline points="9 18 15 12 9 6"></polyline></svg>
-                        <span class="sync-title item-title" style="font-size: 0.85rem; flex: 1;"></span>
-                        <span class="badge badge-mini-party" style="cursor: default;"></span>
-                        <span class="badge badge-procedente" 
-                              onclick="event.stopPropagation(); rotateSentenceBadge(this);" 
-                              title="Clique para alternar o resultado" 
-                              style="margin-left: auto;">PROCEDENTE</span>
-                    </div>
-                    <div class="sync-item-body" style="display: none; width: 100%; padding-left: 24px; box-sizing: border-box; margin-top: 6px;">
-                        <input type="text" class="input-details input-full-width"
-                               placeholder="Observações sobre o resultado deste tópico..."
-                               oninput="this.setAttribute('value', this.value);">
-                    </div>
-                </div>
-            `;
-            container.appendChild(syncItem);
-        }
-
-        const titleEl = syncItem.querySelector('.sync-title');
-        if (titleEl) titleEl.textContent = title;
-
-        const miniParty = syncItem.querySelector('.badge-mini-party');
-        if (miniParty) {
-            miniParty.className = `badge badge-mini-party ${partyClass}`;
-            miniParty.textContent = partyText;
-        }
-
-        syncItem.style.marginLeft = isSub ? '40px' : '0px';
-    });
-
-    // Fase 3 — REORDENAR para espelhar a ordem da Trilha
-    trilhaItems.forEach(item => {
-        const id = item.dataset.topicId;
-        if (!id) return;
-        const syncItem = container.querySelector(`.sentence-topic-sync[data-sync-id="${id}"]`);
-        if (syncItem) container.appendChild(syncItem);
-    });
-}
+/* Função syncSentenceTopics removida */
 
 /**
  * Ativa ou desativa um bloco de formulário da Tempestividade.
@@ -1037,19 +714,6 @@ window.triggerSave = async function(btn) {
     // UX: Garante que a animação seja percebida antes do thread lock do download
     await new Promise(r => setTimeout(r, 500)); 
     
-    // NOVO: Push ativo - Envia o estado atualizado para salvar no sistema principal (Backup)
-    if (window.parent && window.parent !== window) {
-        document.querySelectorAll('input[type="checkbox"], input[type="radio"]').forEach(c => c.checked ? c.setAttribute('checked', 'checked') : c.removeAttribute('checked'));
-        document.querySelectorAll('input[type="text"], input[type="number"], input[type="hidden"]').forEach(i => i.setAttribute('value', i.value));
-        document.querySelectorAll('textarea').forEach(t => t.textContent = t.value);
-        
-        window.parent.postMessage({ 
-            type: 'DOSSIE_UPDATED', 
-            html: document.documentElement.outerHTML 
-        }, '*');
-    }
-    
-    // Mantém o comportamento de baixar o HTML localmente (caso necessário)
     await downloadBundledHTML();
     
     btn.classList.remove('is-saving');
@@ -1058,27 +722,7 @@ window.triggerSave = async function(btn) {
     setTimeout(() => btn.classList.remove('save-success'), 2500);
 };
 
-window.updateTaskCounters = function() {
-    const obsList = document.getElementById('obs-list');
-    if (!obsList) return;
-    
-    let pending = 0;
-    let done = 0;
-    obsList.querySelectorAll('.chk-input').forEach(chk => chk.checked ? done++ : pending++);
-    
-    const pBadge = document.getElementById('task-pending');
-    const dBadge = document.getElementById('task-done');
-    
-    if (pBadge) {
-        pBadge.innerText = pending;
-        pBadge.style.display = pending > 0 ? 'flex' : 'none'; // Previne poluição visual de zeros
-    }
-    
-    if (dBadge) {
-        dBadge.innerText = done;
-        dBadge.style.display = done > 0 ? 'flex' : 'none';
-    }
-};
+/* Função updateTaskCounters removida */
 
 function rotateSimNaoBadge(el) {
     const states = ['badge-sim', 'badge-nao'];

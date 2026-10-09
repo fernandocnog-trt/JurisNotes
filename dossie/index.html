@@ -1,13 +1,21 @@
 <!DOCTYPE html>
 <html lang="pt-br">
 <head>
+   <meta charset="UTF-8">
    <link rel="shortcut icon" href="favicon_io/favicon.ico" type="image/x-icon">
    <link rel="icon" type="image/png" sizes="32x32" href="favicon_io/favicon-32x32.png">
    <link rel="icon" type="image/png" sizes="16x16" href="favicon_io/favicon-16x16.png">
    <link rel="apple-touch-icon" sizes="180x180" href="favicon_io/apple-touch-icon.png">
-   <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Painel de Julgamento</title>
+   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+   <title>Painel de Julgamento</title>
+   <script>
+       (function(){
+           var t = new URLSearchParams(location.search).get('theme');
+           if(['ro','ed','ai'].indexOf(t) !== -1) {
+               document.documentElement.setAttribute('data-theme', t);
+           }
+       })();
+   </script>
     <link rel="stylesheet" href="style.css" id="main-css">
 </head>
 <body>
@@ -25,7 +33,7 @@
                     <path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"></path>
                     <path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"></path>
                 </svg>
-                Gerar Dossiê
+                <span>Gerar Dossiê</span>
             </button>
 
             <button class="btn-clear" onclick="limparJSON()">
@@ -48,14 +56,7 @@
                 <input type="text" id="parties-display" class="header-input-partes" placeholder="Partes: Recorrente x Recorrido (Preencha Manualmente)" autocomplete="off" oninput="this.setAttribute('value', this.value);">
             </div>
             <div class="header-actions" style="display: flex; align-items: center; gap: 20px;">
-                <div id="task-counter-widget" class="task-counter" title="Contador de Observações Gerais">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M9 11l3 3L22 4"></path>
-                        <path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"></path>
-                    </svg>
-                    <span id="task-pending" class="badge-pending" style="display: none;">0</span>
-                    <span id="task-done" class="badge-done" style="display: none;">0</span>
-                </div>
+                <!-- Contador removido -->
                 
                 <button id="btn-save-minimal" class="btn-save-minimal" onclick="triggerSave(this)" title="Salvar Dossiê Localmente">
                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -83,16 +84,7 @@
                 </div>
             </div>
 
-            <!-- ACORDEÃO RECOLHÍVEL (Estrutura Segura) -->
-            <div id="dynamic-sentence-topics" class="sync-accordion-wrapper">
-                <div class="sync-section-header clickable" onclick="toggleMainSyncPanel(this)">
-                    <svg class="chevron-main" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
-                    <span>Resultado por Tópico da Trilha de Julgamento</span>
-                </div>
-                <div class="sync-accordion-body" id="dynamic-sentence-topics-body">
-                    <div class="sync-placeholder">Os tópicos adicionados na Trilha de Julgamento aparecerão aqui automaticamente.</div>
-                </div>
-            </div>
+            <!-- Acordeão dinâmico removido -->
 
             <div class="checklist-item" style="flex-wrap: wrap; align-items: flex-start;">
                 <input type="checkbox" class="chk-input" style="margin-top: 5px;" onchange="toggleRow(this);">
@@ -158,9 +150,7 @@
             ADICIONAR NOVO TÓPICO
         </button>
 
-        <div class="section-title">5. Observações Gerais</div>
-        <div class="checklist-container" id="obs-list"></div>
-        <button class="btn-add-row" onclick="addNewObs()">+ ADICIONAR OBSERVAÇÃO</button>
+        <!-- Observações gerais removidas -->
 
     </div>
 
