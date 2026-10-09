@@ -88,6 +88,12 @@
         <symbol id="icon-fab-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
         </symbol>
+        <symbol id="icon-robot" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="11" width="18" height="10" rx="2"></rect><circle cx="12" cy="5" r="2"></circle><path d="M12 7v4"></path><line x1="8" y1="16" x2="8" y2="16"></line><line x1="16" y1="16" x2="16" y2="16"></line>
+        </symbol>
+        <symbol id="icon-quick-report" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect><path d="M13 11l-2 4h4l-2 4"></path>
+        </symbol>
     </svg>
 
     <!-- ========================================== -->
@@ -258,6 +264,17 @@
                         <line x1="10" y1="17" x2="14" y2="17"></line>
                     </svg>
                 </button>
+
+                <!-- ── Ferramentas Modulares Compartilhadas ─────────────────────── -->
+                <hr class="toolbar-separator">
+                
+                <button class="icon-btn" id="btn-juris-relatorio" onclick="JurisRelatorioManager.abrirModal()" title="Juris Relatório (Geração Rápida de Decisão)">
+                    <svg viewBox="0 0 24 24"><use href="#icon-quick-report"></use></svg>
+                </button>
+                
+                <button class="icon-btn" id="btn-juris-prompts" onclick="PromptUIController.abrirModal()" title="Juris Prompts (Gestor de Modelos de IA)">
+                    <svg viewBox="0 0 24 24"><use href="#icon-robot"></use></svg>
+                </button>
                 
             </div>
         </div>
@@ -382,11 +399,26 @@
     <script>
         (async function AppBootstrapper() {
             try {
-                // PASSO 1: Baixar e injetar o HTML dos modais específicos de AI
-                const response = await fetch('ai_modais.html');
-                if (!response.ok) throw new Error(`Falha no fetch do ai_modais.html (Status: ${response.status})`);
-                const html = await response.text();
-                document.getElementById('modais-dinamicos-container').innerHTML = html;
+                // PASSO 1: Injeção Idempotente de Templates e Módulos (Assets de AI e Globais)
+                const assets = [
+                    { html: 'ai_modais.html', js: null, id: 'modal-gerador-contexto' },
+                    // ATENÇÃO: Uso de '../' para voltar à raiz a partir da pasta do módulo AI
+                    { html: '../ferramentas/juris-relatorio.template.html', js: '../ferramentas/juris-relatorio.js', id: 'modal-juris-relatorio' },
+                    { html: '../ferramentas/juris-prompts.template.html', js: '../ferramentas/juris-prompts.js', id: 'modal-juris-prompts' }
+                ];
+
+                for (const asset of assets) {
+                    if (!document.getElementById(asset.id)) {
+                        const res = await fetch(asset.html);
+                        if (res.ok) {
+                            const htmlText = await res.text();
+                            document.getElementById('modais-dinamicos-container').insertAdjacentHTML('beforeend', htmlText);
+                            if (asset.js) await import(asset.js);
+                        } else if (asset.html === 'ai_modais.html') {
+                            throw new Error(`Falha no fetch do ai_modais.html (Status: ${res.status})`);
+                        }
+                    }
+                }
                 
                 // PASSO 2: Fila ordenada de scripts locais da aplicação AI
                 const scriptsParaCarregar = [
@@ -439,5 +471,7 @@
     <!-- SCRIPT DE AUTENTICAÇÃO E ACERVO (Diferido) -->
     <script type="module" src="js/ai_firebase-auth.js" defer></script>
     <script type="module" src="js/ai_firebase-acervo.js" defer></script>
+    <script type="module" src="js/ai_firebase-prompts.js" defer></script>
+</body>
 </body>
 </html>
