@@ -7,6 +7,11 @@
    1. VARIÁVEIS, Z-INDEX CENTRALIZADO E RESET
    ================================================ */
 :root {
+    /* DEFINIÇÃO GLOBAL SEMÂNTICA (Imutável) */
+    --semantic-danger: #ef4444;      /* Botões de excluir/alerta */
+    --semantic-info-bg: #e0f2fe;     /* Fundo de badges informativos */
+    --semantic-info-text: #0369a1;   /* Texto de badges informativos */
+
     /* Design Tokens Bases */
     --theme-bg-jasmine: #FFD580;
     --theme-border-jasmine: #fbc02d;
@@ -35,7 +40,7 @@
     --z-classification-popup: 2000;
     --z-audio-player: 2500;
     --z-wizard-backdrop: 2999;
-    --z-toast: 3000;
+    --z-toast: 7000;
     --z-wizard-modal: 3000;
     --z-classification-audio: 3001;
     --z-context-menu: 4000;
@@ -67,18 +72,39 @@
 body[data-module="ro"] {
     --module-primary: #fbc02d;
     --module-border: #f57f17;
+    
+    /* Alias Theming (Shared Modals) */
+    --theme-primary: var(--module-primary);
+    --theme-hover: var(--module-border);
+    --theme-light-bg: rgba(251, 192, 45, 0.1);
+    --theme-light-border: rgba(251, 192, 45, 0.4);
+    --theme-text-on-primary: #000000;
 }
 
 /* Identidade: Embargos de Declaração (Fúcsia) */
 body[data-module="ed"] {
     --module-primary: #D500B5;
     --module-border: #A3008A;
+    
+    /* Alias Theming (Shared Modals) */
+    --theme-primary: var(--module-primary);
+    --theme-hover: var(--module-border);
+    --theme-light-bg: rgba(213, 0, 181, 0.06);
+    --theme-light-border: rgba(213, 0, 181, 0.35);
+    --theme-text-on-primary: #ffffff;
 }
 
 /* Identidade: Agravo de Instrumento (Verde Lima) */
 body[data-module="ai"] {
     --module-primary: #aeea00;
     --module-border: #7cb342;
+    
+    /* Alias Theming (Shared Modals) */
+    --theme-primary: var(--module-primary);
+    --theme-hover: var(--module-border);
+    --theme-light-bg: rgba(174, 234, 0, 0.08);
+    --theme-light-border: rgba(174, 234, 0, 0.4);
+    --theme-text-on-primary: #000000;
 }
 
 *, *::before, *::after {
@@ -1106,4 +1132,41 @@ body[data-active-tab="leitura"] #idea-markers-list {
     border-color: var(--trt-blue-mid);
     background: #ffffff;
     box-shadow: 0 0 0 2px rgba(26, 58, 92, 0.1);
+}
+
+/* ================================================
+   MODAIS DOCUMENTAIS: EFEITO TRANSLÚCIDO (BACKDROP)
+   ================================================ */
+.modal-backdrop-modern {
+    position: fixed;
+    inset: 0;
+    /* Mesma cor escura e transparência do Criar Tópico Recursal */
+    background: rgba(15, 23, 42, 0.6); 
+    /* Efeito de desfoque (Blur translúcido) */
+    backdrop-filter: blur(3px);        
+    -webkit-backdrop-filter: blur(3px);
+    
+    z-index: 990; /* Fica logo atrás da janela do modal */
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.25s ease, visibility 0.25s ease;
+}
+
+/* Quando o JavaScript ativa a tela, o efeito acende suavemente */
+.modal-backdrop-modern.active {
+    opacity: 1;
+    visibility: visible;
+}
+
+/* ================================================
+   MODIFICADORES DE ELEVAÇÃO: JURIS PROMPTS
+   ================================================ */
+/* Eleva a película escura de desfoque */
+.modal-backdrop-modern.jp-elevated-backdrop {
+    z-index: var(--z-juris-prompt, 5000);
+}
+
+/* Eleva a janela do modal acima da película */
+.doc-modal.jp-elevated-modal {
+    z-index: calc(var(--z-juris-prompt, 5000) + 1);
 }
