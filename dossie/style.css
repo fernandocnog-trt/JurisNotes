@@ -382,9 +382,9 @@ header {
 .badge-joint { background: var(--joint-bg); color: var(--joint-color); border-color: var(--joint-border); }
 
 .badge-theme-tag { 
-  background: #fff; 
-  color: var(--theme-primary); 
-  border: 1px solid var(--theme-primary); 
+  background: var(--theme-bg-primary); 
+  color: var(--theme-text); 
+  border: 1px solid var(--theme-border-primary); 
   font-size: 0.65rem; 
   font-weight: 700; 
   padding: 3px 8px; 
@@ -675,13 +675,13 @@ header {
 }
 
 .sentence-topic-sync {
-    border-left: 3px solid var(--theme-orange);
-    background: #fffdf9;
-    transition: background-color 0.2s;
+    border-left: 3px solid var(--theme-primary);
+    background: var(--theme-bg-primary);
+    transition: filter 0.2s ease, background-color 0.2s ease;
 }
 
 .sentence-topic-sync:hover {
-    background-color: #fff8f0;
+    filter: brightness(0.97);
 }
 
 .badge-mini-party {

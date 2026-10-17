@@ -4,7 +4,7 @@ function generateTopicId() {
 }
 
 // --- CONSTANTES E ÍCONES ---
-const SVG_BALANCE = `<svg class="icon-theme" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin-right: 6px; color: #9a3412;"><path d="M21.21 15.89A10 10 0 1 1 8 2.83"></path><path d="M22 12A10 10 0 0 0 12 2v10z"></path></svg>`;
+const SVG_BALANCE = `<svg class="icon-theme" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.21 15.89A10 10 0 1 1 8 2.83"></path><path d="M22 12A10 10 0 0 0 12 2v10z"></path></svg>`;
 
 const SVG_DRAG_HANDLE = `<div class="drag-handle" title="Arraste para reordenar">
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -269,7 +269,9 @@ let windowAvailableTopics = [];
 
 // 0. OUVINTE DE ERROS DO GATEKEEPER (NACK)
 window.addEventListener('message', function(event) {
-    if (event.data && event.data.type === 'DOSSIE_ERROR') {
+    if (!event.data || typeof event.data !== 'object') return;
+
+    if (event.data.type === 'DOSSIE_ERROR') {
         const btn = document.querySelector('.btn-generate');
         if (btn) {
             btn.classList.remove('is-loading');
@@ -277,6 +279,13 @@ window.addEventListener('message', function(event) {
             if (span) span.innerText = "Gerar Dossiê";
         }
         alert("Falha ao integrar o Dossiê: " + (event.data.message || "Erro desconhecido."));
+    }
+
+    // Sincronização dinâmica de tema enviada pelo BalancaManager hospedeiro
+    if (event.data.type === 'SYNC_TOPICS' && event.data.theme) {
+        if (['ro', 'ed', 'ai'].includes(event.data.theme)) {
+            document.documentElement.setAttribute('data-theme', event.data.theme);
+        }
     }
 });
 
@@ -474,6 +483,13 @@ async function downloadBundledHTML(isInternalGenerator = false) {
     
     const clone = document.documentElement.cloneNode(true);
     
+    // BLINDAGEM DE TEMA: Congela o tema ativo no HTML final e remove o script detector por ID
+    const activeTheme = document.documentElement.getAttribute('data-theme') || 'ro';
+    clone.setAttribute('data-theme', activeTheme);
+    
+    const themeDetector = clone.querySelector('#theme-detector');
+    if (themeDetector) themeDetector.remove();
+
     // HIGIENE DO CLONE (Removendo rastros do gerador e histórico no HTML final)
     const importer = clone.querySelector('#json-importer');
     if(importer) importer.remove();
@@ -514,7 +530,8 @@ async function downloadBundledHTML(isInternalGenerator = false) {
         const cloneScript = clone.querySelector('script[src*="script.js"]');
         if(cloneScript) cloneScript.replaceWith(scriptTag);
 
-        const finalHTML = clone.outerHTML;
+        // Garante DOCTYPE estrito para evitar Quirks Mode em srcdoc e arquivos locais
+        const finalHTML = '<!DOCTYPE html>\n' + clone.outerHTML;
 
         // RESOLUÇÃO DO CRÍTICO: Comunicação desacoplada para evitar loop de evento
         if (isInternalGenerator && window.parent && window.parent !== window) {

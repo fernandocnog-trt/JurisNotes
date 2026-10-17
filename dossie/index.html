@@ -8,12 +8,40 @@
    <link rel="apple-touch-icon" sizes="180x180" href="favicon_io/apple-touch-icon.png">
    <meta name="viewport" content="width=device-width, initial-scale=1.0">
    <title>Painel de Julgamento</title>
-   <script>
+   <script id="theme-detector">
        (function(){
+           var root = document.documentElement;
+           var validThemes = ['ro', 'ed', 'ai'];
+           
+           // 1. Idempotência: Se o HTML já possui um data-theme válido cravado (srcdoc ou exportado), preserva-o
+           var existingTheme = root.getAttribute('data-theme');
+           if (validThemes.indexOf(existingTheme) !== -1) return;
+
+           // 2. Fonte Primária: Design Token via Query String (?theme=ro|ed|ai)
            var t = new URLSearchParams(location.search).get('theme');
-           if(['ro','ed','ai'].indexOf(t) !== -1) {
-               document.documentElement.setAttribute('data-theme', t);
+
+           // 3. Fallback Same-Origin: Lê a meta tag "juris-module" diretamente no painel pai
+           if (validThemes.indexOf(t) === -1) {
+               try {
+                   if (window.parent && window.parent !== window) {
+                       var parentMeta = window.parent.document.querySelector('meta[name="juris-module"]');
+                       if (parentMeta) t = parentMeta.getAttribute('content');
+                   }
+               } catch (err) {
+                   // Silencioso caso haja restrição de origem em file://
+               }
            }
+
+           // 4. Fallback de Contingência: Analisa document.referrer
+           if (validThemes.indexOf(t) === -1 && document.referrer) {
+               var ref = document.referrer.toLowerCase();
+               if (ref.indexOf('ed_') !== -1 || ref.indexOf('/ed/') !== -1) t = 'ed';
+               else if (ref.indexOf('ai_') !== -1 || ref.indexOf('/ai/') !== -1) t = 'ai';
+           }
+
+           // 5. Aplicação determinística (Fallback final: 'ro')
+           var finalTheme = validThemes.indexOf(t) !== -1 ? t : 'ro';
+           root.setAttribute('data-theme', finalTheme);
        })();
    </script>
     <link rel="stylesheet" href="style.css" id="main-css">
@@ -139,7 +167,7 @@
         <div class="section-title">3. Painel de Temas Vinculantes</div>
         <div id="theme-panel"></div>
 
-        <div class="section-title">4. Trilha de Julgamento (Arraste para Reordenar)</div>
+        <div class="section-title" id="secao-trilha-julgamento">4. Trilha de Julgamento (Arraste para Reordenar)</div>
         <div class="checklist-container" id="sortable-list"></div>
 
         <button class="btn-add-row btn-add-topic" onclick="addNewTopic()">
