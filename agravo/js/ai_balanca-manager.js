@@ -7,8 +7,70 @@ window.BalancaManager = (function() {
     
     let htmlState = null;
     let pendingTasksCount = 0;
+    let _resolveStateRequest = null;
 
-    // ATUALIZAÇÃO: Atalho Alt + B protegido e inteligente
+    function obterTemaModulo() {
+        const metaModulo = document.querySelector('meta[name="juris-module"]');
+        const module = metaModulo ? metaModulo.content : 'ai';
+        return ['ro', 'ed', 'ai'].includes(module) ? module : 'ai';
+    }
+
+    function urlDoGerador() {
+        return `../dossie/index.html?theme=${obterTemaModulo()}`;
+    }
+
+    // Garante que o sandbox do iframe permita o download do dossiê empacotado
+    function _garantirPermissoesSandbox(iframe) {
+        if (iframe && iframe.hasAttribute('sandbox')) {
+            const permissoesAtuais = iframe.getAttribute('sandbox') || '';
+            if (!permissoesAtuais.includes('allow-downloads')) {
+                iframe.setAttribute('sandbox', (permissoesAtuais + ' allow-downloads allow-modals').trim());
+            }
+        }
+    }
+
+    // 1. GATEKEEPER E PONTE IPC (Compatível com Iframe em Sandbox)
+    window.addEventListener('message', function(event) {
+        const iframe = document.getElementById('balanca-iframe');
+        
+        // Validação por referência de janela (funciona mesmo com origin "null" de sandbox)
+        if (!iframe || event.source !== iframe.contentWindow) return;
+
+        const data = event.data;
+        if (!data || typeof data !== 'object') return;
+
+        switch (data.type) {
+            case 'DOSSIE_GENERATED':
+                if (data.html && typeof data.html === 'string') {
+                    htmlState = data.html;
+                    _renderIframeWithBridge(htmlState, true);
+                    atualizarInterface();
+                    if (typeof window.salvarBackupAutomatico === 'function') {
+                        window.salvarBackupAutomatico();
+                    }
+                    if (typeof window.exibirToast === 'function') {
+                        window.exibirToast('Dossiê vinculado com sucesso!', 'sucesso');
+                    }
+                }
+                break;
+                
+            case 'DOSSIE_STATE_RESPONSE':
+                if (data.html) htmlState = data.html;
+                if (_resolveStateRequest) {
+                    _resolveStateRequest();
+                    _resolveStateRequest = null;
+                }
+                break;
+
+            case 'DOSSIE_HOTKEY':
+                if (data.key === 'AltB' || data.key === 'Escape') {
+                    fecharPainel();
+                }
+                break;
+        }
+    });
+
+    // Atalho Alt + B protegido e inteligente (quando o foco está no painel pai)
     document.addEventListener('keydown', function(e) {
         if (e.altKey && (e.key === 'b' || e.key === 'B')) {
             const activeTag = document.activeElement ? document.activeElement.tagName.toLowerCase() : '';
@@ -16,129 +78,174 @@ window.BalancaManager = (function() {
             
             if (!isTyping) {
                 e.preventDefault();
-                htmlState ? abrirPainel() : resetToGenerator();
+                const painel = document.getElementById('balanca-painel');
+                if (painel && painel.style.display === 'flex') {
+                    fecharPainel();
+                } else {
+                    htmlState ? abrirPainel() : resetToGenerator();
+                }
             }
         }
     });
 
-    // NOVO: Validação estrita de segurança e listener de mensagens
-    window.addEventListener('message', function(event) {
-        const allowedOrigins = [window.location.origin, 'http://localhost', 'http://127.0.0.1'];
-        if (!allowedOrigins.some(origin => event.origin.startsWith(origin))) return;
+    // 2. FUNÇÃO DE INJEÇÃO SEGURA DA PONTE E DO TEMA (Via DOMParser)
+    function _renderIframeWithBridge(rawHtml, scrollToTrilha = false) {
+        const iframe = document.getElementById('balanca-iframe');
+        if (!iframe) return;
 
-        if (event.data && event.data.type === 'DOSSIE_GENERATED') {
-            htmlState = event.data.html;
-            
-            const iframe = document.getElementById('balanca-iframe');
-            iframe.removeAttribute('src'); 
-            iframe.srcdoc = htmlState;     
+        _garantirPermissoesSandbox(iframe);
 
-            atualizarInterface();
+        try {
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(rawHtml, 'text/html');
             
-            if (typeof window.salvarBackupAutomatico === 'function') {
-                window.salvarBackupAutomatico();
-            }
-            if (typeof window.exibirToast === 'function') {
-                window.exibirToast('Dossiê vinculado com sucesso!', 'sucesso');
-            }
+            // Carimba o tema do módulo (ai) no elemento <html>
+            doc.documentElement.setAttribute('data-theme', obterTemaModulo());
+
+            // Remove ponte anterior se já existir para evitar duplicidade
+            const oldBridge = doc.getElementById('jn-ipc-bridge');
+            if (oldBridge) oldBridge.remove();
+
+            // Script da Ponte (Roda no contexto isolado do iframe)
+            const bridgeScript = doc.createElement('script');
+            bridgeScript.id = 'jn-ipc-bridge';
+            bridgeScript.textContent = `
+                (function() {
+                    window.addEventListener('message', function(e) {
+                        if (e.data && e.data.type === 'REQUEST_STATE') {
+                            const clone = document.documentElement.cloneNode(true);
+                            
+                            const bridge = clone.querySelector('#jn-ipc-bridge');
+                            if (bridge) bridge.remove();
+
+                            const liveTextareas = document.querySelectorAll('textarea');
+                            clone.querySelectorAll('textarea').forEach((el, i) => {
+                                if (liveTextareas[i]) el.textContent = liveTextareas[i].value;
+                            });
+
+                            const liveInputs = document.querySelectorAll('input');
+                            clone.querySelectorAll('input').forEach((el, i) => {
+                                if (!liveInputs[i]) return;
+                                const type = liveInputs[i].type;
+                                if (type === 'checkbox' || type === 'radio') {
+                                    if (liveInputs[i].checked) el.setAttribute('checked', 'checked');
+                                    else el.removeAttribute('checked');
+                                } else {
+                                    el.setAttribute('value', liveInputs[i].value);
+                                }
+                            });
+
+                            const liveSelects = document.querySelectorAll('select');
+                            clone.querySelectorAll('select').forEach((select, i) => {
+                                if (!liveSelects[i]) return;
+                                const liveOptions = liveSelects[i].options;
+                                Array.from(select.options).forEach((opt, j) => {
+                                    if (liveOptions[j] && liveOptions[j].selected) opt.setAttribute('selected', 'selected');
+                                    else opt.removeAttribute('selected');
+                                });
+                            });
+
+                            const finalHtml = '<!DOCTYPE html>\\n' + clone.outerHTML;
+                            window.parent.postMessage({ type: 'DOSSIE_STATE_RESPONSE', html: finalHtml }, '*');
+                        }
+                        
+                        if (e.data && e.data.type === 'SCROLL_TO_TRILHA') {
+                            const alvo = document.getElementById('secao-trilha-julgamento') || 
+                                         Array.from(document.querySelectorAll('h1, h2, h3, h4, div.section-title')).find(el => el.textContent.trim().toLowerCase().includes('trilha de julgamento'));
+                            if (alvo) {
+                                alvo.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                                alvo.classList.add('card-flash-focus');
+                                setTimeout(() => alvo.classList.remove('card-flash-focus'), 1300);
+                            }
+                        }
+                    });
+
+                    document.addEventListener('keydown', function(e) {
+                        if (e.altKey && (e.key === 'b' || e.key === 'B')) {
+                            e.preventDefault();
+                            window.parent.postMessage({ type: 'DOSSIE_HOTKEY', key: 'AltB' }, '*');
+                        } else if (e.key === 'Escape') {
+                            window.parent.postMessage({ type: 'DOSSIE_HOTKEY', key: 'Escape' }, '*');
+                        }
+                    });
+                })();
+            `;
+            doc.body.appendChild(bridgeScript);
+            
+            const finalHtmlToRender = '<!DOCTYPE html>\n' + doc.documentElement.outerHTML;
+            htmlState = finalHtmlToRender;
+            
+            const onLoad = () => {
+                sincronizarContextoDossie(typeof topicos !== 'undefined' ? topicos : []);
+                if (scrollToTrilha && iframe.contentWindow) {
+                    iframe.contentWindow.postMessage({ type: 'SCROLL_TO_TRILHA' }, '*');
+                }
+                iframe.removeEventListener('load', onLoad);
+            };
+            
+            iframe.addEventListener('load', onLoad);
+            
+            iframe.removeAttribute('src');
+            iframe.removeAttribute('srcdoc');
+            void iframe.offsetWidth;
+            iframe.srcdoc = finalHtmlToRender;
+
+        } catch (err) {
+            console.error('[Juris Notes AI] Erro ao injetar ponte no Dossiê:', err);
         }
-    });
+    }
 
     function abrirPainel() {
         document.getElementById('balanca-modal-backdrop').style.display = 'block';
         document.getElementById('balanca-painel').style.display = 'flex';
 
         const iframe = document.getElementById('balanca-iframe');
-        const irParaTrilha = !!htmlState; // só tenta scroll se já existir dossiê carregado
-        
-        // Listener seguro que se auto-destrói para evitar memory leak
-        const onIframeLoad = () => {
-            sincronizarContextoDossie(typeof topicos !== 'undefined' ? topicos : []);
-            
-            if (irParaTrilha) {
-                aguardarDomERolarParaTrilha(iframe);
-            }
-
-            iframe.removeEventListener('load', onIframeLoad);
-        };
-        iframe.addEventListener('load', onIframeLoad);
+        _garantirPermissoesSandbox(iframe);
 
         if (htmlState) {
-            // Força o navegador a tratar como nova navegação, garantindo que
-            // o evento 'load' dispare mesmo se o conteúdo for idêntico ao anterior.
+            _renderIframeWithBridge(htmlState, true);
+        } else if (iframe) {
             iframe.removeAttribute('srcdoc');
-            iframe.removeAttribute('src');
-            // Reflow síncrono necessário antes de reatribuir o mesmo srcdoc
-            void iframe.offsetWidth;
-            iframe.srcdoc = htmlState;
-        } else {
-            iframe.removeAttribute('srcdoc');
-            iframe.src = '../dossie/index.html'; // Puxa o gerador da raiz
+            iframe.src = urlDoGerador();
         }
     }
 
-    /**
-     * Aguarda o DOM interno do iframe estar pronto (sem número mágico de tempo)
-     * e então executa a busca + scroll até a Trilha de Julgamento.
-     */
-    function aguardarDomERolarParaTrilha(iframe, tentativas = 0) {
-        const MAX_TENTATIVAS = 20; // ~1s no total (20 x 50ms), suficiente para dossiês grandes
-        const doc = iframe.contentDocument;
-
-        if (!doc || doc.readyState !== 'complete') {
-            if (tentativas < MAX_TENTATIVAS) {
-                setTimeout(() => aguardarDomERolarParaTrilha(iframe, tentativas + 1), 50);
-            }
-            return;
+    async function fecharPainel() {
+        const iframe = document.getElementById('balanca-iframe');
+        if (iframe && iframe.contentWindow && htmlState) {
+            await new Promise(resolve => {
+                _resolveStateRequest = resolve;
+                iframe.contentWindow.postMessage({ type: 'REQUEST_STATE' }, '*');
+                setTimeout(resolve, 1000);
+            });
         }
-
-        rolarParaTrilhaDeJulgamento(doc);
-    }
-
-    function rolarParaTrilhaDeJulgamento(doc) {
-        try {
-            // ESTRATÉGIA 1 (preferencial): ID fixo injetado pelo gerador
-            let alvo = doc.getElementById('secao-trilha-julgamento');
-
-            // ESTRATÉGIA 2 (fallback de compatibilidade): busca textual restrita
-            // Cobre dossiês antigos salvos sem o id, e também variações de numeração
-            if (!alvo) {
-                const candidatos = Array.from(doc.querySelectorAll('h1, h2, h3, h4, div.section-title'));
-                alvo = candidatos.find(el =>
-                    el.textContent.trim().toLowerCase().includes('trilha de julgamento')
-                );
-            }
-
-            if (alvo) {
-                alvo.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                // Reaproveita a animação já existente no projeto
-                alvo.classList.add('card-flash-focus');
-                setTimeout(() => alvo.classList.remove('card-flash-focus'), 1300);
-            }
-        } catch (e) {
-            console.warn('[Juris Notes AI] Não foi possível localizar a Trilha de Julgamento no dossiê.', e);
+        
+        atualizarInterface();
+        document.getElementById('balanca-modal-backdrop').style.display = 'none';
+        document.getElementById('balanca-painel').style.display = 'none';
+        
+        if (typeof window.salvarBackupAutomatico === 'function') {
+            window.salvarBackupAutomatico();
         }
     }
-
-    // (abrirLembretes removido - transferido para TaskManager nativo)
 
     function sincronizarContextoDossie(topicosInjetados) {
         const iframe = document.getElementById('balanca-iframe');
         if (iframe && iframe.contentWindow) {
-            // Resolve o "Scoping Trap": Usa o array injetado. Se não houver, tenta o escopo local com segurança.
             const arrayReferencia = topicosInjetados || (typeof topicos !== 'undefined' ? topicos : []);
-            
-            // Mapeamento limpo dos tópicos atuais da matriz
             const topicosAtivos = arrayReferencia.map(t => ({
                 id: t.id,
                 nome: t.nome,
                 cor: t.cor
             }));
-            iframe.contentWindow.postMessage({ type: 'SYNC_TOPICS', topicos: topicosAtivos }, '*');
+            iframe.contentWindow.postMessage({ 
+                type: 'SYNC_TOPICS', 
+                theme: obterTemaModulo(),
+                topicos: topicosAtivos 
+            }, '*');
         }
     }
 
-    // NOVO: Função protegida contra perda de dados
     function resetToGenerator() {
         if (htmlState !== null) {
             const confirmacao = confirm("⚠️ Atenção:\n\nIsso substituirá o Dossiê atual. Se você fez marcações de checkbox que não foram salvas no backup principal, elas serão perdidas.\n\nDeseja gerar um novo dossiê?");
@@ -149,55 +256,35 @@ window.BalancaManager = (function() {
         pendingTasksCount = 0;
         const iframe = document.getElementById('balanca-iframe');
         if (iframe) {
+            _garantirPermissoesSandbox(iframe);
             iframe.removeAttribute('srcdoc');
-            iframe.src = '../dossie/index.html';
+            iframe.src = urlDoGerador();
         }
         abrirPainel();
         atualizarInterface();
     }
 
-    // ==========================================
-    // DELEGAÇÃO DE TAREFAS
-    // ==========================================
     function avaliarTarefasPendentes() {
-        // Redireciona para o TaskManager nativo
         const badge = document.getElementById('badge-tarefas');
-        if(badge && badge.style.display !== 'none') {
+        if (badge && badge.style.display !== 'none') {
             return parseInt(badge.textContent.replace('+', '')) || 0;
         }
         return 0;
     }
 
-    // ==========================================
-    // ATUALIZAÇÃO VISUAL CENTRALIZADA
-    // ==========================================
     function atualizarInterface() {
         const btnBalanca = document.getElementById('btn-balanca-justica');
         const btnLembrete = document.getElementById('btn-lembretes-tarefa');
         
         if (!btnBalanca || !btnLembrete) return;
 
-        // Regra 1: O ícone da balança só fica carregado se houver HTML
         if (htmlState) {
             btnBalanca.classList.add('is-loaded');
         } else {
             btnBalanca.classList.remove('is-loaded');
         }
         
-        // Regra 2: O Lembrete agora é nativo e independe da balança
         btnLembrete.disabled = false;
-    }
-
-    function fecharPainel() {
-        sincronizarEstadoInterno(); 
-        atualizarInterface(); // Atualiza a bolinha vermelha ao fechar o painel
-        
-        document.getElementById('balanca-modal-backdrop').style.display = 'none';
-        document.getElementById('balanca-painel').style.display = 'none';
-        
-        if (typeof window.salvarBackupAutomatico === 'function') {
-            window.salvarBackupAutomatico();
-        }
     }
 
     function processarUpload(event) {
@@ -207,8 +294,8 @@ window.BalancaManager = (function() {
         const reader = new FileReader();
         reader.onload = function(e) {
             htmlState = e.target.result;
-            renderizarIframe(htmlState);
-            atualizarInterface(); // Atualiza UI ao carregar
+            _renderIframeWithBridge(htmlState, false);
+            atualizarInterface();
             
             if (typeof window.exibirToast === 'function') {
                 window.exibirToast('Painel HTML importado e ancorado com sucesso!', 'sucesso');
@@ -219,41 +306,6 @@ window.BalancaManager = (function() {
         event.target.value = ''; 
     }
 
-    function renderizarIframe(conteudoHTML) {
-        const iframe = document.getElementById('balanca-iframe');
-        if (iframe) iframe.srcdoc = conteudoHTML;
-    }
-
-    function sincronizarEstadoInterno() {
-        const iframe = document.getElementById('balanca-iframe');
-        if (!iframe || !htmlState) return;
-
-        try {
-            const doc = iframe.contentDocument || iframe.contentWindow.document;
-            
-            doc.querySelectorAll('textarea').forEach(el => el.textContent = el.value);
-            doc.querySelectorAll('input[type="text"], input[type="number"], input[type="hidden"]').forEach(el => el.setAttribute('value', el.value));
-            
-            // Tratamento Crítico de Checkboxes (Onde ficam as tarefas)
-            doc.querySelectorAll('input[type="checkbox"], input[type="radio"]').forEach(el => {
-                if (el.checked) el.setAttribute('checked', 'checked');
-                else el.removeAttribute('checked');
-            });
-
-            doc.querySelectorAll('select').forEach(select => {
-                Array.from(select.options).forEach(opt => {
-                    if (opt.selected) opt.setAttribute('selected', 'selected');
-                    else opt.removeAttribute('selected');
-                });
-            });
-
-            htmlState = doc.documentElement.outerHTML;
-
-        } catch (e) {
-            console.error("[Juris Notes AI] Sincronização do painel falhou.", e);
-        }
-    }
-
     function getHtmlState() {
         return htmlState;
     }
@@ -261,9 +313,8 @@ window.BalancaManager = (function() {
     function restoreHtmlState(htmlData) {
         htmlState = htmlData || null;
         if (htmlState) {
-            renderizarIframe(htmlState);
+            _renderIframeWithBridge(htmlState, false);
         }
-        // Timeout breve para dar tempo do Iframe renderizar antes de contar as tarefas no restore
         setTimeout(atualizarInterface, 100); 
     }
 
@@ -275,20 +326,14 @@ window.BalancaManager = (function() {
         atualizarInterface();
     }
 
-    /**
-     * Valida tarefas pendentes e emite um alerta nativo síncrono se houver pendências.
-     * @param {string} acaoDesejada - Texto descritivo da ação (ex: "copiar o pacote para a IA").
-     * @returns {boolean} - Retorna true se puder prosseguir (sem tarefas ou usuário confirmou), false se abortado.
-     */
     function executarGuardrailDeTarefas(acaoDesejada) {
-        // PERFOMANCE: Chamada única ao DOM para evitar layout thrashing
         const count = avaliarTarefasPendentes(); 
         
         if (count > 0) {
             const msg = `ATENÇÃO: Existem ${count} tarefa(s) pendente(s) não concluídas no Painel da Balança.\n\nTem certeza de que deseja ${acaoDesejada} mesmo assim?`;
-            return confirm(msg); // Bloqueia a thread e retorna a decisão do usuário
+            return confirm(msg);
         }
-        return true; // Passe livre se não houver tarefas
+        return true;
     }
 
     return { 
