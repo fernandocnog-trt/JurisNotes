@@ -9,6 +9,16 @@ window.BalancaManager = (function() {
     let pendingTasksCount = 0;
     let _resolveStateRequest = null;
 
+    function obterTemaModulo() {
+        const metaModulo = document.querySelector('meta[name="juris-module"]');
+        const module = metaModulo ? metaModulo.content : 'ed';
+        return ['ro', 'ed', 'ai'].includes(module) ? module : 'ed';
+    }
+
+    function urlDoGerador() {
+        return `../dossie/index.html?theme=${obterTemaModulo()}`;
+    }
+
     // 1. GATEKEEPER E PONTE IPC
     window.addEventListener('message', function(event) {
         const iframe = document.getElementById('balanca-iframe');
@@ -74,6 +84,7 @@ window.BalancaManager = (function() {
             // Evita manipulação frágil de strings usando DOMParser
             const parser = new DOMParser();
             const doc = parser.parseFromString(rawHtml, 'text/html');
+            doc.documentElement.setAttribute('data-theme', obterTemaModulo());
             
             // Script da Ponte (Roda no contexto isolado do iframe)
             const bridgeScript = doc.createElement('script');
@@ -159,6 +170,7 @@ window.BalancaManager = (function() {
             iframe.addEventListener('load', onLoad);
             
             // Força reflow para garantir disparo do evento load
+            iframe.removeAttribute('src');
             iframe.removeAttribute('srcdoc');
             void iframe.offsetWidth;
             iframe.srcdoc = finalHtmlToRender;
@@ -177,7 +189,7 @@ window.BalancaManager = (function() {
         } else {
             const iframe = document.getElementById('balanca-iframe');
             iframe.removeAttribute('srcdoc');
-            iframe.src = '../dossie/index.html'; 
+            iframe.src = urlDoGerador(); 
         }
     }
 
@@ -212,7 +224,11 @@ window.BalancaManager = (function() {
                 nome: t.nome,
                 cor: t.cor
             }));
-            iframe.contentWindow.postMessage({ type: 'SYNC_TOPICS', topicos: topicosAtivos }, '*');
+            iframe.contentWindow.postMessage({ 
+                type: 'SYNC_TOPICS', 
+                theme: obterTemaModulo(),
+                topicos: topicosAtivos 
+            }, '*');
         }
     }
 
@@ -228,7 +244,7 @@ window.BalancaManager = (function() {
         const iframe = document.getElementById('balanca-iframe');
         if (iframe) {
             iframe.removeAttribute('srcdoc');
-            iframe.src = '../dossie/index.html';
+            iframe.src = urlDoGerador();
         }
         abrirPainel();
         atualizarInterface();
