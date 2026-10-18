@@ -916,20 +916,263 @@ function adicionarSubAnotacao(topicoId, anotacaoIndex, cIdx = null) {
     abrirModalEdicao(_editContext, '', '', '✨ Novo Nó de Ideia', 'Descreva o argumento ou observação...');
 }
 
-/* --- MODAL DE TESE --- */
+/* ================================================
+   MODAL DE VÍCIO ALEGADO (TESE ED) E AUTO-TESE IA
+   ================================================ */
 let _ideiaContextoTese = null;
+let _autoTeseRequestId = 0; // Controle monotônico contra Race Conditions assíncronas
+
+// Regex pré-compiladas em escopo de módulo (Hoisting para zero overhead no V8)
+const _REGEX_TAGS_HTML_RESIDUAIS = /<[^>]*>/g;
+const _REGEX_CPF_LGPD = /\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b/g;
+const _REGEX_CNPJ_LGPD = /\b\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}\b/g;
+const _REGEX_EMAIL_LGPD = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g;
+const _REGEX_TEL_LGPD = /(?:\+?55\s?)?(?:\(?\d{2}\)?\s?)?\b9?\d{4}-?\d{4}\b/g;
+
+function _sanitizarTextoParaIA(textoBruto, limiteCaracteres = 500) {
+    if (!textoBruto || typeof textoBruto !== 'string') return '';
+
+    // 1. Remove tags HTML residuais e limpa ruídos de PDF/Markdown
+    let texto = textoBruto.replace(_REGEX_TAGS_HTML_RESIDUAIS, ' ');
+    if (window.JurisUtils) {
+        if (typeof window.JurisUtils.limparTextoPDF === 'function') {
+            texto = window.JurisUtils.limparTextoPDF(texto);
+        }
+        if (typeof window.JurisUtils.limparEscapeMarkdown === 'function') {
+            texto = window.JurisUtils.limparEscapeMarkdown(texto);
+        }
+    }
+
+    // 2. Mascaramento automático de PII (LGPD: CPF, CNPJ, E-mail, Telefone)
+    texto = texto
+        .replace(_REGEX_CPF_LGPD, '[CPF OCULTADO]')
+        .replace(_REGEX_CNPJ_LGPD, '[CNPJ OCULTADO]')
+        .replace(_REGEX_EMAIL_LGPD, '[EMAIL OCULTADO]')
+        .replace(_REGEX_TEL_LGPD, '[TELEFONE OCULTADO]');
+
+    // 3. Integração com termos customizados do QuickRedactManager (se ativo na sessão)
+    if (window.QuickRedactManager && typeof window.QuickRedactManager.aplicarFiltroEmTexto === 'function') {
+        texto = window.QuickRedactManager.aplicarFiltroEmTexto(texto);
+    } else {
+        // Fallback: lê os chips ativos renderizados no painel LGPD caso a API interna varie
+        const chipsAtivos = document.querySelectorAll('#lista-chips-lgpd .redact-chip');
+        chipsAtivos.forEach(chip => {
+            const termo = chip.firstChild?.textContent?.trim();
+            if (termo && termo.length >= 2) {
+                const escapado = termo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                texto = texto.replace(new RegExp(escapado, 'gi'), '[TERMO OCULTADO]');
+            }
+        });
+    }
+
+    // 4. Normalização de espaços e truncamento seguro de janela de contexto
+    texto = texto.replace(/\s+/g, ' ').trim();
+    return texto.length > limiteCaracteres ? texto.substring(0, limiteCaracteres) + '...' : texto;
+}
+
+function _extrairResumoBlocoParaAutoTese(cardMestre, topico) {
+    const nomeTopico = topico?.nome || 'Embargos de Declaração';
+    const vicioRaw = cardMestre?.vicio || topico?.vicio || '';
+    const vicioFormatado = (window.JurisUtils && typeof window.JurisUtils.formatarVicioED === 'function')
+        ? window.JurisUtils.formatarVicioED(vicioRaw)
+        : vicioRaw;
+
+    const linhas = [
+        `Tópico dos Embargos: ${_sanitizarTextoParaIA(nomeTopico, 120)}`,
+        `Hipótese Legal (Cabimento): ${_sanitizarTextoParaIA(vicioFormatado || 'Não especificada', 60)}`
+    ];
+    let possuiConteudoUtil = false;
+
+    const extrairDeCard = (card, rotulo) => {
+        const doc = _sanitizarTextoParaIA(card.documento || 'Documento', 80);
+        const polo = card.polo ? ` | Polo/Origem: ${_sanitizarTextoParaIA(card.polo, 60)}` : '';
+        linhas.push(`\n[${rotulo} — Peça: ${doc}${polo}]`);
+
+        if (card.tipo === 'texto' && card.conteudo) {
+            const trecho = _sanitizarTextoParaIA(card.conteudo, 550);
+            if (trecho) {
+                linhas.push(`Trecho extraído: "${trecho}"`);
+                possuiConteudoUtil = true;
+            }
+        } else if (card.tipo === 'audio' && card.conteudo) {
+            try {
+                const d = JSON.parse(card.conteudo);
+                if (d.orador) linhas.push(`Orador: ${_sanitizarTextoParaIA(d.orador, 80)}`);
+                if (d.transcricao) {
+                    const deg = _sanitizarTextoParaIA(d.transcricao, 500);
+                    if (deg) {
+                        linhas.push(`Degravação: "${deg}"`);
+                        possuiConteudoUtil = true;
+                    }
+                }
+            } catch (e) {}
+        }
+
+        if (card.comentario) {
+            const obs = _sanitizarTextoParaIA(card.comentario, 350);
+            if (obs) {
+                linhas.push(`Observação do Assessor: "${obs}"`);
+                possuiConteudoUtil = true;
+            }
+        }
+
+        if (Array.isArray(card.subAnotacoes) && card.subAnotacoes.length > 0) {
+            card.subAnotacoes.forEach((sub, idx) => {
+                // Trava ética: ignora estritamente Notas Internas Ocultas (intencao === 'nota')
+                if (sub.intencao !== 'nota' && sub.texto) {
+                    const textoSub = _sanitizarTextoParaIA(sub.texto, 380);
+                    if (textoSub) {
+                        const tagIntencao = sub.intencao ? `[${sub.intencao.toUpperCase()}] ` : '';
+                        linhas.push(`  -> Nó de Ideia ${idx + 1}: ${tagIntencao}${textoSub}`);
+                        possuiConteudoUtil = true;
+                    }
+                }
+            });
+        }
+    };
+
+    extrairDeCard(cardMestre, 'Card Principal');
+
+    if (Array.isArray(cardMestre.itensCorrelacionados) && cardMestre.itensCorrelacionados.length > 0) {
+        // Limita a leitura aos primeiros 5 itens correlacionados para proteger o orçamento de tokens
+        cardMestre.itensCorrelacionados.slice(0, 5).forEach((corr, idx) => {
+            extrairDeCard(corr, `Prova Agrupada ${idx + 1}`);
+        });
+    }
+
+    return possuiConteudoUtil ? linhas.join('\n') : '';
+}
+
+function _restaurarEstadoBotaoAutoTese() {
+    const btnIA = document.getElementById('btn-auto-tese-ia');
+    if (!btnIA) return;
+    btnIA.classList.remove('is-thinking');
+    btnIA.disabled = false;
+    const txtBtn = btnIA.querySelector('.btn-auto-tese-text');
+    if (txtBtn) txtBtn.textContent = '✨ Sugerir com IA';
+}
+
+window.acionarAutoTeseIA = async function(event) {
+    if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+    }
+
+    if (!_ideiaContextoTese) return;
+
+    // Snapshot imutável de contexto e geração do token de sessão contra Race Conditions
+    const snapshotTopicoId = _ideiaContextoTese.topicoId;
+    const snapshotIndex = _ideiaContextoTese.index;
+    const currentReqId = ++_autoTeseRequestId;
+
+    const topico = topicos.find(t => t.id === snapshotTopicoId);
+    if (!topico || !topico.anotacoes[snapshotIndex]) return;
+
+    if (!window.AIRecommendationManager || typeof window.AIRecommendationManager.gerarAutoTese !== 'function') {
+        return exibirToast('Serviço de IA não está disponível.', 'erro');
+    }
+
+    const cardMestre = topico.anotacoes[snapshotIndex];
+    const contextoSanitizado = _extrairResumoBlocoParaAutoTese(cardMestre, topico);
+
+    if (!contextoSanitizado) {
+        return exibirToast('Adicione um trecho de texto, observação ou nó de ideia antes de pedir sugestão à IA.', 'aviso');
+    }
+
+    const btnIA = document.getElementById('btn-auto-tese-ia');
+    const txtBtn = btnIA ? btnIA.querySelector('.btn-auto-tese-text') : null;
+
+    if (btnIA) {
+        btnIA.classList.add('is-thinking');
+        btnIA.disabled = true;
+    }
+    if (txtBtn) txtBtn.textContent = 'Analisando vício...';
+
+    try {
+        const resultado = await window.AIRecommendationManager.gerarAutoTese(contextoSanitizado);
+
+        // GUARD CLAUSE CRÍTICO: Verifica se o modal continua aberto para o MESMO card e na MESMA requisição
+        const modalEl = document.getElementById('modal-editar-tese');
+        const modalContinuaAberto = modalEl && modalEl.style.display === 'flex';
+        const contextoIntacto = _ideiaContextoTese &&
+                                _ideiaContextoTese.topicoId === snapshotTopicoId &&
+                                _ideiaContextoTese.index === snapshotIndex;
+
+        if (currentReqId !== _autoTeseRequestId || !modalContinuaAberto || !contextoIntacto) {
+            return; // Aborta silenciosamente: o usuário fechou ou trocou de card
+        }
+
+        const textarea = document.getElementById('input-texto-tese');
+        if (resultado.tese && textarea) {
+            textarea.value = resultado.tese;
+            textarea.classList.remove('card-flash-focus');
+            void textarea.offsetWidth;
+            textarea.classList.add('card-flash-focus');
+            textarea.focus();
+            textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+        }
+
+        exibirToast('Resumo do vício sugerido pela IA! ✨', 'sucesso');
+    } catch (err) {
+        if (currentReqId !== _autoTeseRequestId) return;
+        console.warn('[Auto-Tese IA - ED]', err);
+        exibirToast(err.message || 'Falha ao gerar sugestão de vício.', 'erro');
+    } finally {
+        if (currentReqId === _autoTeseRequestId) {
+            _restaurarEstadoBotaoAutoTese();
+        }
+    }
+};
+
+window.handleModalTeseKeydown = function(event) {
+    // Ctrl+Enter ou Cmd+Enter salva imediatamente o vício
+    if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+        event.preventDefault();
+        event.stopPropagation();
+        salvarTese();
+        return;
+    }
+    // Alt+S dispara a sugestão com IA sem tirar a mão do teclado
+    if (event.altKey && event.key.toLowerCase() === 's') {
+        event.preventDefault();
+        event.stopPropagation();
+        acionarAutoTeseIA(event);
+        return;
+    }
+    // Escape fecha o modal e cancela requisições pendentes
+    if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        fecharModalTese();
+    }
+};
 
 function abrirModalTese(topicoId, index) {
+    _autoTeseRequestId++; // Invalida qualquer requisição anterior pendurada
+    _restaurarEstadoBotaoAutoTese();
+
     _ideiaContextoTese = { topicoId, index };
+    const topico = topicos.find(t => t.id === topicoId);
+    if (!topico || !topico.anotacoes[index]) return;
+
     document.getElementById('tese-ideia-num').textContent = index + 1;
-    const anotacao = topicos.find(t => t.id === topicoId).anotacoes[index];
-    document.getElementById('input-texto-tese').value = anotacao.tese || '';
+    const anotacao = topico.anotacoes[index];
+    const textarea = document.getElementById('input-texto-tese');
+    textarea.value = anotacao.tese || '';
     
     document.getElementById('wizard-backdrop').style.display = 'block';
     document.getElementById('modal-editar-tese').style.display = 'flex';
+
+    setTimeout(() => {
+        textarea.focus();
+        textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+    }, 50);
 }
 
 function fecharModalTese() {
+    _autoTeseRequestId++; // Invalida imediatamente qualquer Promise da IA em voo
+    _restaurarEstadoBotaoAutoTese();
+
     document.getElementById('wizard-backdrop').style.display = 'none';
     document.getElementById('modal-editar-tese').style.display = 'none';
     _ideiaContextoTese = null;
@@ -937,12 +1180,17 @@ function fecharModalTese() {
 
 function salvarTese() {
     if (!_ideiaContextoTese) return;
-    const teseTxt = document.getElementById('input-texto-tese').value.trim();
+    _autoTeseRequestId++; // Cancela respostas tardias caso o usuário salve manualmente antes da IA responder
+
     const topico = topicos.find(t => t.id === _ideiaContextoTese.topicoId);
+    if (!topico || !topico.anotacoes[_ideiaContextoTese.index]) return;
+
+    const teseTxt = document.getElementById('input-texto-tese').value.trim();
     topico.anotacoes[_ideiaContextoTese.index].tese = teseTxt;
     
-    renderizarTopicos(); salvarBackupAutomatico();
-    exibirToast('Tese salva com sucesso!', 'sucesso');
+    renderizarTopicos();
+    salvarBackupAutomatico();
+    exibirToast('Vício alegado salvo com sucesso!', 'sucesso');
     fecharModalTese();
 }
 
