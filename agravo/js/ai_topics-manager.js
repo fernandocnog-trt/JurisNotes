@@ -1074,6 +1074,48 @@ window.TopicsManager = (function () {
         </div>`;
     }
 
+    /**
+     * Sincroniza módulos externos dependentes do contexto da aba ativa
+     * (Cronômetro de Eficiência e Status do Extrator de Peças).
+     */
+    function _sincronizarModulosPerifericos() {
+        if (window.TimeTrackerManager && typeof window.TimeTrackerManager.sincronizarCor === 'function') {
+            window.TimeTrackerManager.sincronizarCor(activeTabId);
+        }
+        if (typeof window.atualizarStatusBotaoExtrator === 'function') {
+            window.atualizarStatusBotaoExtrator();
+        }
+    }
+
+    /**
+     * Garante que a aba ativa esteja visível no scroll horizontal do cabeçalho
+     * sem provocar efeitos colaterais de scroll vertical na janela.
+     */
+    function _garantirAbaVisivelNoHeader(headerEl, abaAtivaNode, scrollAnterior, mudouAba) {
+        if (!headerEl) return;
+
+        // Restaura a base imediatamente para evitar salto visual após limpar innerHTML
+        headerEl.scrollLeft = scrollAnterior;
+
+        if (!mudouAba || !abaAtivaNode) return;
+
+        requestAnimationFrame(() => {
+            const headerRect = headerEl.getBoundingClientRect();
+            const tabRect = abaAtivaNode.getBoundingClientRect();
+            const MARGEM_RESPIRO = 16;
+
+            if (tabRect.left < headerRect.left) {
+                // Aba está oculta à esquerda (ex: novo tópico recém-criado)
+                const delta = tabRect.left - headerRect.left - MARGEM_RESPIRO;
+                headerEl.scrollTo({ left: Math.max(0, headerEl.scrollLeft + delta), behavior: 'smooth' });
+            } else if (tabRect.right > headerRect.right) {
+                // Aba está oculta à direita
+                const delta = tabRect.right - headerRect.right + MARGEM_RESPIRO;
+                headerEl.scrollTo({ left: headerEl.scrollLeft + delta, behavior: 'smooth' });
+            }
+        });
+    }
+
     function renderizarFichario(topicosArray) {
         capturarScroll();
 
@@ -1091,14 +1133,23 @@ window.TopicsManager = (function () {
                 </p>`;
             contentEl.style.borderTop       = 'none';
             contentEl.style.backgroundColor = 'transparent';
+            _ultimaAbaRenderizada = null;
+            _atualizarMarcadoresDeIdeia(null);
+            atualizarContadorNotasOcultas();
+            _sincronizarModulosPerifericos();
             restaurarScroll();
             return;
         }
+
+        contentEl.style.borderTop = '';
+        contentEl.style.backgroundColor = '';
 
         if (!activeTabId || !topicosArray.some(t => t.id === activeTabId)) {
             activeTabId = topicosArray[0].id;
         }
 
+        // Detecta se houve transição de aba antes que restaurarScroll() atualize _ultimaAbaRenderizada
+        const mudouAba = (activeTabId !== _ultimaAbaRenderizada);
         const scrollAnterior = headerEl.scrollLeft;
         let abaAtivaNode = null;
 
@@ -1120,6 +1171,7 @@ window.TopicsManager = (function () {
             btn.appendChild(labelSpan);
 
             btn.onclick = () => {
+                if (activeTabId === topico.id) return; // Evita re-renderização redundante na mesma aba
                 activeTabId = topico.id;
                 renderizarFichario(topicosArray);
             };
@@ -1135,9 +1187,8 @@ window.TopicsManager = (function () {
         const corTextoTese = obterCorContraste(_activeTopicoCor);
         contentEl.style.setProperty('--active-tab-color', escurecerCor(_activeTopicoCor));
 
-        requestAnimationFrame(() => {
-            headerEl.scrollTo({ left: scrollAnterior, behavior: 'auto' });
-        });
+        // Posiciona o scroll horizontal da barra de abas de forma inteligente
+        _garantirAbaVisivelNoHeader(headerEl, abaAtivaNode, scrollAnterior, mudouAba);
 
         const preambleHtml = `
             <div class="topic-preamble-panel">
@@ -1200,7 +1251,11 @@ window.TopicsManager = (function () {
                 contentEl.innerHTML = novoHtml;
             }
             
+            // CORREÇÃO ARQUITETURAL: Limpa marcadores flutuantes e sincroniza periféricos em tópicos vazios
             _sincronizarBtnGlobais(false, false);
+            _atualizarMarcadoresDeIdeia(topicoAtivo);
+            atualizarContadorNotasOcultas();
+            _sincronizarModulosPerifericos();
             restaurarScroll();
             return;
         }
@@ -1426,6 +1481,7 @@ window.TopicsManager = (function () {
         });
         
         _sincronizarBtnGlobais(temGlobais, forcadoAberto);
+        _sincronizarModulosPerifericos();
     }
 
     /**
