@@ -1306,11 +1306,23 @@ window.confirmarCriacaoTopico = function() {
     });
 
     fecharModalCriarTopico();
+
+    // 1. Define o novo tópico como ativo e instrui o Scroll Guard a ir para o topo (y = 0)
+    if (window.TopicsManager) {
+        TopicsManager.setActiveTabId(novoTopicoId);
+        if (typeof TopicsManager.suprimirProximaRestauracao === 'function') {
+            TopicsManager.suprimirProximaRestauracao();
+        }
+    }
+
+    // 2. Garante que o #history-container esteja visível (display: block) ANTES de medir/renderizar o DOM
+    trocarAba('historico');
+
+    // 3. Renderiza o fichário já focado no novo tópico e persiste o estado
     renderizarTopicos();
     
     if (typeof salvarBackupAutomatico === 'function') salvarBackupAutomatico();
     
-    trocarAba('historico');
     exibirToast(`Análise de ${vicioFormatadoVisivel} iniciada.`, 'sucesso');
     
     if (typeof verificarAcervoEmSegundoPlano === 'function') {
