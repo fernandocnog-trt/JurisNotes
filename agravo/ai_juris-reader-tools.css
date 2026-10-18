@@ -1408,3 +1408,168 @@ MINI PLAYER DE ÁUDIO — MODAL FOCADO (AI CONTEXT)
 @media (prefers-reduced-motion: reduce) {
     .extrator-custom-reveal:not([hidden]) { animation: none; }
 }
+
+/* ================================================
+   OCULTADOR RÁPIDO + RADAR DE SUGESTÕES (LGPD - GERADOR IA)
+   ================================================ */
+.quick-redact-panel {
+    background: #fff8e1;
+    border: 1px solid #ffe082;
+    border-left: 4px solid #f57c00;
+    border-radius: 8px;
+    padding: 10px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.quick-redact-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: #e65100;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.quick-redact-controls {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.quick-redact-input {
+    flex: 1;
+    padding: 6px 10px;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    font-size: 0.84rem;
+    font-family: inherit;
+    background: #ffffff;
+    color: var(--text-dark);
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.quick-redact-input:focus {
+    border-color: #f57c00;
+    box-shadow: 0 0 0 2px rgba(245, 124, 0, 0.15);
+}
+
+.quick-redact-btn {
+    background: #f57c00;
+    color: #ffffff;
+    border: none;
+    border-radius: 6px;
+    padding: 6px 14px;
+    font-size: 0.82rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background-color 0.2s, transform 0.1s;
+    white-space: nowrap;
+}
+
+.quick-redact-btn:hover { background: #ef6c00; }
+.quick-redact-btn:active { transform: scale(0.97); }
+.quick-redact-btn:focus-visible { outline: 2px solid #e65100; outline-offset: 2px; }
+
+/* Área do Radar de Sugestões Automáticas */
+.quick-redact-suggestions-box {
+    display: none;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding-top: 6px;
+    border-top: 1px dashed #ffe082;
+}
+
+.quick-redact-suggestions-box.has-suggestions {
+    display: flex;
+}
+
+.suggestions-label {
+    font-size: 0.73rem;
+    font-weight: 700;
+    color: #b26a00;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-right: 4px;
+}
+
+.suggestion-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    background: #fffdf7;
+    border: 1px dashed #f57c00;
+    color: #e65100;
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 3px 9px;
+    border-radius: 14px;
+    cursor: pointer;
+    transition: background-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
+}
+
+.suggestion-chip:hover,
+.suggestion-chip:focus-visible {
+    background: #f57c00;
+    color: #ffffff;
+    border-style: solid;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(245, 124, 0, 0.25);
+    outline: none;
+}
+
+.suggestion-chip .sug-count {
+    font-size: 0.68rem;
+    background: rgba(245, 124, 0, 0.15);
+    padding: 1px 5px;
+    border-radius: 8px;
+    font-weight: 800;
+}
+
+.suggestion-chip:hover .sug-count,
+.suggestion-chip:focus-visible .sug-count {
+    background: rgba(255, 255, 255, 0.25);
+    color: #ffffff;
+}
+
+/* Chips Ativos (Já Ocultados) */
+.quick-redact-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    min-height: 2px;
+}
+
+.redact-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: #ffffff;
+    border: 1px solid #ffcc80;
+    color: #bf360c;
+    font-size: 0.76rem;
+    font-weight: 600;
+    padding: 3px 8px;
+    border-radius: 14px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+}
+
+.redact-chip button {
+    background: none;
+    border: none;
+    color: #e65100;
+    font-weight: bold;
+    cursor: pointer;
+    padding: 0 2px;
+    font-size: 0.85rem;
+    line-height: 1;
+    border-radius: 50%;
+}
+
+.redact-chip button:hover { color: #d32f2f; background: rgba(211, 47, 47, 0.08); }

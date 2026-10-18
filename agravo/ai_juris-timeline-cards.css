@@ -1409,3 +1409,130 @@ body[data-context="ed"] .topics-content-area {
 
 /* Durante o arraste, preserva a folga em vez do padding-top: 4px original */
 .correlated-item-wrapper.drag-over { padding-top: var(--slot-pad, 0px); }
+
+/* ================================================
+   11. CLASSIFICAÇÃO VISUAL DE TESES E AUTO-TESE IA
+   ================================================ */
+.tese-icon-circle {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), background-color 0.2s ease;
+}
+
+.tese-icon-circle svg {
+    width: 14px;
+    height: 14px;
+    stroke: currentColor;
+    fill: none;
+    stroke-width: 2.2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.tese-icon-circle.tese-autora {
+    background-color: #1565c0;
+    color: #ffffff;
+    box-shadow: 0 2px 4px rgba(21, 101, 192, 0.25);
+}
+
+.tese-icon-circle.tese-re {
+    background-color: #c62828;
+    color: #ffffff;
+    box-shadow: 0 2px 4px rgba(198, 40, 40, 0.25);
+}
+
+.tese-icon-circle.tese-juizo {
+    background-color: #6a1b9a;
+    color: #ffffff;
+    box-shadow: 0 2px 4px rgba(106, 27, 154, 0.25);
+}
+
+.tese-icon-circle.tese-neutro {
+    background-color: transparent;
+    color: #94a3b8;
+    border: 2px dashed #cbd5e1;
+    box-shadow: none;
+}
+
+/* ================================================
+   11.5 BOTÃO AUTO-TESE (SUGESTÃO COM IA NO MODAL)
+   ================================================ */
+.tese-label-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 6px;
+    margin-bottom: 6px;
+    gap: 8px;
+}
+
+.btn-auto-tese-ia {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px;
+    border-radius: 16px;
+    font-size: 0.76rem;
+    font-weight: 700;
+    color: #6a1b9a;
+    background: linear-gradient(135deg, #f3e5f5 0%, #ede7f6 100%);
+    border: 1px solid #ce93d8;
+    cursor: pointer;
+    box-shadow: 0 2px 4px rgba(106, 27, 154, 0.08);
+    transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+    user-select: none;
+}
+
+.btn-auto-tese-ia .sparkle-icon {
+    width: 13px;
+    height: 13px;
+    stroke: #8e24aa;
+    flex-shrink: 0;
+    transition: transform 0.3s ease;
+}
+
+.btn-auto-tese-ia:hover:not(:disabled) {
+    background: linear-gradient(135deg, #e1bee7 0%, #d1c4e9 100%);
+    border-color: #ab47bc;
+    transform: translateY(-1px) scale(1.03);
+    box-shadow: 0 4px 8px rgba(106, 27, 154, 0.16);
+}
+
+.btn-auto-tese-ia:hover:not(:disabled) .sparkle-icon {
+    transform: rotate(18deg) scale(1.15);
+}
+
+.btn-auto-tese-ia:active:not(:disabled) {
+    transform: scale(0.96);
+}
+
+.btn-auto-tese-ia:focus-visible {
+    outline: 2px solid #6a1b9a;
+    outline-offset: 2px;
+}
+
+.btn-auto-tese-ia.is-thinking {
+    pointer-events: none;
+    opacity: 0.85;
+    background: #f3e5f5;
+    animation: ai-pulse 1.2s infinite alternate ease-in-out;
+}
+
+.btn-auto-tese-ia.is-thinking .sparkle-icon {
+    animation: spin 2s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .btn-auto-tese-ia,
+    .btn-auto-tese-ia .sparkle-icon,
+    .btn-auto-tese-ia.is-thinking,
+    .btn-auto-tese-ia.is-thinking .sparkle-icon {
+        transition: none;
+        animation: none;
+    }
+}
