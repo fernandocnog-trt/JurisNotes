@@ -1566,6 +1566,7 @@ document.addEventListener('keydown', function (e) {
                 if (modal.id === 'outline-view-modal' && window.OutlineViewManager) OutlineViewManager.fechar();
                 if (modal.id === 'minuta-view-modal' && window.MinutaViewManager) MinutaViewManager.fechar();
                 if (modal.id === 'modal-tarefas' && window.TaskManager) TaskManager.fecharModal();
+                if (modal.id === 'modal-editar-tese' && typeof fecharModalTese === 'function') fecharModalTese();
                 
                 // NOVO: Delegar o fechamento ao TopicsManager (Tesoura)
                 if (modal.id === 'modal-predivisao' && window.TopicsManager) TopicsManager.fecharModalPreDivisao();

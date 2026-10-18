@@ -1002,6 +1002,382 @@ function _debounce(func, wait) {
     };
 }
 
+/* ========================================================
+   SUBMÓDULO: OCULTADOR RÁPIDO + RADAR DE FREQUÊNCIA (LGPD)
+   Arquitetura em 2 camadas: Engine Pura + UI Controller
+   ======================================================== */
+window.QuickRedactManager = (function() {
+    // Marcador inline semântico (sem quebras de linha para não corromper listas Markdown/XML)
+    const MARCADOR_INLINE_LGPD = '[DADO PESSOAL OCULTADO - LGPD]';
+    
+    const CAMPOS_ALVO = [
+        'ctx-diretrizes',
+        'ctx-minuta-anterior',
+        'ctx-rascunho-ia',
+        'ctx-teor-sentenca',
+        'ctx-teor-recurso'
+    ];
+
+    const CAMPOS_EDITAVEIS = [
+        'ctx-minuta-anterior',
+        'ctx-rascunho-ia',
+        'ctx-teor-sentenca',
+        'ctx-teor-recurso'
+    ];
+
+    // Estado interno de sessão da UI
+    let _sugestoesAtuais = [];
+    let _snapshotsOriginais = new Map(); // Permite reverter (Undo) caso o usuário remova um chip
+    let _eventosBlurRegistrados = false;
+    let _radarTimer = null;
+
+    // ─── CAMADA 1: ENGINE PURA E PERSISTÊNCIA (SAFE FOR BACKGROUND EXPORT) ───
+
+    function _obterChaveStorage() {
+        const tagDom = document.getElementById('tag-numero-processo');
+        const numProc = tagDom && tagDom.textContent.trim() ? tagDom.textContent.trim() : 'padrao';
+        return `juris_quick_redact_${numProc}`;
+    }
+
+    function obterTermos() {
+        try {
+            const raw = sessionStorage.getItem(_obterChaveStorage());
+            const parsed = raw ? JSON.parse(raw) : [];
+            return Array.isArray(parsed) ? parsed : [];
+        } catch {
+            return [];
+        }
+    }
+
+    function _salvarTermos(lista) {
+        try {
+            sessionStorage.setItem(_obterChaveStorage(), JSON.stringify(lista));
+        } catch (e) {
+            console.warn('[QuickRedactManager] Falha ao salvar no sessionStorage:', e);
+        }
+    }
+
+    function _escapeRegExp(str) {
+        return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+
+    /**
+     * Compila todos os termos ativos em uma ÚNICA Expressão Regular de alternância (termo1|termo2).
+     * Ordena do mais longo para o mais curto para garantir que termos compostos tenham precedência.
+     * Complexidade de execução: 1 única passagem O(N) sobre o texto!
+     */
+    function _compilarRegexUnificada(listaTermos) {
+        const validos = (listaTermos || [])
+            .map(t => String(t).trim())
+            .filter(t => t.length >= 2);
+            
+        if (validos.length === 0) return null;
+
+        const ordenados = [...validos].sort((a, b) => b.length - a.length);
+        const padraoAlternancia = ordenados.map(_escapeRegExp).join('|');
+        return new RegExp(`(${padraoAlternancia})`, 'gi');
+    }
+
+    /**
+     * Função pura de sanitização de texto.
+     * Pode ser invocada tanto pelo modal quanto pelo ExportManager em background.
+     */
+    function sanitizarString(texto) {
+        if (!texto || typeof texto !== 'string') return '';
+        const regexUnificada = _compilarRegexUnificada(obterTermos());
+        if (!regexUnificada) return texto;
+        return texto.replace(regexUnificada, MARCADOR_INLINE_LGPD);
+    }
+
+    // ─── CAMADA 2: SINCRONIZAÇÃO DE DOM E SNAPSHOTS (REVERSIBILIDADE) ───
+
+    function _atualizarSnapshotBaseSeNecessario(idCampo, valorAtual) {
+        if (!_snapshotsOriginais.has(idCampo)) {
+            _snapshotsOriginais.set(idCampo, valorAtual);
+        }
+    }
+
+    function aplicarNosCamposDoModal(restaurarSnapshots = false) {
+        const regexUnificada = _compilarRegexUnificada(obterTermos());
+        let totalOcorrencias = 0;
+        let houveMutacao = false;
+
+        CAMPOS_ALVO.forEach(id => {
+            const el = document.getElementById(id);
+            if (!el) return;
+
+            let textoBase = el.value || '';
+            if (restaurarSnapshots && _snapshotsOriginais.has(id)) {
+                textoBase = _snapshotsOriginais.get(id);
+            }
+
+            if (!textoBase) return;
+
+            let novoTexto = textoBase;
+            if (regexUnificada) {
+                const matches = textoBase.match(regexUnificada);
+                if (matches) {
+                    totalOcorrencias += matches.length;
+                    novoTexto = textoBase.replace(regexUnificada, MARCADOR_INLINE_LGPD);
+                }
+            }
+
+            if (el.value !== novoTexto) {
+                el.value = novoTexto;
+                houveMutacao = true;
+            }
+        });
+
+        if (houveMutacao) {
+            window.salvarRascunhoContextoDebounced?.();
+        }
+        return totalOcorrencias;
+    }
+
+    // ─── CAMADA 3: RADAR DE SUGESTÕES ASSÍNCRONO (MAIN THREAD SAFE) ───
+
+    function agendarRadarAssincrono() {
+        if (_radarTimer) clearTimeout(_radarTimer);
+        const runner = () => analisarESugerir();
+        if (typeof window.requestIdleCallback === 'function') {
+            _radarTimer = setTimeout(() => window.requestIdleCallback(runner, { timeout: 300 }), 30);
+        } else {
+            _radarTimer = setTimeout(runner, 50);
+        }
+    }
+
+    function analisarESugerir() {
+        const textoConsolidado = CAMPOS_ALVO.map(id => {
+            const el = document.getElementById(id);
+            return el && el.value ? el.value : '';
+        }).join('\n');
+
+        if (!textoConsolidado.trim()) {
+            _sugestoesAtuais = [];
+            _renderizarSugestoesDOM();
+            return;
+        }
+
+        const termosJaSalvos = new Set(obterTermos().map(t => t.toLowerCase()));
+        const mapaCandidatos = new Map();
+
+        const registrarCandidato = (valorBruto, isCritico = false) => {
+            const limpo = valorBruto.trim().replace(/^[.,;:-]+|[.,;:-]+$/g, '');
+            if (limpo.length < 4) return;
+            const chave = limpo.toLowerCase();
+            if (termosJaSalvos.has(chave)) return;
+
+            if (!mapaCandidatos.has(chave)) {
+                mapaCandidatos.set(chave, { termo: limpo, count: 1, critico: isCritico });
+            } else {
+                const item = mapaCandidatos.get(chave);
+                item.count += 1;
+                if (isCritico) item.critico = true;
+            }
+        };
+
+        const regexCPF = /\b\d{3}\.\d{3}\.\d{3}-\d{2}\b/g;
+        const regexCNPJ = /\b\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}\b/g;
+        const regexTel = /(?:\(\d{2}\)\s*|\b\d{2}\s+)9?\d{4}[-.\s]?\d{4}\b|\b9\d{4}-\d{4}\b/g;
+        const regexEmail = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g;
+
+        (textoConsolidado.match(regexCPF) || []).forEach(m => registrarCandidato(m, true));
+        (textoConsolidado.match(regexCNPJ) || []).forEach(m => registrarCandidato(m, true));
+        (textoConsolidado.match(regexTel) || []).forEach(m => registrarCandidato(m, true));
+        (textoConsolidado.match(regexEmail) || []).forEach(m => registrarCandidato(m, true));
+
+        const textoSemRuidoProcessual = textoConsolidado
+            .replace(/\[DADO PESSOAL OCULTADO - LGPD\]/g, ' ')
+            .replace(/\b(?:id|fl|fls|pág|pag|chk|art|inc|lei|proc|processo)[.\s:-]*[a-z0-9_.-]+/gi, ' ')
+            .replace(/\b\d{1,2}\/\d{1,2}\/\d{2,4}\b/g, ' ')
+            .replace(/R\$\s*[\d.,]+/gi, ' ');
+
+        const regexAlfanumerico = /\b(?=[A-Za-z0-9.-]*\d)[A-Za-z0-9][A-Za-z0-9.-]{4,17}\b/g;
+        const tokens = textoSemRuidoProcessual.match(regexAlfanumerico) || [];
+
+        tokens.forEach(token => {
+            if (/^(19|20)\d{2}$/.test(token)) return; 
+            if (/^\d{1,3}(\.\d{3})*,\d{2}$/.test(token)) return;
+            registrarCandidato(token, false);
+        });
+
+        _sugestoesAtuais = Array.from(mapaCandidatos.values())
+            .filter(item => item.critico || item.count >= 2)
+            .sort((a, b) => (b.critico - a.critico) || (b.count - a.count))
+            .slice(0, 10);
+
+        _renderizarSugestoesDOM();
+    }
+
+    // ─── CAMADA 4: RENDERIZAÇÃO SEGURA DE DOM (ZERO INNERHTML / ANTI-XSS) ───
+
+    function _renderizarSugestoesDOM() {
+        const box = document.getElementById('box-sugestoes-lgpd');
+        const container = document.getElementById('lista-sugestoes-lgpd');
+        if (!box || !container) return;
+
+        container.replaceChildren(); 
+
+        if (!_sugestoesAtuais || _sugestoesAtuais.length === 0) {
+            box.classList.remove('has-suggestions');
+            return;
+        }
+
+        box.classList.add('has-suggestions');
+        const fragment = document.createDocumentFragment();
+
+        _sugestoesAtuais.forEach((item, idx) => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'suggestion-chip';
+            btn.title = 'Clique para ocultar todas as ocorrências deste termo';
+
+            const spanTexto = document.createElement('span');
+            spanTexto.textContent = `+ ${item.termo}`;
+
+            const spanCount = document.createElement('span');
+            spanCount.className = 'sug-count';
+            spanCount.textContent = `${item.count}x`;
+
+            btn.appendChild(spanTexto);
+            btn.appendChild(spanCount);
+            btn.addEventListener('click', () => aprovarSugestao(idx));
+
+            fragment.appendChild(btn);
+        });
+
+        container.appendChild(fragment);
+    }
+
+    function renderizarChipsDOM() {
+        const container = document.getElementById('lista-chips-lgpd');
+        if (!container) return;
+
+        container.replaceChildren();
+        const termos = obterTermos();
+        if (termos.length === 0) return;
+
+        const fragment = document.createDocumentFragment();
+
+        termos.forEach((termo, idx) => {
+            const chip = document.createElement('span');
+            chip.className = 'redact-chip';
+
+            const label = document.createElement('span');
+            label.textContent = termo;
+
+            const btnRemove = document.createElement('button');
+            btnRemove.type = 'button';
+            btnRemove.title = 'Remover termo e restaurar no texto';
+            btnRemove.setAttribute('aria-label', `Remover filtro ${termo}`);
+            btnRemove.textContent = '×';
+            btnRemove.addEventListener('click', () => removerTermo(idx));
+
+            chip.appendChild(label);
+            chip.appendChild(btnRemove);
+            fragment.appendChild(chip);
+        });
+
+        container.appendChild(fragment);
+    }
+
+    // ─── CAMADA 5: AÇÕES DO USUÁRIO E CICLO DE VIDA DO MODAL ───
+
+    function _efetivarTermo(valor) {
+        const termos = obterTermos();
+        if (!termos.some(t => t.toLowerCase() === valor.toLowerCase())) {
+            termos.push(valor);
+            _salvarTermos(termos);
+        }
+
+        renderizarChipsDOM();
+        const qtd = aplicarNosCamposDoModal(false);
+
+        if (typeof exibirToast === 'function') {
+            exibirToast(qtd > 0 
+                ? `"${valor}" ocultado (${qtd} ocorrência(s))!` 
+                : `"${valor}" adicionado à blindagem ativa deste processo.`, 'sucesso');
+        }
+    }
+
+    function aprovarSugestao(idx) {
+        const item = _sugestoesAtuais[idx];
+        if (!item) return;
+
+        _sugestoesAtuais.splice(idx, 1);
+        _renderizarSugestoesDOM();
+
+        _efetivarTermo(item.termo);
+    }
+
+    function adicionarTermoInput() {
+        const input = document.getElementById('input-termo-curto-lgpd');
+        if (!input) return;
+
+        const valor = input.value.trim();
+        if (valor.length < 2) {
+            if (typeof exibirToast === 'function') exibirToast('Digite pelo menos 2 caracteres para ocultar.', 'aviso');
+            return;
+        }
+
+        input.value = '';
+        _sugestoesAtuais = _sugestoesAtuais.filter(s => s.termo.toLowerCase() !== valor.toLowerCase());
+        _renderizarSugestoesDOM();
+
+        _efetivarTermo(valor);
+    }
+
+    function removerTermo(index) {
+        const termos = obterTermos();
+        const removido = termos.splice(index, 1)[0];
+        _salvarTermos(termos);
+
+        renderizarChipsDOM();
+        aplicarNosCamposDoModal(true);
+        agendarRadarAssincrono();
+
+        if (typeof exibirToast === 'function') {
+            exibirToast(`Filtro "${removido}" removido e texto restaurado.`, 'info');
+        }
+    }
+
+    function _registrarListenersDeBlurUmaVez() {
+        if (_eventosBlurRegistrados) return;
+        CAMPOS_EDITAVEIS.forEach(id => {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.addEventListener('blur', () => {
+                _snapshotsOriginais.set(id, el.value);
+                aplicarNosCamposDoModal(false);
+                agendarRadarAssincrono();
+            });
+        });
+        _eventosBlurRegistrados = true;
+    }
+
+    function inicializarSessaoModal() {
+        _snapshotsOriginais.clear();
+        CAMPOS_ALVO.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) _snapshotsOriginais.set(id, el.value || '');
+        });
+
+        _registrarListenersDeBlurUmaVez();
+        renderizarChipsDOM();
+        aplicarNosCamposDoModal(false);
+        agendarRadarAssincrono();
+    }
+
+    return {
+        inicializarSessaoModal,
+        adicionarTermoInput,
+        aprovarSugestao,
+        removerTermo,
+        sanitizarString,
+        agendarRadarAssincrono
+    };
+})();
+
 /* --- NOVA FUNÇÃO DE LIMPEZA MANUAL --- */
 window.limparAreaInternaLGPD = function() {
     document.getElementById('ctx-teor-sentenca').value = '';
@@ -1098,6 +1474,11 @@ window.limparAreaInternaLGPD = function() {
             }
 
             window.salvarRascunhoContextoDebounced?.();
+            
+            if (window.QuickRedactManager) {
+                window.QuickRedactManager.inicializarSessaoModal();
+            }
+            
             if (typeof exibirToast === 'function') exibirToast('Texto inserido com sucesso.', 'sucesso');
 
         } catch (err) {
@@ -1253,6 +1634,11 @@ window.abrirModalGeradorContexto = async function() {
         if (painelPdf) painelPdf.classList.add('pdf-foco-ativo');
         if (painelAnotacoes) painelAnotacoes.classList.add('pdf-foco-ativo');
 
+        // Inicializa snapshots de reversão, aplica chips salvos e agenda o Radar em idle time
+        if (window.QuickRedactManager) {
+            window.QuickRedactManager.inicializarSessaoModal();
+        }
+
         document.getElementById('gerador-contexto-backdrop').style.display = 'block';
         document.getElementById('modal-gerador-contexto').style.display = 'flex';
 
@@ -1361,6 +1747,11 @@ Abaixo, envio os dados deste novo volume:
     // Feedback Visual Progressivo (Atualizado sem quebrar o layout)
     targetTextNode.innerText = '⏳ Copiando...';
     btn.style.opacity = "0.8";
+
+    // Garantia final: aplica a Regex compilada sobre o pacote consolidado antes de enviar ao Clipboard
+    if (window.QuickRedactManager) {
+        outputFinal = window.QuickRedactManager.sanitizarString(outputFinal);
+    }
 
     if (!navigator.clipboard) {
         executarCopiaFallback(outputFinal, btn, targetTextNode, originalText, modo);
