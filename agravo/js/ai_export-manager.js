@@ -760,6 +760,11 @@ window.ExportManager = (function () {
             }
         }
 
+        // 3. CAMADA DE TERMOS CURTOS (LGPD) — Consome a função pura sem acoplamento com o DOM do modal
+        if (window.QuickRedactManager && typeof window.QuickRedactManager.sanitizarString === 'function') {
+            textoProcessado = window.QuickRedactManager.sanitizarString(textoProcessado);
+        }
+
         return textoProcessado;
     }
 

@@ -188,7 +188,106 @@ Se NÃO houver NENHUM modelo compatível com o tema, responda OBRIGATORIAMENTE: 
         }
     }
 
+    function _extrairJsonAutoTeseSeguro(respostaBruta) {
+        if (!respostaBruta || typeof respostaBruta !== 'string') {
+            throw new Error('A IA retornou uma resposta vazia.');
+        }
+
+        // 1. Remove blocos <think> de modelos de raciocínio (Qwen / DeepSeek)
+        let limpo = respostaBruta.replace(/<think>[\s\S]*?(?:<\/think>|$)\s*/gi, '').trim();
+        if (limpo.includes('</think>')) {
+            limpo = limpo.split('</think>').pop().trim();
+        }
+
+        // 2. Remove code fences markdown mesmo que haja texto conversacional antes ou depois
+        limpo = limpo.replace(/```(?:json|markdown|text)?/gi, '').replace(/```/g, '').trim();
+
+        // 3. Localiza o primeiro bloco balanceado { ... } para evitar captura gulosa (greedy)
+        const firstBrace = limpo.indexOf('{');
+        if (firstBrace !== -1) {
+            let depth = 0;
+            let inString = false;
+            let escape = false;
+            for (let i = firstBrace; i < limpo.length; i++) {
+                const ch = limpo[i];
+                if (escape) { escape = false; continue; }
+                if (ch === '\\') { escape = true; continue; }
+                if (ch === '"') { inString = !inString; continue; }
+                if (!inString) {
+                    if (ch === '{') depth++;
+                    else if (ch === '}') {
+                        depth--;
+                        if (depth === 0) {
+                            const candidato = limpo.substring(firstBrace, i + 1);
+                            try {
+                                return JSON.parse(candidato);
+                            } catch (e) {
+                                break; // Cai para o fallback de regex abaixo
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 4. Fallback de Contingência: Extrai campos via Regex se o JSON tiver aspas internas mal escapadas
+        const matchTese = limpo.match(/"tese"\s*:\s*"([^"]+)"/i);
+        const matchClass = limpo.match(/"classificacao"\s*:\s*"(autora|re|juizo|neutro)"/i);
+        if (matchTese) {
+            return {
+                tese: matchTese[1],
+                classificacao: matchClass ? matchClass[1].toLowerCase() : 'neutro'
+            };
+        }
+
+        throw new Error('Não foi possível interpretar a sugestão da IA. Tente novamente.');
+    }
+
+    async function gerarAutoTese(contextoCardTexto) {
+        if (!contextoCardTexto || contextoCardTexto.trim() === '') {
+            throw new Error('O bloco não possui conteúdo textual suficiente para análise.');
+        }
+
+        const fullPrompt = `Atue como um Assessor de Desembargador Trabalhista sênior especializado em Admissibilidade Recursal e Agravo de Instrumento.
+Sua tarefa é ler os elementos probatórios e anotações delimitados na tag <bloco_probatorio> e sintetizar a Tese Jurídica correspondente.
+
+REGRAS DE ELABORAÇÃO:
+1. "tese": Elabore um título ou resumo técnico, formal e direto (máximo de 180 caracteres) que identifique o pressuposto recursal/tema e o cerne do argumento ou prova (Ex: "Preparo. Deserção afastada. Seguro garantia judicial com acréscimo de 30%" ou "Tempestividade. Feriado local não comprovado no ato da interposição. Súmula 385 do TST"). Não inclua nomes próprios de pessoas ou empresas.
+2. "classificacao": Identifique a autoria/origem predominante da tese escolhendo ESTRITAMENTE uma das 4 opções:
+   - "autora" (insurgência, agravo ou argumento da Parte Autora / Reclamante / Exequente)
+   - "re" (defesa, contraminuta ou agravo da Parte Ré / Reclamada / Executada)
+   - "juizo" (fundamento do Despacho Denegatório / Sentença / Acórdão / Magistrado)
+   - "neutro" (certidão de intimação, guia de custas, apólice ou registro objetivo sem polarização definida)
+
+<bloco_probatorio>
+${contextoCardTexto}
+</bloco_probatorio>
+
+FORMATO DE RESPOSTA OBRIGATÓRIO:
+Responda EXCLUSIVAMENTE com um objeto JSON válido em uma única linha, sem markdown e sem comentários:
+{"tese": "Texto formal da tese", "classificacao": "autora"}`;
+
+        const respostaBruta = await processarIA(fullPrompt);
+        const dados = _extrairJsonAutoTeseSeguro(respostaBruta);
+
+        const classesValidas = ['autora', 're', 'juizo', 'neutro'];
+        const classificacaoSegura = classesValidas.includes(String(dados.classificacao || '').toLowerCase().trim())
+            ? String(dados.classificacao).toLowerCase().trim()
+            : 'neutro';
+
+        const teseLimpa = String(dados.tese || '').replace(/\s+/g, ' ').trim();
+        if (!teseLimpa) {
+            throw new Error('A IA não retornou um texto de tese válido.');
+        }
+
+        return {
+            tese: teseLimpa,
+            classificacao: classificacaoSegura
+        };
+    }
+
     return {
-        buscarModelosCompativeis
+        buscarModelosCompativeis,
+        gerarAutoTese
     };
 })();

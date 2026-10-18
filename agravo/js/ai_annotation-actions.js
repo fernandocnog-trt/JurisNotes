@@ -832,20 +832,356 @@ function confirmarSubAnotacao(topicoId, anotacaoIndex, cIdx = null) {
     exibirToast('Observação secundária vinculada.', 'sucesso');
 }
 
-/* --- MODAL DE TESE --- */
+/* ================================================
+   SISTEMA DE CLASSIFICAÇÃO, AUTO-TESE IA E REDAÇÃO DE TESES (AI)
+   ================================================ */
 let _ideiaContextoTese = null;
+let _autoTeseRequestId = 0; // Controle monotônico contra Race Conditions assíncronas
+
+// Regex pré-compiladas em escopo de módulo (Hoisting para zero overhead no V8)
+const _REGEX_TAGS_HTML_RESIDUAIS = /<[^>]*>/g;
+const _REGEX_CPF_LGPD = /\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b/g;
+const _REGEX_CNPJ_LGPD = /\b\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}\b/g;
+const _REGEX_EMAIL_LGPD = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g;
+const _REGEX_TEL_LGPD = /(?:\+?55\s?)?(?:\(?\d{2}\)?\s?)?\b9?\d{4}-?\d{4}\b/g;
+
+// Mapa de Fallback seguro caso TopicsManager.MAPA_TESE_ICONES não esteja exposto no módulo AI
+const _MAPA_TESE_ICONES_FALLBACK = {
+    neutro: {
+        label: 'Tese Neutra',
+        classeCss: 'tese-neutro',
+        spriteId: '#icon-tese-neutro',
+        textColor: '#64748b',
+        title: 'Clique para alternar: Neutro ➔ Autora ➔ Ré ➔ Juízo'
+    },
+    autora: {
+        label: 'Tese da Autora',
+        classeCss: 'tese-autora',
+        spriteId: '#icon-tese-autora',
+        textColor: '#1565c0',
+        title: 'Origem: Parte Autora / Agravante (Clique para alternar)'
+    },
+    re: {
+        label: 'Tese da Ré',
+        classeCss: 'tese-re',
+        spriteId: '#icon-tese-re',
+        textColor: '#c62828',
+        title: 'Origem: Parte Ré / Agravada (Clique para alternar)'
+    },
+    juizo: {
+        label: 'Fundamento do Juízo',
+        classeCss: 'tese-juizo',
+        spriteId: '#icon-tese-juizo',
+        textColor: '#6a1b9a',
+        title: 'Origem: Juízo / Decisão Denegatória (Clique para alternar)'
+    }
+};
+
+function _obterMapaTeseIcones() {
+    return (window.TopicsManager && window.TopicsManager.MAPA_TESE_ICONES)
+        ? window.TopicsManager.MAPA_TESE_ICONES
+        : _MAPA_TESE_ICONES_FALLBACK;
+}
+
+function _sanitizarTextoParaIA(textoBruto, limiteCaracteres = 500) {
+    if (!textoBruto || typeof textoBruto !== 'string') return '';
+
+    // 1. Remove tags HTML residuais e limpa ruídos de PDF/Markdown
+    let texto = textoBruto.replace(_REGEX_TAGS_HTML_RESIDUAIS, ' ');
+    if (window.JurisUtils) {
+        if (typeof window.JurisUtils.limparTextoPDF === 'function') {
+            texto = window.JurisUtils.limparTextoPDF(texto);
+        }
+        if (typeof window.JurisUtils.limparEscapeMarkdown === 'function') {
+            texto = window.JurisUtils.limparEscapeMarkdown(texto);
+        }
+    }
+
+    // 2. Mascaramento automático de PII (LGPD: CPF, CNPJ, E-mail, Telefone)
+    texto = texto
+        .replace(_REGEX_CPF_LGPD, '[CPF OCULTADO]')
+        .replace(_REGEX_CNPJ_LGPD, '[CNPJ OCULTADO]')
+        .replace(_REGEX_EMAIL_LGPD, '[EMAIL OCULTADO]')
+        .replace(_REGEX_TEL_LGPD, '[TELEFONE OCULTADO]');
+
+    // 3. Integração com termos customizados do QuickRedactManager (se ativo na sessão)
+    if (window.QuickRedactManager && typeof window.QuickRedactManager.aplicarFiltroEmTexto === 'function') {
+        texto = window.QuickRedactManager.aplicarFiltroEmTexto(texto);
+    } else {
+        // Fallback: lê os chips ativos renderizados no painel LGPD caso a API interna varie
+        const chipsAtivos = document.querySelectorAll('#lista-chips-lgpd .redact-chip');
+        chipsAtivos.forEach(chip => {
+            const termo = chip.firstChild?.textContent?.trim();
+            if (termo && termo.length >= 2) {
+                const escapado = termo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                texto = texto.replace(new RegExp(escapado, 'gi'), '[TERMO OCULTADO]');
+            }
+        });
+    }
+
+    // 4. Normalização de espaços e truncamento seguro de janela de contexto
+    texto = texto.replace(/\s+/g, ' ').trim();
+    return texto.length > limiteCaracteres ? texto.substring(0, limiteCaracteres) + '...' : texto;
+}
+
+function _extrairResumoBlocoParaAutoTese(cardMestre, nomeTopico, tipoObiceTopico) {
+    const obiceHeader = tipoObiceTopico ? ` | Hipótese de Cabimento: ${_sanitizarTextoParaIA(tipoObiceTopico, 40)}` : '';
+    const linhas = [`Tópico Processual: ${_sanitizarTextoParaIA(nomeTopico || 'Geral', 120)}${obiceHeader}`];
+    let possuiConteudoUtil = false;
+
+    const extrairDeCard = (card, rotulo) => {
+        const doc = _sanitizarTextoParaIA(card.documento || 'Documento', 80);
+        const polo = card.polo ? ` | Polo/Origem: ${_sanitizarTextoParaIA(card.polo, 60)}` : '';
+        const vicio = card.vicio ? ` | Pressuposto/Óbice: ${_sanitizarTextoParaIA(card.vicio, 40)}` : '';
+        linhas.push(`\n[${rotulo} — Peça: ${doc}${polo}${vicio}]`);
+
+        if (card.tipo === 'texto' && card.conteudo) {
+            const trecho = _sanitizarTextoParaIA(card.conteudo, 550);
+            if (trecho) {
+                linhas.push(`Trecho extraído: "${trecho}"`);
+                possuiConteudoUtil = true;
+            }
+        } else if (card.tipo === 'audio' && card.conteudo) {
+            try {
+                const d = JSON.parse(card.conteudo);
+                if (d.orador) linhas.push(`Orador: ${_sanitizarTextoParaIA(d.orador, 80)}`);
+                if (d.transcricao) {
+                    const deg = _sanitizarTextoParaIA(d.transcricao, 500);
+                    if (deg) {
+                        linhas.push(`Degravação: "${deg}"`);
+                        possuiConteudoUtil = true;
+                    }
+                }
+            } catch (e) {}
+        }
+
+        if (card.comentario) {
+            const obs = _sanitizarTextoParaIA(card.comentario, 350);
+            if (obs) {
+                linhas.push(`Observação do Assessor: "${obs}"`);
+                possuiConteudoUtil = true;
+            }
+        }
+
+        if (Array.isArray(card.subAnotacoes) && card.subAnotacoes.length > 0) {
+            card.subAnotacoes.forEach((sub, idx) => {
+                // Trava ética: ignora estritamente Notas Internas Ocultas (intencao === 'nota')
+                if (sub.intencao !== 'nota' && sub.texto) {
+                    const textoSub = _sanitizarTextoParaIA(sub.texto, 380);
+                    if (textoSub) {
+                        const tagIntencao = sub.intencao ? `[${sub.intencao.toUpperCase()}] ` : '';
+                        linhas.push(`  -> Nó de Ideia ${idx + 1}: ${tagIntencao}${textoSub}`);
+                        possuiConteudoUtil = true;
+                    }
+                }
+            });
+        }
+    };
+
+    extrairDeCard(cardMestre, 'Card Principal');
+
+    if (Array.isArray(cardMestre.itensCorrelacionados) && cardMestre.itensCorrelacionados.length > 0) {
+        // Limita a leitura aos primeiros 5 itens correlacionados para proteger o orçamento de tokens
+        cardMestre.itensCorrelacionados.slice(0, 5).forEach((corr, idx) => {
+            extrairDeCard(corr, `Prova Agrupada ${idx + 1}`);
+        });
+    }
+
+    return possuiConteudoUtil ? linhas.join('\n') : '';
+}
+
+function _restaurarEstadoBotaoAutoTese() {
+    const btnIA = document.getElementById('btn-auto-tese-ia');
+    if (!btnIA) return;
+    btnIA.classList.remove('is-thinking');
+    btnIA.disabled = false;
+    const txtBtn = btnIA.querySelector('.btn-auto-tese-text');
+    if (txtBtn) txtBtn.textContent = '✨ Sugerir com IA';
+}
+
+function _aplicarVisualBotaoTese(chave) {
+    const btn = document.getElementById('btn-classificacao-tese');
+    const iconSpan = document.getElementById('icone-classificacao-tese');
+    const textSpan = document.getElementById('texto-classificacao-tese');
+    
+    if (!btn) return;
+    
+    const mapa = _obterMapaTeseIcones();
+    const config = mapa[chave] || mapa['neutro'];
+    
+    btn.dataset.classificacao = chave;
+    btn.title = config.title;
+    
+    if (iconSpan) {
+        iconSpan.className = `tese-icon-circle ${config.classeCss}`;
+        iconSpan.innerHTML = `<svg><use href="${config.spriteId}"></use></svg>`;
+    }
+    
+    if (textSpan) {
+        textSpan.textContent = config.label;
+        textSpan.style.color = config.textColor;
+    }
+}
+
+window.ciclarClassificacaoTese = function(event) {
+    if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+    }
+    
+    const btn = document.getElementById('btn-classificacao-tese');
+    if (!btn) return;
+    
+    const ordem = ['neutro', 'autora', 're', 'juizo'];
+    const classeAtual = btn.dataset.classificacao || 'neutro';
+    const proxIndex = (ordem.indexOf(classeAtual) + 1) % ordem.length;
+    const novaClasse = ordem[proxIndex];
+    
+    _aplicarVisualBotaoTese(novaClasse);
+    
+    const iconSpan = document.getElementById('icone-classificacao-tese');
+    if (iconSpan) {
+        iconSpan.style.transform = 'scale(0.8)';
+        setTimeout(() => {
+            iconSpan.style.transform = 'scale(1)';
+        }, 100);
+    }
+};
+
+window.acionarAutoTeseIA = async function(event) {
+    if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+    }
+
+    if (!_ideiaContextoTese) return;
+
+    // Snapshot imutável de contexto e geração do token de sessão contra Race Conditions
+    const snapshotTopicoId = _ideiaContextoTese.topicoId;
+    const snapshotIndex = _ideiaContextoTese.index;
+    const currentReqId = ++_autoTeseRequestId;
+
+    const topico = topicos.find(t => t.id === snapshotTopicoId);
+    if (!topico || !topico.anotacoes[snapshotIndex]) return;
+
+    if (!window.AIRecommendationManager || typeof window.AIRecommendationManager.gerarAutoTese !== 'function') {
+        return exibirToast('Serviço de IA não está disponível.', 'erro');
+    }
+
+    const cardMestre = topico.anotacoes[snapshotIndex];
+    const contextoSanitizado = _extrairResumoBlocoParaAutoTese(cardMestre, topico.nome, topico.tipoObice || topico.vicio);
+
+    if (!contextoSanitizado) {
+        return exibirToast('Adicione um trecho de texto, observação ou nó de ideia antes de pedir sugestão à IA.', 'aviso');
+    }
+
+    const btnIA = document.getElementById('btn-auto-tese-ia');
+    const txtBtn = btnIA ? btnIA.querySelector('.btn-auto-tese-text') : null;
+
+    if (btnIA) {
+        btnIA.classList.add('is-thinking');
+        btnIA.disabled = true;
+    }
+    if (txtBtn) txtBtn.textContent = 'Analisando bloco...';
+
+    try {
+        const resultado = await window.AIRecommendationManager.gerarAutoTese(contextoSanitizado);
+
+        // GUARD CLAUSE CRÍTICO: Verifica se o modal continua aberto para o MESMO card e na MESMA requisição
+        const modalEl = document.getElementById('modal-editar-tese');
+        const modalContinuaAberto = modalEl && modalEl.style.display === 'flex';
+        const contextoIntacto = _ideiaContextoTese &&
+                                _ideiaContextoTese.topicoId === snapshotTopicoId &&
+                                _ideiaContextoTese.index === snapshotIndex;
+
+        if (currentReqId !== _autoTeseRequestId || !modalContinuaAberto || !contextoIntacto) {
+            return; // Aborta silenciosamente: o usuário fechou ou trocou de card
+        }
+
+        const textarea = document.getElementById('input-texto-tese');
+        if (resultado.tese && textarea) {
+            textarea.value = resultado.tese;
+            textarea.classList.remove('card-flash-focus');
+            void textarea.offsetWidth;
+            textarea.classList.add('card-flash-focus');
+            textarea.focus();
+            textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+        }
+
+        if (resultado.classificacao) {
+            _aplicarVisualBotaoTese(resultado.classificacao);
+            const iconSpan = document.getElementById('icone-classificacao-tese');
+            if (iconSpan) {
+                iconSpan.style.transform = 'scale(1.22)';
+                setTimeout(() => { iconSpan.style.transform = 'scale(1)'; }, 180);
+            }
+        }
+
+        exibirToast('Tese e classificação sugeridas pela IA! ✨', 'sucesso');
+    } catch (err) {
+        if (currentReqId !== _autoTeseRequestId) return;
+        console.warn('[Auto-Tese IA]', err);
+        exibirToast(err.message || 'Falha ao gerar sugestão de tese.', 'erro');
+    } finally {
+        if (currentReqId === _autoTeseRequestId) {
+            _restaurarEstadoBotaoAutoTese();
+        }
+    }
+};
+
+window.handleModalTeseKeydown = function(event) {
+    // Ctrl+Enter ou Cmd+Enter salva imediatamente a tese
+    if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+        event.preventDefault();
+        event.stopPropagation();
+        salvarTese();
+        return;
+    }
+    // Alt+S dispara a sugestão com IA sem tirar a mão do teclado
+    if (event.altKey && event.key.toLowerCase() === 's') {
+        event.preventDefault();
+        event.stopPropagation();
+        acionarAutoTeseIA(event);
+        return;
+    }
+    // Escape fecha o modal e cancela requisições pendentes
+    if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        fecharModalTese();
+    }
+};
 
 function abrirModalTese(topicoId, index) {
+    _autoTeseRequestId++; // Invalida qualquer requisição anterior pendurada
+    _restaurarEstadoBotaoAutoTese();
+
     _ideiaContextoTese = { topicoId, index };
+    const topico = topicos.find(t => t.id === topicoId);
+    if (!topico || !topico.anotacoes[index]) return;
+
+    const anotacao = topico.anotacoes[index];
+    
     document.getElementById('tese-ideia-num').textContent = index + 1;
-    const anotacao = topicos.find(t => t.id === topicoId).anotacoes[index];
-    document.getElementById('input-texto-tese').value = anotacao.tese || '';
+    
+    const textarea = document.getElementById('input-texto-tese');
+    textarea.value = anotacao.tese || '';
+    
+    _aplicarVisualBotaoTese(anotacao.teseClassificacao || 'neutro');
     
     document.getElementById('wizard-backdrop').style.display = 'block';
     document.getElementById('modal-editar-tese').style.display = 'flex';
+    
+    setTimeout(() => {
+        textarea.focus();
+        textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+    }, 50);
 }
 
 function fecharModalTese() {
+    _autoTeseRequestId++; // Invalida imediatamente qualquer Promise da IA em voo
+    _restaurarEstadoBotaoAutoTese();
+
     document.getElementById('wizard-backdrop').style.display = 'none';
     document.getElementById('modal-editar-tese').style.display = 'none';
     _ideiaContextoTese = null;
@@ -853,12 +1189,22 @@ function fecharModalTese() {
 
 function salvarTese() {
     if (!_ideiaContextoTese) return;
-    const teseTxt = document.getElementById('input-texto-tese').value.trim();
+    _autoTeseRequestId++; // Cancela respostas tardias caso o usuário salve manualmente antes da IA responder
+
     const topico = topicos.find(t => t.id === _ideiaContextoTese.topicoId);
-    topico.anotacoes[_ideiaContextoTese.index].tese = teseTxt;
+    if (!topico || !topico.anotacoes[_ideiaContextoTese.index]) return;
     
-    renderizarTopicos(); salvarBackupAutomatico();
-    exibirToast('Tese salva com sucesso!', 'sucesso');
+    const textoTese = document.getElementById('input-texto-tese').value.trim();
+    const btnClass = document.getElementById('btn-classificacao-tese');
+    const classificacao = btnClass ? (btnClass.dataset.classificacao || 'neutro') : 'neutro';
+    
+    topico.anotacoes[_ideiaContextoTese.index].tese = textoTese;
+    topico.anotacoes[_ideiaContextoTese.index].teseClassificacao = classificacao;
+    
+    renderizarTopicos(); 
+    salvarBackupAutomatico();
+    
+    exibirToast('Tese recursal atualizada com sucesso!', 'sucesso');
     fecharModalTese();
 }
 
