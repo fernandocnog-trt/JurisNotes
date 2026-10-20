@@ -80,14 +80,104 @@
         background-color: #94a3b8;
     }
 
-    .jp-card { background-color: #ffffff; color: #1e293b; border-radius: 8px; padding: 1.25rem; border: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; }
-    .jp-card-info { display: flex; flex-direction: column; gap: 4px; overflow: hidden; width: 70%; }
-    .jp-title { font-weight: 600; font-size: 1.1rem; }
-    .jp-preview { font-size: 0.85rem; color: #64748b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .jp-actions { display: flex; gap: 5px; }
-    .jp-icon-btn { background: none; border: 1px solid transparent; cursor: pointer; padding: 8px; border-radius: 6px; display: flex; align-items: center; justify-content: center; }
-    .jp-icon-btn svg { width: 18px; height: 18px; stroke: #64748b; stroke-width: 2; fill: none; }
+    .jp-card { 
+        background-color: #ffffff; 
+        color: #1e293b; 
+        border-radius: 8px; 
+        padding: 1rem 1.25rem; 
+        border: 1px solid #e2e8f0; 
+        display: flex; 
+        justify-content: space-between; 
+        align-items: center; 
+        margin-bottom: 0.75rem;
+        gap: 1rem;
+        transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    }
+    .jp-card:hover {
+        border-color: #cbd5e0;
+        box-shadow: 0 2px 6px rgba(15, 23, 42, 0.04);
+    }
+    /* Flex child com min-width: 0 impede que títulos longos empurrem os botões de ação */
+    .jp-card-info { 
+        display: flex; 
+        align-items: center; 
+        flex: 1; 
+        min-width: 0; 
+    }
+    .jp-title { 
+        font-weight: 600; 
+        font-size: 1.05rem; 
+        display: flex; 
+        align-items: center; 
+        gap: 8px; 
+        width: 100%; 
+        min-width: 0; 
+    }
+    .jp-title-text {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .jp-badge-extras {
+        background: var(--semantic-info-bg, #e0f2fe);
+        color: var(--semantic-info-text, #0369a1);
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-size: 0.7rem;
+        font-weight: 600;
+        flex-shrink: 0;
+    }
+    .jp-badge-match {
+        background: #f1f5f9;
+        color: #475569;
+        border: 1px solid #cbd5e0;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-size: 0.7rem;
+        font-weight: 500;
+        flex-shrink: 0;
+    }
+    .jp-actions { 
+        display: flex; 
+        gap: 5px; 
+        flex-shrink: 0; 
+    }
+    .jp-icon-btn { 
+        background: none; 
+        border: 1px solid transparent; 
+        cursor: pointer; 
+        padding: 8px; 
+        border-radius: 6px; 
+        display: flex; 
+        align-items: center; 
+        justify-content: center; 
+    }
+    .jp-icon-btn svg { 
+        width: 18px; 
+        height: 18px; 
+        stroke: #64748b; 
+        stroke-width: 2; 
+        fill: none; 
+        stroke-linejoin: round;
+        stroke-linecap: round;
+    }
     .jp-icon-btn:hover { background-color: #f1f5f9; }
+    
+    /* Botão de Favorito (Estrela): Branco quando inativo, Cor do Painel (--theme-primary) quando ativo */
+    .jp-icon-btn.jp-fav svg {
+        fill: #ffffff;
+        stroke: #94a3b8;
+        transition: transform 0.15s ease, fill 0.2s ease, stroke 0.2s ease;
+    }
+    .jp-icon-btn.jp-fav:hover svg {
+        transform: scale(1.15);
+        stroke: var(--theme-primary, #ffc107);
+    }
+    .jp-icon-btn.jp-fav.is-fav svg {
+        fill: var(--theme-primary, #ffc107);
+        stroke: var(--theme-primary, #ffc107);
+    }
+
     .jp-play:hover svg { stroke: var(--theme-text-on-primary, #000); fill: var(--theme-primary, #ffc107); }
     .jp-edit:hover svg { stroke: #0284c7; }
     .jp-del:hover svg { stroke: var(--semantic-danger, #ef4444); }

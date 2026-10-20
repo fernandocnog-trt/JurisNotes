@@ -6,6 +6,39 @@ window.PromptUIController = (function() {
 
     const getEl = (id) => document.getElementById(id);
 
+    // Utilitário 1: Normalização Diacrítica (Remove acentos e converte para minúsculas)
+    function normalizeText(str = '') {
+        return String(str)
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .toLowerCase()
+            .trim();
+    }
+
+    // Utilitário 2: Limpeza de Emojis/Símbolos iniciais para Ordenação Alfabética Real
+    function cleanTitleForSort(str = '') {
+        return normalizeText(String(str).replace(/^[^\p{L}\p{N}]+/gu, ''));
+    }
+
+    // Utilitário 3: Ordenação Padrão (1º Favoritos no topo, 2º Ordem Alfabética Limpa)
+    function getDefaultSortedPrompts(list = prompts) {
+        return [...list].sort((a, b) => {
+            const favA = Boolean(a.favorite);
+            const favB = Boolean(b.favorite);
+            if (favA !== favB) return favA ? -1 : 1;
+            return cleanTitleForSort(a.title).localeCompare(cleanTitleForSort(b.title), 'pt-BR');
+        });
+    }
+
+    // Utilitário 4: Escape básico de HTML para evitar quebra de DOM em títulos com caracteres especiais
+    function escapeHtml(str = '') {
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    }
+
     // Verificador de Autenticação (Auth Guard)
     function verificarSessao() {
         const btnLogin = document.getElementById('btn-login-user');
@@ -17,26 +50,49 @@ window.PromptUIController = (function() {
         return true;
     }
 
-    function renderList(data = prompts) {
+    // Renderização Pura da Lista (Recebe dados ordenados e Set opcional de IDs com match apenas no conteúdo)
+    function renderList(data = null, contentMatchIds = null) {
         const list = getEl('jp-list');
+        if (!list) return;
         list.innerHTML = '';
-        if (data.length === 0) {
+
+        const itemsToRender = data !== null ? data : getDefaultSortedPrompts(prompts);
+
+        if (itemsToRender.length === 0) {
             list.innerHTML = `<div style="text-align: center; color: #64748b; padding: 2rem; border: 1px dashed #cbd5e0; border-radius: 8px;">Nenhum modelo encontrado.</div>`;
             return;
         }
 
-        data.forEach(p => {
+        itemsToRender.forEach(p => {
             const hasExtras = p.customFields && p.customFields.length > 0;
-            const badge = hasExtras ? `<span style="background: var(--semantic-info-bg, #e0f2fe); color: var(--semantic-info-text, #0369a1); padding: 2px 6px; border-radius:4px; font-size:0.7rem; margin-left:8px;">+${p.customFields.length} extras</span>` : '';
+            const badgeExtras = hasExtras 
+                ? `<span class="jp-badge-extras">+${p.customFields.length} extras</span>` 
+                : '';
+            
+            // Exibe indicador se o item apareceu na busca exclusivamente pelo conteúdo interno
+            const isContentMatch = contentMatchIds && contentMatchIds.has(p.id);
+            const badgeMatch = isContentMatch 
+                ? `<span class="jp-badge-match" title="O termo pesquisado foi encontrado no teor deste prompt">Contém no texto</span>` 
+                : '';
+
+            const isFav = Boolean(p.favorite);
+            const favClass = isFav ? 'is-fav' : '';
+            const favTitle = isFav ? 'Remover dos favoritos' : 'Favoritar modelo';
             
             const card = document.createElement('div');
             card.className = 'jp-card';
             card.innerHTML = `
                 <div class="jp-card-info">
-                    <div class="jp-title">${p.title} ${badge}</div>
-                    <div class="jp-preview">${p.content.substring(0, 70)}...</div>
+                    <div class="jp-title">
+                        <span class="jp-title-text" title="${escapeHtml(p.title)}">${escapeHtml(p.title)}</span>
+                        ${badgeExtras}
+                        ${badgeMatch}
+                    </div>
                 </div>
                 <div class="jp-actions">
+                    <button class="jp-icon-btn jp-fav ${favClass}" aria-pressed="${isFav}" onclick="PromptUIController.toggleFavorite('${p.id}')" title="${favTitle}">
+                        <svg viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+                    </button>
                     <button class="jp-icon-btn jp-play" onclick="PromptUIController.openGenModal('${p.id}')" title="Gerar"><svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg></button>
                     <button class="jp-icon-btn jp-edit" onclick="PromptUIController.openEditModal('${p.id}')" title="Editar"><svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg></button>
                     <button class="jp-icon-btn jp-del" onclick="PromptUIController.deletePrompt('${p.id}')" title="Excluir"><svg viewBox="0 0 24 24" style="stroke: var(--semantic-danger, #ef4444);"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg></button>
@@ -68,14 +124,21 @@ window.PromptUIController = (function() {
                     <span style="background:#e2e8f0; padding:2px 8px; border-radius:12px; font-size:0.75rem;">${field.type.toUpperCase()}</span>
                     <span style="color:#ef4444; cursor:pointer; font-weight:bold;" onclick="PromptUIController.rmField(${index})">✕</span>
                 </div>
-                <input type="text" class="jp-input" placeholder="Título do Campo" value="${field.label}" onchange="PromptUIController.updField(${index}, 'label', this.value)" required>
+                <input type="text" class="jp-input" placeholder="Título do Campo" value="${escapeHtml(field.label)}" onchange="PromptUIController.updField(${index}, 'label', this.value)" required>
                 ${spec}
             `;
             c.appendChild(card);
         });
     }
 
-    // Abertura Modal Principal com Auth Guard e Caching
+    // Restaura a visualização do Modal Principal usando o cache local (sem novo fetch na nuvem)
+    function restaurarModalPrincipal() {
+        getEl('backdrop-juris-prompts').classList.add('active');
+        getEl('modal-juris-prompts').style.display = 'block';
+        PromptUIController.filter();
+    }
+
+    // Abertura Modal Principal com Auth Guard e Fetch Inicial
     async function abrirModal() {
         if (!verificarSessao()) return;
 
@@ -86,14 +149,14 @@ window.PromptUIController = (function() {
         
         try {
             if (!window.FirebasePrompts) throw new Error("Módulo de nuvem não carregado.");
-            // Fetch limpo. Só ocorre na abertura.
             prompts = await window.FirebasePrompts.carregar();
-            renderList();
+            PromptUIController.filter();
         } catch (error) {
             console.error("Juris Prompts [Firebase Error]:", error);
             getEl('jp-list').innerHTML = `<div style="text-align: center; color: #ef4444; padding: 2rem;">Falha ao sincronizar. Verifique sua conexão.</div>`;
         }
     }
+
     function fecharModalPrincipal() {
         getEl('backdrop-juris-prompts').classList.remove('active');
         getEl('modal-juris-prompts').style.display = 'none';
@@ -111,6 +174,7 @@ window.PromptUIController = (function() {
         getEl('backdrop-jp-form').classList.add('active');
         getEl('modal-jp-form').style.display = 'block';
     }
+
     function openEditModal(id) {
         fecharModalPrincipal();
         const p = prompts.find(x => x.id === id);
@@ -124,10 +188,11 @@ window.PromptUIController = (function() {
         getEl('backdrop-jp-form').classList.add('active');
         getEl('modal-jp-form').style.display = 'block';
     }
+
     function closeAddModal() {
         getEl('backdrop-jp-form').classList.remove('active');
         getEl('modal-jp-form').style.display = 'none';
-        abrirModal();
+        restaurarModalPrincipal();
     }
 
     // Abertura Gerador
@@ -145,13 +210,13 @@ window.PromptUIController = (function() {
             genDiv.style.display = 'block';
             let html = `<div style="font-size:0.85rem; font-weight:bold; color: var(--theme-primary, #b48500); margin-bottom:10px;">Preencha:</div>`;
             currentActivePrompt.customFields.forEach(f => {
-                html += `<div class="jp-form-group"><label>${f.label}</label>`;
+                html += `<div class="jp-form-group"><label>${escapeHtml(f.label)}</label>`;
                 if(f.type === 'text') {
-                    html += `<textarea class="jp-input jp-dyn-txt" data-label="${f.label}" style="min-height:60px;"></textarea>`;
+                    html += `<textarea class="jp-input jp-dyn-txt" data-label="${escapeHtml(f.label)}" style="min-height:60px;"></textarea>`;
                 } else if (f.type === 'checkbox') {
                     const opts = f.options.split('\n').filter(o => o.trim() !== '');
-                    html += `<div class="jp-dyn-chk-grp" data-label="${f.label}">`;
-                    opts.forEach(opt => html += `<label style="display:flex; gap:8px; margin-top:5px; font-weight:normal; color:#1e293b;"><input type="checkbox" value="${opt.trim()}"> ${opt.trim()}</label>`);
+                    html += `<div class="jp-dyn-chk-grp" data-label="${escapeHtml(f.label)}">`;
+                    opts.forEach(opt => html += `<label style="display:flex; gap:8px; margin-top:5px; font-weight:normal; color:#1e293b;"><input type="checkbox" value="${escapeHtml(opt.trim())}"> ${escapeHtml(opt.trim())}</label>`);
                     html += `</div>`;
                 }
                 html += `</div>`;
@@ -161,10 +226,11 @@ window.PromptUIController = (function() {
         getEl('backdrop-jp-gen').classList.add('active');
         getEl('modal-jp-gen').style.display = 'block';
     }
+
     function closeGenModal() {
         getEl('backdrop-jp-gen').classList.remove('active');
         getEl('modal-jp-gen').style.display = 'none';
-        abrirModal();
+        restaurarModalPrincipal();
     }
 
     // Ações e Persistência
@@ -178,7 +244,14 @@ window.PromptUIController = (function() {
         if(!title || !content) { alert('Preencha nome e teor.'); return; }
         
         const validFields = editingCustomFields.filter(f => f.label.trim() !== '');
-        const promptObj = { title, content, customFields: validFields };
+        const existingPrompt = id ? prompts.find(p => p.id === id) : null;
+        
+        const promptObj = { 
+            title, 
+            content, 
+            customFields: validFields,
+            favorite: existingPrompt ? Boolean(existingPrompt.favorite) : false
+        };
         if (id) promptObj.id = id;
 
         try {
@@ -196,8 +269,8 @@ window.PromptUIController = (function() {
                 prompts.push({ ...promptObj, id: idGerado });
             }
 
+            // closeAddModal() já restaura o modal principal e aplica filter() sobre o array atualizado
             closeAddModal();
-            renderList();
             if (window.exibirToast) window.exibirToast('Salvo na nuvem com sucesso!', 'sucesso');
             
         } catch (error) {
@@ -209,6 +282,32 @@ window.PromptUIController = (function() {
         }
     }
 
+    async function toggleFavorite(id) {
+        if (isSyncing || !verificarSessao()) return;
+
+        const idx = prompts.findIndex(p => p.id === id);
+        if (idx === -1) return;
+
+        const estadoAnterior = Boolean(prompts[idx].favorite);
+        prompts[idx].favorite = !estadoAnterior;
+
+        // Optimistic UI: Reordena e atualiza a estrela imediatamente
+        PromptUIController.filter();
+
+        try {
+            isSyncing = true;
+            await window.FirebasePrompts.salvar(prompts[idx]);
+        } catch (error) {
+            console.error("Erro ao favoritar modelo:", error);
+            // Rollback em caso de erro de rede/permissão
+            prompts[idx].favorite = estadoAnterior;
+            PromptUIController.filter();
+            if (window.exibirToast) window.exibirToast('Falha ao atualizar favorito na nuvem.', 'erro');
+        } finally {
+            isSyncing = false;
+        }
+    }
+
     async function deletePrompt(id) {
         if (isSyncing || !verificarSessao()) return;
 
@@ -217,9 +316,9 @@ window.PromptUIController = (function() {
                 isSyncing = true;
                 await window.FirebasePrompts.excluir(id);
                 
-                // OPTIMISTIC UPDATE: Filtra da memória, sem ler o DB de novo
+                // OPTIMISTIC UPDATE: Filtra da memória e preserva filtro atual
                 prompts = prompts.filter(p => p.id !== id);
-                renderList();
+                PromptUIController.filter();
                 
                 if (window.exibirToast) window.exibirToast('Modelo excluído!', 'sucesso');
             } catch (error) {
@@ -231,57 +330,46 @@ window.PromptUIController = (function() {
     }
 
     async function copyToClipboard() {
-        // 1. Injeção do Teor Base do Prompt (sempre garantido)
         let final = currentActivePrompt.content.trim() + "\n\n";
         
-        // 2. Avaliação de Contexto Dinâmico Baseada em Schema (Data-Driven)
         if (currentActivePrompt.customFields && currentActivePrompt.customFields.length > 0) {
             let extrasText = "--- INSTRUÇÕES ADICIONAIS / CONTEXTO DA PEÇA ---\n\n";
             
-            // Iteração rigorosa sobre os campos planejados no modelo
             currentActivePrompt.customFields.forEach(f => {
                 extrasText += `### ${f.label} ###\n`;
                 
                 if (f.type === 'text') {
-                    const inp = document.querySelector(`.jp-dyn-txt[data-label="${f.label}"]`);
+                    const inp = document.querySelector(`.jp-dyn-txt[data-label="${CSS.escape(f.label)}"]`);
                     const valor = inp ? inp.value.trim() : '';
                     
                     if (valor !== '') {
                         extrasText += `${valor}\n\n`;
                     } else {
-                        // Prevenção de Alucinação (Negative Prompt)
                         extrasText += `[Atenção IA: Nenhuma informação foi fornecida pelo usuário para este tópico. Não presuma dados.]\n\n`;
                     }
                 } 
                 else if (f.type === 'checkbox') {
-                    const grp = document.querySelector(`.jp-dyn-chk-grp[data-label="${f.label}"]`);
+                    const grp = document.querySelector(`.jp-dyn-chk-grp[data-label="${CSS.escape(f.label)}"]`);
                     if (grp) {
                         const checks = grp.querySelectorAll('input:checked');
                         if (checks.length > 0) {
-                            // [NOVO] Injeção Condicional de Diretrizes Específicas
                             if (f.guidelines && f.guidelines.trim() !== '') {
-                                extrasText += `[Diretriz Específica]: ${f.guidelines.trim()}\n\n`;
+                                extrasText += `[Diretriz Específicas]: ${f.guidelines.trim()}\n\n`;
                             }
-                            
-                            // Lista as opções que o usuário marcou
                             checks.forEach(c => extrasText += `- ${c.value}\n`);
                             extrasText += `\n`;
                         } else {
-                            // Prevenção de Alucinação para Arrays/Múltipla Escolha
                             extrasText += `[Atenção IA: Nenhuma das opções predefinidas foi selecionada.]\n\n`;
                         }
                     }
                 }
             });
             
-            // Acoplamento do contexto dinâmico ao payload final
             final += extrasText;
         }
         
-        // 3. Execução Segura via API Assíncrona
         try {
             await navigator.clipboard.writeText(final.trim());
-            // Interface com sistema de Toast global do Juris Core
             if (typeof window.exibirToast === 'function') {
                 window.exibirToast('Prompt estruturado e copiado com sucesso!', 'sucesso');
             } else {
@@ -294,13 +382,11 @@ window.PromptUIController = (function() {
         }
     }
 
-    // --- NOVO: Delegação de Eventos Global ---
-    // Garante que o filtro funcione mesmo com o HTML sendo injetado dinamicamente
+    // Delegação de Eventos Global para a Barra de Pesquisa
     document.addEventListener('input', (e) => {
         if (e.target && e.target.id === 'jp-search') {
             const btnClear = document.getElementById('jp-btn-clear-search');
             if (btnClear) {
-                // Reatividade leve baseada no tamanho da string
                 btnClear.style.display = e.target.value.length > 0 ? 'flex' : 'none';
             }
             PromptUIController.filter();
@@ -315,8 +401,6 @@ window.PromptUIController = (function() {
             
             if (isModalOpen) {
                 const searchInput = getEl('jp-search');
-                // Se o foco está no input e tem texto, apenas limpa. 
-                // Do contrário, deixa fluir (poderá fechar o modal).
                 if (document.activeElement === searchInput && searchInput.value !== '') {
                     e.preventDefault();
                     PromptUIController.clearSearch();
@@ -326,9 +410,42 @@ window.PromptUIController = (function() {
     });
 
     return {
-        abrirModal, fecharModalPrincipal, filter: () => {
-            const term = getEl('jp-search').value.toLowerCase();
-            renderList(prompts.filter(p => p.title.toLowerCase().includes(term) || p.content.toLowerCase().includes(term)));
+        abrirModal,
+        fecharModalPrincipal,
+        filter: () => {
+            const searchEl = getEl('jp-search');
+            const rawTerm = searchEl ? searchEl.value : '';
+            const normTerm = normalizeText(rawTerm);
+
+            // Sem termo de busca: exibe Favoritos no topo + Ordem Alfabética Limpa
+            if (!normTerm) {
+                renderList();
+                return;
+            }
+
+            // Com termo de busca:
+            // Prioridade 1 -> Termo contido no Nome (title)
+            // Prioridade 2 -> Termo contido apenas no Conteúdo (content)
+            const titleMatches = [];
+            const contentMatches = [];
+            const contentMatchIds = new Set();
+
+            prompts.forEach(p => {
+                const inTitle = normalizeText(p.title).includes(normTerm);
+                if (inTitle) {
+                    titleMatches.push(p);
+                } else if (normalizeText(p.content).includes(normTerm)) {
+                    contentMatches.push(p);
+                    contentMatchIds.add(p.id);
+                }
+            });
+
+            const combinedResults = [
+                ...getDefaultSortedPrompts(titleMatches),
+                ...getDefaultSortedPrompts(contentMatches)
+            ];
+
+            renderList(combinedResults, contentMatchIds);
         },
         clearSearch: () => {
             const searchInput = getEl('jp-search');
@@ -336,16 +453,23 @@ window.PromptUIController = (function() {
             
             if (searchInput) {
                 searchInput.value = '';
-                searchInput.focus(); // Mantém contexto para o usuário continuar navegando
+                searchInput.focus();
             }
             if (btnClear) btnClear.style.display = 'none';
             
-            PromptUIController.filter(); // Recarrega a lista original
+            PromptUIController.filter();
         },
-        openAddModal, closeAddModal, openEditModal, openGenModal, closeGenModal,
+        openAddModal,
+        closeAddModal,
+        openEditModal,
+        openGenModal,
+        closeGenModal,
         addField: (t) => { editingCustomFields.push({type: t, label: '', options: '', guidelines: ''}); renderBuilder(); },
         updField: (idx, k, v) => { editingCustomFields[idx][k] = v; },
-        rmField: (idx) => { editingCustomFields.splice(idx,1); renderBuilder(); },
-        savePrompt, deletePrompt, copyToClipboard
+        rmField: (idx) => { editingCustomFields.splice(idx, 1); renderBuilder(); },
+        savePrompt,
+        toggleFavorite,
+        deletePrompt,
+        copyToClipboard
     };
 })();
