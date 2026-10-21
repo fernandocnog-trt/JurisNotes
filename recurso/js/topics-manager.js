@@ -10,6 +10,32 @@ window.TopicsManager = (function () {
 
     let _activeTopicoCor = '#ffffff';
     const _topicosComGlobaisAbertas = new Set();
+    let _preambuloLadoALado = false;
+
+    function togglePreambuloTopico(event) {
+        if (event) event.stopPropagation();
+        if (!activeTabId) return;
+
+        _preambuloLadoALado = !_preambuloLadoALado;
+
+        const panel = document.querySelector('.topic-preamble-panel');
+        const btn = document.getElementById('btn-toggle-preambulo');
+
+        if (panel) panel.classList.toggle('is-side-by-side', _preambuloLadoALado);
+        if (btn) {
+            btn.setAttribute('aria-pressed', _preambuloLadoALado ? 'true' : 'false');
+            btn.innerHTML = _preambuloLadoALado ? '☰ Um Abaixo do Outro' : '◫ Lado a Lado';
+        }
+
+        // Recalcula as conexões SVG do mapa mental após a mudança de disposição
+        requestAnimationFrame(() => {
+            const container = document.getElementById('timeline-container');
+            if (container && container.offsetParent !== null) {
+                posicionarNosDeIdeia(container);
+                desenharConexoes();
+            }
+        });
+    }
 
     /* --- INÍCIO DO BLOCO DE FUNÇÕES AUXILIARES --- */
     function _ehCheckpoint(anotacao) {
@@ -1389,37 +1415,48 @@ window.TopicsManager = (function () {
         const corTextoTese = obterCorContraste(_activeTopicoCor);
 
         const preambleHtml = `
-            <div class="topic-preamble-panel">
-                <div class="preamble-card preamble-alegacao ${!topicoAtivo.alegacoes ? 'is-empty' : ''}" onclick="abrirEdicaoPreambulo('${activeTabId}', 'alegacoes')">
-                    <div class="preamble-icon ai-trigger-btn" 
-                         title="✨ Inteligência Artificial: Buscar modelos compatíveis" 
-                         onclick="event.stopPropagation(); AIRecommendationManager.buscarModelosCompativeis('${activeTabId}', decodeURIComponent('${encodeURIComponent(topicoAtivo.alegacoes || '').replace(/'/g, "%27")}'))">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
-                            <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" class="ai-sparkle" style="display:none; transform-origin: 12px 12px;"></path>
-                        </svg>
-                    </div>
-                    <div class="preamble-content">
-                        <span class="preamble-title">Razões Recursais</span>
-                        ${topicoAtivo.alegacoes ? renderizarMarkdownSeguro(escaparHTML(topicoAtivo.alegacoes)) : '<span class="preamble-empty">Clique para redigir as alegações recursais...</span>'}
-                    </div>
+            <div class="topic-preamble-panel ${_preambuloLadoALado ? 'is-side-by-side' : ''}" lang="pt-BR">
+                <div class="preamble-panel-toolbar">
+                    <span class="preamble-panel-heading">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px; height:14px;"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="3" y1="9" x2="21" y2="9"></line><line x1="9" y1="21" x2="9" y2="9"></line></svg>
+                        Quadro Sinótico do Tópico (Síntese Recursal)
+                    </span>
+                    <button type="button" id="btn-toggle-preambulo" class="btn-toggle-preambulo" aria-pressed="${_preambuloLadoALado}" onclick="TopicsManager.togglePreambuloTopico(event)" title="Alternar disposição dos cartões entre empilhados (vertical) e lado a lado (horizontal)">
+                        ${_preambuloLadoALado ? '☰ Um Abaixo do Outro' : '◫ Lado a Lado'}
+                    </button>
                 </div>
-                <div class="preamble-card preamble-origem ${!topicoAtivo.fundamentos ? 'is-empty' : ''}" onclick="abrirEdicaoPreambulo('${activeTabId}', 'fundamentos')">
-                    <div class="preamble-icon">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18M3 7v14M21 7v14M6 21V7l6-4 6 4v14"></path></svg>
+                <div class="preamble-cards-grid">
+                    <div class="preamble-card preamble-alegacao ${!topicoAtivo.alegacoes ? 'is-empty' : ''}" onclick="abrirEdicaoPreambulo('${activeTabId}', 'alegacoes')">
+                        <div class="preamble-icon ai-trigger-btn" 
+                             title="✨ Inteligência Artificial: Buscar modelos compatíveis" 
+                             onclick="event.stopPropagation(); AIRecommendationManager.buscarModelosCompativeis('${activeTabId}', decodeURIComponent('${encodeURIComponent(topicoAtivo.alegacoes || '').replace(/'/g, "%27")}'))">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                                <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" class="ai-sparkle" style="display:none; transform-origin: 12px 12px;"></path>
+                            </svg>
+                        </div>
+                        <div class="preamble-content">
+                            <span class="preamble-title">Razões Recursais</span>
+                            ${topicoAtivo.alegacoes ? `<div class="preamble-body-text">${renderizarMarkdownSeguro(escaparHTML(topicoAtivo.alegacoes))}</div>` : '<span class="preamble-empty">Clique para redigir as alegações recursais...</span>'}
+                        </div>
                     </div>
-                    <div class="preamble-content">
-                        <span class="preamble-title">Fundamentos da Origem</span>
-                        ${topicoAtivo.fundamentos ? renderizarMarkdownSeguro(escaparHTML(topicoAtivo.fundamentos)) : '<span class="preamble-empty">Clique para redigir os fundamentos da sentença...</span>'}
+                    <div class="preamble-card preamble-origem ${!topicoAtivo.fundamentos ? 'is-empty' : ''}" onclick="abrirEdicaoPreambulo('${activeTabId}', 'fundamentos')">
+                        <div class="preamble-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18M3 7v14M21 7v14M6 21V7l6-4 6 4v14"></path></svg>
+                        </div>
+                        <div class="preamble-content">
+                            <span class="preamble-title">Fundamentos da Origem</span>
+                            ${topicoAtivo.fundamentos ? `<div class="preamble-body-text">${renderizarMarkdownSeguro(escaparHTML(topicoAtivo.fundamentos))}</div>` : '<span class="preamble-empty">Clique para redigir os fundamentos da sentença...</span>'}
+                        </div>
                     </div>
-                </div>
-                <div class="preamble-card preamble-veredito ${!topicoAtivo.veredito ? 'is-empty' : ''}" onclick="abrirEdicaoPreambulo('${activeTabId}', 'veredito')">
-                    <div class="preamble-icon">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"></path></svg>
-                    </div>
-                    <div class="preamble-content">
-                        <span class="preamble-title">Veredito / Conclusão</span>
-                        ${topicoAtivo.veredito ? renderizarMarkdownSeguro(escaparHTML(topicoAtivo.veredito)) : '<span class="preamble-empty">Clique para definir o veredito final deste tópico...</span>'}
+                    <div class="preamble-card preamble-veredito ${!topicoAtivo.veredito ? 'is-empty' : ''}" onclick="abrirEdicaoPreambulo('${activeTabId}', 'veredito')">
+                        <div class="preamble-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"></path></svg>
+                        </div>
+                        <div class="preamble-content">
+                            <span class="preamble-title">Veredito / Conclusão</span>
+                            ${topicoAtivo.veredito ? `<div class="preamble-body-text">${renderizarMarkdownSeguro(escaparHTML(topicoAtivo.veredito))}</div>` : '<span class="preamble-empty">Clique para definir o veredito final deste tópico...</span>'}
+                        </div>
                     </div>
                 </div>
             </div>`;
@@ -2530,11 +2567,25 @@ window.TopicsManager = (function () {
     // FIM: LÓGICA DA TESOURA E CHECKPOINT
     // ==========================================
 
+    // Sincronia de Web Fonts com o Canvas SVG do Mapa Mental
+    if (document.fonts && document.fonts.ready) {
+        document.fonts.ready.then(() => {
+            requestAnimationFrame(() => {
+                const container = document.getElementById('timeline-container');
+                if (container && container.offsetParent !== null) {
+                    posicionarNosDeIdeia(container);
+                    desenharConexoes();
+                }
+            });
+        });
+    }
+
     // API pública do módulo
     return {
         obterDadosAudioSeguros: _obterDadosAudioSeguros,
         suprimirProximaRestauracao,
         toggleDiretrizesGlobais,
+        togglePreambuloTopico,
         resetVisibilidadeGlobais,
         MAPA_TESE_ICONES,
         obterCor,
