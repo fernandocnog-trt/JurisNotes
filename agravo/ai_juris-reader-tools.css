@@ -154,16 +154,123 @@ button#btn-ferramenta-extrator.extrator-completo:not(:disabled) svg {
 .crop-preview-container img { max-width: 100%; border-radius: 4px; box-shadow: var(--shadow-sm); }
 .wizard-polo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 
-.text-edit-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border: 1px solid var(--border-color); border-radius: 12px; padding: 20px; box-shadow: 0 12px 48px rgba(0,0,0,0.28); z-index: var(--z-text-edit-modal); min-width: 400px; max-width: 90vw; display: flex; flex-direction: column; gap: 12px; }
-.edit-header { font-size: 1.05rem; font-weight: 800; color: var(--trt-blue); border-bottom: 2px solid var(--trt-light-bg); padding-bottom: 8px; }
-.edit-toolbar { display: flex; gap: 8px; margin-bottom: 4px; }
+.text-edit-modal {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: white;
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 20px 24px;
+    box-shadow: 0 12px 48px rgba(0,0,0,0.28);
+    z-index: var(--z-text-edit-modal);
+    width: min(760px, 94vw);
+    min-width: min(400px, 94vw);
+    max-width: 94vw;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    overflow: hidden;
+    transition: width 0.22s cubic-bezier(0.25, 0.8, 0.25, 1),
+                height 0.22s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+/* Modal mais largo e confortável ao editar Razões, Fundamentos e Veredito */
+.text-edit-modal.is-preambulo {
+    width: min(880px, 94vw);
+}
+
+/* Modo Expandido (Foco Total): o pai dita a altura e o filho cresce via flex: 1 1 0% */
+.text-edit-modal.is-expanded {
+    width: min(1140px, 94vw);
+    height: 86vh;
+}
+
+.edit-header { font-size: 1.05rem; font-weight: 800; color: var(--trt-blue); border-bottom: 2px solid var(--trt-light-bg); padding-bottom: 8px; flex-shrink: 0; }
+
+.edit-header--flex {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+}
+
+.edit-expand-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: #f8fafc;
+    border: 1px solid #cbd5e1;
+    color: var(--trt-blue);
+    padding: 5px 12px;
+    border-radius: 6px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.2s, border-color 0.2s;
+}
+
+.edit-expand-btn:hover {
+    background: #e2e8f0;
+    border-color: var(--trt-blue-mid);
+}
+
+.edit-expand-btn[aria-pressed="true"] {
+    background: var(--trt-blue);
+    color: #ffffff;
+    border-color: var(--trt-blue);
+}
+
+.edit-toolbar { display: flex; gap: 8px; margin-bottom: 4px; flex-shrink: 0; }
 .edit-tool-btn { background: #fff; border: 1px solid #bbb; border-radius: 6px; cursor: pointer; color: var(--trt-blue); transition: all 0.2s ease; width: 36px; height: 36px; padding: 0; display: flex; align-items: center; justify-content: center; }
 .edit-tool-btn svg { width: 18px; height: 18px; pointer-events: none; }
 .edit-tool-btn:hover { background: #f0f4f8; border-color: var(--trt-blue-mid); color: var(--trt-blue-mid); }
-.edit-textarea { width: 100%; min-height: 140px; padding: 10px; border: 1px solid var(--border-color); border-radius: 6px; font-family: inherit; font-size: 0.9rem; line-height: 1.5; outline: none; resize: vertical; }
-.edit-textarea:focus { border-color: var(--trt-blue-mid); }
-.edit-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 8px; padding-top: 12px; border-top: 1px solid #eee; }
+.edit-textarea { width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 6px; font-family: inherit; font-size: 0.9rem; line-height: 1.5; outline: none; flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; white-space: pre-wrap; word-wrap: break-word; resize: none; transition: border-color 0.2s, box-shadow 0.2s; }
+.edit-textarea:focus { border-color: var(--trt-blue-mid); box-shadow: 0 0 0 2px rgba(26, 58, 92, 0.12); }
+.edit-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 8px; padding-top: 12px; border-top: 1px solid #eee; flex-shrink: 0; }
 .edit-save-btn { background: var(--trt-blue); color: white; border-color: var(--trt-blue); }
+
+/* Caixa de texto principal: nasce ampla para múltiplos parágrafos e permite resize vertical */
+.text-edit-modal #edit-text-input {
+    flex: 1 1 auto;
+    min-height: clamp(200px, 32vh, 420px);
+    max-height: 62vh;
+    padding: 14px 18px;
+    font-family: var(--font-reading);
+    font-size: 0.96rem;
+    line-height: 1.7;
+    text-align: justify;
+    text-align-last: left;
+    hyphens: auto;
+    -webkit-hyphens: auto;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    resize: vertical;
+}
+
+.text-edit-modal.is-preambulo #edit-text-input {
+    min-height: clamp(260px, 40vh, 500px);
+}
+
+/* No modo expandido, delega 100% da distribuição ao Flexbox sem conflito de height: 100% */
+.text-edit-modal.is-expanded #edit-text-input {
+    flex: 1 1 0%;
+    min-height: 0;
+    max-height: none;
+    resize: none;
+}
+
+/* Harmonização do Modo Leitura e Visões Documentais com a nova tipografia justificada */
+#reading-mode-content,
+.doc-modal__content {
+    font-family: var(--font-reading);
+    text-align: justify;
+    text-align-last: left;
+    hyphens: auto;
+    -webkit-hyphens: auto;
+}
 
 .aba-manager-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; border: 1px solid var(--border-color); border-radius: 6px; background: #fafafa; margin-bottom: 6px; }
 .aba-manager-nome { font-weight: 600; color: var(--trt-blue); font-size: 0.88rem; }

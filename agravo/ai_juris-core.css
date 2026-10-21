@@ -65,6 +65,13 @@
     --theme-light-bg: rgba(174, 234, 0, 0.08);
     --theme-light-border: rgba(174, 234, 0, 0.4);
     --theme-text-on-primary: #000000;
+
+    /* Tipografia Base e de Leitura Forense:
+       - 'Inter': Sans-serif neo-grotesca com alta altura de 'x' e desambiguação OpenType.
+       - Alternativa Clássica: Se desejar testar fonte serifada nos cartões de leitura,
+         altere --font-reading para: 'Source Serif 4', Georgia, serif; */
+    --font-ui: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+    --font-reading: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
 }
 
 *, *::before, *::after {
@@ -78,7 +85,12 @@ body {
     height: 100vh;
     background-color: var(--trt-light-bg);
     color: var(--text-dark);
-    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    font-family: var(--font-ui);
+    /* OpenType Features para leitura jurídica:
+       cv02/cv05/cv08/cv11 diferenciam claramente 1 (numeral), l (ele) e I (inciso romano) */
+    font-feature-settings: "cv02" 1, "cv05" 1, "cv08" 1, "cv11" 1;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
     flex-direction: column;
 }
 
