@@ -171,6 +171,25 @@
     </div>
 </div>
 
+<!-- MODAL NOTAS OCULTAS GLOBAIS -->
+<div id="notas-ocultas-modal-backdrop" class="backdrop-seguro" style="display: none;" onclick="TopicsManager.fecharModalNotasOcultas()"></div>
+<div id="modal-notas-ocultas" class="crop-wizard-popup modal-notas-ocultas-painel fechavel-por-esc" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="notas-ocultas-modal-title">
+    <div class="wizard-header wizard-header--flex">
+        <span class="wizard-header__title" id="notas-ocultas-modal-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 20px; height: 20px;">
+                <path d="M9 18h6"></path><path d="M10 22h4"></path>
+                <path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A4.65 4.65 0 0 0 18 8 6 6 0 0 0 6 8c0 1 .23 2.23 1.5 3.5A4.61 4.61 0 0 1 8.91 14"></path>
+            </svg>
+            Notas Ocultas Pendentes
+        </span>
+        <button type="button" class="wizard-header__close-btn" onclick="TopicsManager.fecharModalNotasOcultas()" aria-label="Fechar">✕</button>
+    </div>
+    <p class="popup-label" style="margin-top: 4px; text-transform: none; font-size: 0.8rem; color: #64748b;">
+        Passe o mouse sobre o círculo colorido para ver o tópico e clique para ir até a nota:
+    </p>
+    <div id="lista-topicos-notas-ocultas" class="hidden-notes-grid" role="list"></div>
+</div>
+
 <!-- MODAL EDITOR DE TEXTO -->
 <div id="text-edit-backdrop" class="modal-backdrop-modern" onclick="fecharModalEdicaoSeguro()"></div>
 <div id="text-edit-modal" class="text-edit-modal" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="edit-modal-title" onkeydown="handleModalEditorKeydown(event)">
