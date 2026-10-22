@@ -1577,6 +1577,7 @@ document.addEventListener('keydown', function (e) {
                 if (modal.id === 'outline-view-modal' && window.OutlineViewManager) OutlineViewManager.fechar();
                 if (modal.id === 'minuta-view-modal' && window.MinutaViewManager) MinutaViewManager.fechar();
                 if (modal.id === 'modal-tarefas' && window.TaskManager) TaskManager.fecharModal();
+                if (modal.id === 'modal-notas-ocultas' && window.TopicsManager) TopicsManager.fecharModalNotasOcultas();
                 if (modal.id === 'modal-editar-tese' && typeof fecharModalTese === 'function') fecharModalTese();
                 
                 // NOVO: Delegar o fechamento ao TopicsManager (Tesoura)
@@ -2504,6 +2505,11 @@ document.addEventListener("DOMContentLoaded", () => {
         window.abrirModalGeradorContexto = function() {
             // Executa a função original primeiro (popula dados, exibe modal)
             originalAbrirModalGeradorContexto.apply(this, arguments);
+
+            // Guardrail: Alerta se houver notas ocultas pendentes de revisão no processo
+            if (window.TopicsManager && typeof TopicsManager.sinalizarNotasOcultasPendentes === 'function') {
+                TopicsManager.sinalizarNotasOcultasPendentes();
+            }
 
             // Injeta a lógica de UX do Selo de Continuidade
             if (typeof TopicsManager !== 'undefined') {

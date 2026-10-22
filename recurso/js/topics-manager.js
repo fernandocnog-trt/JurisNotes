@@ -2012,30 +2012,176 @@ window.TopicsManager = (function () {
 
     let notaOcultaIndexAtual = -1;
 
+    /**
+     * Varre todos os tópicos em memória (O(N)) usando _percorrerTodosOsNos
+     * e contabiliza todas as notas internas (intencao === 'nota') ainda não revisadas.
+     */
+    function _obterResumoNotasOcultasGlobal() {
+        const listaTopicos = (typeof topicos !== 'undefined' && Array.isArray(topicos)) ? topicos : [];
+        let totalGlobal = 0;
+        const porTopico = [];
+
+        listaTopicos.forEach(t => {
+            let pendentesNoTopico = 0;
+            _percorrerTodosOsNos(t, (no) => {
+                if (no && no.intencao === 'nota' && no.revisada !== true) {
+                    pendentesNoTopico++;
+                }
+            });
+
+            if (pendentesNoTopico > 0) {
+                totalGlobal += pendentesNoTopico;
+                porTopico.push({
+                    id: t.id,
+                    nome: t.nome,
+                    cor: t.cor || '#1a3a5c',
+                    quantidade: pendentesNoTopico
+                });
+            }
+        });
+
+        return { totalGlobal, porTopico };
+    }
+
+    /**
+     * Atualiza o contador global da lâmpada no cabeçalho.
+     */
     function atualizarContadorNotasOcultas() {
-        // Conta quantas div's ganharam a classe de nota interna na renderização atual
-        const notas = document.querySelectorAll('.sub-annotation-item.is-nota-interna.is-pendente');
-        const trackerContainer = document.getElementById('efficiency-tracker-container'); // Container pai
+        const trackerContainer = document.getElementById('efficiency-tracker-container');
         const lampTracker = document.getElementById('hidden-notes-tracker');
         const badge = document.getElementById('hidden-notes-badge');
-        
         if (!trackerContainer || !lampTracker || !badge) return;
 
-        if (notas.length > 0) {
-            trackerContainer.style.display = 'flex'; // Garante que a barra flutuante esteja ativa
+        const { totalGlobal } = _obterResumoNotasOcultasGlobal();
+
+        if (totalGlobal > 0) {
+            trackerContainer.style.display = 'flex';
             lampTracker.style.display = 'flex';
-            badge.textContent = notas.length;
+            badge.textContent = totalGlobal > 99 ? '99+' : totalGlobal;
         } else {
             lampTracker.style.display = 'none';
-            // Oculta a barra inteira SOMENTE se o cronômetro também não estiver em uso
             const pill = document.getElementById('efficiency-tracker-pill');
             if (pill && pill.style.display === 'none') {
                 trackerContainer.style.display = 'none';
             }
         }
-        
-        // Reseta o estado de navegação (evita out-of-bounds se uma nota for apagada)
+
+        // Reseta o cursor de navegação local sempre que a árvore é re-renderizada
         notaOcultaIndexAtual = -1;
+    }
+
+    /**
+     * Abre o modal global de notas ocultas por tópico (ou rola diretamente se Shift estiver pressionado).
+     */
+    function abrirModalNotasOcultas(event) {
+        if (event) event.stopPropagation();
+
+        // Atalho Power User: Shift + Clique cicla diretamente nas notas ocultas da aba atual
+        if (event && event.shiftKey) {
+            if (document.body.dataset.activeTab !== 'historico' && typeof window.trocarAba === 'function') {
+                window.trocarAba('historico');
+            }
+            requestAnimationFrame(() => rolarParaProximaNotaOculta());
+            return;
+        }
+
+        const backdrop = document.getElementById('notas-ocultas-modal-backdrop');
+        const modal = document.getElementById('modal-notas-ocultas');
+        const container = document.getElementById('lista-topicos-notas-ocultas');
+        if (!backdrop || !modal || !container) return;
+
+        const { porTopico } = _obterResumoNotasOcultasGlobal();
+        container.innerHTML = '';
+
+        if (porTopico.length === 0) {
+            container.innerHTML = '<p class="popup-label" style="text-align:center; margin: 0;">Nenhuma nota oculta pendente.</p>';
+        } else {
+            const fragment = document.createDocumentFragment();
+
+            porTopico.forEach(item => {
+                const chip = document.createElement('button');
+                chip.type = 'button';
+                // Crítico: inclui 'juris-tooltip' para ativar os pseudo-elementos CSS de tooltip
+                chip.className = 'hidden-note-topic-chip juris-tooltip';
+                chip.setAttribute('role', 'listitem');
+                chip.style.backgroundColor = item.cor;
+                chip.style.color = obterCorContraste(item.cor);
+
+                const plural = item.quantidade === 1 ? 'nota oculta' : 'notas ocultas';
+                const tooltipLinear = `${item.nome} • ${item.quantidade} ${plural}`;
+                chip.setAttribute('data-tooltip', tooltipLinear);
+                chip.setAttribute('aria-label', tooltipLinear);
+
+                chip.innerHTML = `<span class="hidden-note-topic-count">${item.quantidade}</span>`;
+                chip.addEventListener('click', () => selecionarTopicoNotaOculta(item.id));
+
+                fragment.appendChild(chip);
+            });
+
+            container.appendChild(fragment);
+        }
+
+        if (window.RenderCycle) RenderCycle.bloquearScrollBody(true);
+        backdrop.style.display = 'block';
+        modal.style.display = 'flex';
+    }
+
+    function fecharModalNotasOcultas() {
+        const backdrop = document.getElementById('notas-ocultas-modal-backdrop');
+        const modal = document.getElementById('modal-notas-ocultas');
+        if (backdrop) backdrop.style.display = 'none';
+        if (modal) modal.style.display = 'none';
+        if (window.RenderCycle) RenderCycle.bloquearScrollBody(false);
+    }
+
+    /**
+     * Navega até o tópico selecionado no modal e rola até sua primeira nota oculta pendente.
+     */
+    function selecionarTopicoNotaOculta(topicoId) {
+        fecharModalNotasOcultas();
+
+        const estavaNaAbaLeitura = !document.getElementById('tab-historico').classList.contains('active');
+        if (estavaNaAbaLeitura && typeof window.trocarAba === 'function') {
+            window.trocarAba('historico');
+        }
+
+        const trocouTopico = (activeTabId !== topicoId);
+        if (trocouTopico) {
+            activeTabId = topicoId;
+            renderizarFichario(topicos);
+        } else if (estavaNaAbaLeitura) {
+            // Se já era o mesmo tópico mas o container estava oculto (display:none),
+            // garante que as coordenadas absolutas dos subnós estejam calculadas
+            const timelineEl = document.getElementById('timeline-container');
+            if (timelineEl) {
+                posicionarNosDeIdeia(timelineEl);
+                desenharConexoes();
+            }
+        }
+
+        // Aguarda o ciclo de posicionamento do DOM e reseta o cursor antes de rolar
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                notaOcultaIndexAtual = -1;
+                rolarParaProximaNotaOculta();
+            });
+        });
+    }
+
+    function sinalizarNotasOcultasPendentes() {
+        const { totalGlobal } = _obterResumoNotasOcultasGlobal();
+        if (totalGlobal > 0) {
+            if (typeof exibirToast === 'function') {
+                exibirToast(`Atenção: Existem ${totalGlobal} nota(s) oculta(s) pendente(s) de revisão no processo.`, 'aviso');
+            }
+            const lamp = document.getElementById('hidden-notes-tracker');
+            if (lamp) {
+                lamp.classList.remove('lamp-pulse-alert');
+                void lamp.offsetWidth;
+                lamp.classList.add('lamp-pulse-alert');
+                setTimeout(() => lamp.classList.remove('lamp-pulse-alert'), 2800);
+            }
+        }
     }
 
     function rolarParaProximaNotaOculta() {
@@ -2605,6 +2751,10 @@ window.TopicsManager = (function () {
         copiarTextoModoLeitura,
         hexToRgba,
         rolarParaProximaNotaOculta,
+        abrirModalNotasOcultas,
+        fecharModalNotasOcultas,
+        selecionarTopicoNotaOculta,
+        sinalizarNotasOcultasPendentes,
         abrirModoLeituraPilhaProcessual,
         abrirModalPilhaProcessual,
         fecharModalPilhaProcessual,
