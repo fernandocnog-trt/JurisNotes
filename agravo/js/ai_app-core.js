@@ -1605,6 +1605,7 @@ document.addEventListener('keydown', function (e) {
                 if (modal.id === 'outline-view-modal' && window.OutlineViewManager) OutlineViewManager.fechar();
                 if (modal.id === 'minuta-view-modal' && window.MinutaViewManager) MinutaViewManager.fechar();
                 if (modal.id === 'modal-tarefas' && window.TaskManager) TaskManager.fecharModal();
+                if (modal.id === 'modal-notas-ocultas' && window.TopicsManager) TopicsManager.fecharModalNotasOcultas();
                 if (modal.id === 'modal-editar-tese' && typeof fecharModalTese === 'function') fecharModalTese();
             }
         });
@@ -2466,4 +2467,19 @@ window.TaskManager = (function() {
     }
 
     return { abrirModal, fecharModal, adicionarTarefa, toggleConcluido, atualizarBadge, abrirSeletorTemas, getTarefasState, setTarefasState };
+})();
+
+/* =========================================================
+   INTERCEPTOR: GUARDRAIL DE NOTAS OCULTAS NO GERADOR IA (AI)
+   ========================================================= */
+(function() {
+    if (typeof window.abrirModalGeradorContexto === 'function') {
+        const originalAbrirModalGeradorContexto = window.abrirModalGeradorContexto;
+        window.abrirModalGeradorContexto = function() {
+            originalAbrirModalGeradorContexto.apply(this, arguments);
+            if (window.TopicsManager && typeof TopicsManager.sinalizarNotasOcultasPendentes === 'function') {
+                TopicsManager.sinalizarNotasOcultasPendentes();
+            }
+        };
+    }
 })();
