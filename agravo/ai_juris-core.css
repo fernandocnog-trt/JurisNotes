@@ -40,7 +40,7 @@
     --z-classification-popup: 2000;
     --z-audio-player: 2500;
     --z-wizard-backdrop: 2999;
-    --z-toast: 3000;
+    --z-toast: 3000; /* Mantido em 3000 para preservar [data-tooltip]::after */
     --z-wizard-modal: 3000;
     --z-classification-audio: 3001;
     --z-context-menu: 4000;
@@ -49,11 +49,18 @@
     --z-abas-modal: 4005;
     --z-temas-backdrop: 4006;
     --z-temas-modal: 4007;
-    /* NOVAS VARIÁVEIS - OUTLINE */
+    /* Variáveis do Modo de Leitura e Outline */
+    --z-reading-backdrop: 4048;
+    --z-reading-modal: 4049;
     --z-outline-backdrop: 4050;
     --z-outline-modal: 4051;
-    /* NOVO: Hierarquia do JurisPrompt - Acima dos modais de conteúdo */
+    /* Camadas dedicadas para Juris Relatório e Juris Prompts (abaixo do JurisPrompt 5000) */
+    --z-shared-tools-backdrop: 4060;
+    --z-shared-tools-modal: 4061;
+    /* Hierarquia do JurisPrompt - Acima dos modais de conteúdo */
     --z-juris-prompt: 5000;
+    /* NOVO: Camada exclusiva para notificações Toast (acima de qualquer modal/backdrop) */
+    --z-toast-feedback: 9000;
     --z-splash: 9999;
     
     /* Variável da Espinha Dorsal (Vermelho sólido primário) */
@@ -466,7 +473,8 @@ body.theme-anotacoes-jasmine {
     font-weight: 500;
     box-shadow: 0 4px 16px rgba(0,0,0,0.15);
     border: 1px solid #546e7a;
-    z-index: var(--z-toast);
+    /* Usa token exclusivo com !important para nunca ser encoberto por nenhum modal ou backdrop */
+    z-index: var(--z-toast-feedback, 9000) !important;
     opacity: 0;
     transform: translateY(12px);
     transition: opacity 0.25s ease, transform 0.25s ease;
