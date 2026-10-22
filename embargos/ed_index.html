@@ -36,10 +36,10 @@
 </script>
     
     <!-- 1. Estilos Base, Variáveis Globais e Estrutura Principal (Core) -->
-<link rel="stylesheet" href="ed_juris-core.css?v=2.0.0">
+<link rel="stylesheet" href="ed_juris-core.css?v=2.0.2">
 
 <!-- 2. Ferramentas Globais, PDF, Áudio e Modais (Ferramentas de Entrada) -->
-<link rel="stylesheet" href="ed_juris-reader-tools.css?v=3.0.1">
+<link rel="stylesheet" href="ed_juris-reader-tools.css?v=3.0.3">
 
 <!-- 3. Fichário, Timeline, Fases Metodológicas e Acervo (Síntese e Saída) -->
 <link rel="stylesheet" href="ed_juris-timeline-cards.css?v=3.1.1">
@@ -362,7 +362,7 @@
         
                 <!-- Módulo: Time Tracker -->
                 <div id="efficiency-tracker-container" class="tracker-group" style="display: none;">
-                    <div id="hidden-notes-tracker" class="floating-lamp-tracker" role="button" tabindex="0" style="display: none;" onclick="TopicsManager.rolarParaProximaNotaOculta()" title="Você tem notas ocultas neste tópico. Clique para navegar.">
+                    <div id="hidden-notes-tracker" class="floating-lamp-tracker" role="button" tabindex="0" style="display: none;" onclick="TopicsManager.abrirModalNotasOcultas(event)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();TopicsManager.abrirModalNotasOcultas(event);}" title="Notas ocultas pendentes no processo (Clique: Painel Global | Shift+Clique: Próxima nota deste tópico)">
                         <div class="lamp-icon">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"></path><path d="M10 22h4"></path><path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A4.65 4.65 0 0 0 18 8 6 6 0 0 0 6 8c0 1 .23 2.23 1.5 3.5A4.61 4.61 0 0 1 8.91 14"></path></svg>
                         </div>
@@ -481,6 +481,167 @@
                 // PASSO 3: Disparo de Gatilho de Inicialização (Vital para reviver o Menu)
                 window.document.dispatchEvent(new Event('DOMContentLoaded', { bubbles: true, cancelable: true }));
                 window.dispatchEvent(new Event('load', { bubbles: true, cancelable: true }));
+
+                // PASSO 3.1: Controlador de Backdrop Translúcido (Juris Relatório & Juris Prompts)
+                (function initSharedToolsBackdropController() {
+                    'use strict';
+
+                    const TOOL_MODAL_CONFIGS = [
+                        {
+                            id: 'modal-juris-relatorio',
+                            getController: () => window.JurisRelatorioManager
+                        },
+                        {
+                            id: 'modal-juris-prompts',
+                            getController: () => window.PromptUIController
+                        }
+                    ];
+
+                    const backdrop = document.getElementById('shared-tools-backdrop');
+                    if (!backdrop) return;
+
+                    let rafId = null;
+
+                    /**
+                     * Verifica de forma determinística se o modal está aberto,
+                     * sem depender de valores intermediários de opacity em transições.
+                     */
+                    const isModalOpen = (el) => {
+                        if (!el || !el.isConnected || el.hidden) return false;
+                        if (el.getAttribute('aria-hidden') === 'true') return false;
+                        if (el.classList.contains('is-hidden') || el.classList.contains('hidden')) return false;
+
+                        const inlineDisplay = el.style.display;
+                        if (inlineDisplay === 'none') return false;
+
+                        const computed = window.getComputedStyle(el);
+                        return computed.display !== 'none' && computed.visibility !== 'hidden';
+                    };
+
+                    /**
+                     * Garante que a hierarquia de camadas (z-index) prevaleça sobre estilos inline:
+                     * Backdrop (4060) < Painel da Ferramenta (4061) < JurisPrompt (5000) < Toast (9000)
+                     */
+                    const enforceLayerHierarchy = (modalEl) => {
+                        backdrop.style.setProperty('z-index', '4060', 'important');
+
+                        if (modalEl) {
+                            modalEl.style.setProperty('z-index', '4061', 'important');
+                            const innerPopup = modalEl.querySelector('.crop-wizard-popup, .doc-modal, [role="dialog"]');
+                            if (innerPopup) {
+                                innerPopup.style.setProperty('z-index', '4061', 'important');
+                            }
+                        }
+
+                        const toastEl = document.getElementById('toast-feedback');
+                        if (toastEl) {
+                            toastEl.style.setProperty('z-index', '9000', 'important');
+                        }
+                    };
+
+                    /**
+                     * Sincroniza a visibilidade do backdrop agrupando leituras de layout no próximo frame.
+                     */
+                    const syncBackdropState = () => {
+                        if (rafId !== null) cancelAnimationFrame(rafId);
+                        rafId = requestAnimationFrame(() => {
+                            rafId = null;
+                            let hasOpenTool = false;
+
+                            TOOL_MODAL_CONFIGS.forEach(({ id }) => {
+                                const el = document.getElementById(id);
+                                if (isModalOpen(el)) {
+                                    hasOpenTool = true;
+                                    enforceLayerHierarchy(el);
+                                }
+                            });
+
+                            backdrop.style.display = hasOpenTool ? 'block' : 'none';
+                        });
+                    };
+
+                    /**
+                     * Fecha de forma segura um modal ativo delegando ao próprio controller
+                     * ou acionando seu botão interno de fechamento, sem corromper estados internos.
+                     */
+                    const closeToolSafely = ({ id, getController }) => {
+                        const el = document.getElementById(id);
+                        if (!isModalOpen(el)) return false;
+
+                        const ctrl = getController();
+                        if (ctrl) {
+                            const closeMethod = ['fecharModal', 'fechar', 'close', 'hide'].find(
+                                (fn) => typeof ctrl[fn] === 'function'
+                            );
+                            if (closeMethod) {
+                                ctrl[closeMethod]();
+                                syncBackdropState();
+                                return true;
+                            }
+                        }
+
+                        // Fallback seguro: aciona o botão nativo de fechar dentro do próprio modal
+                        const closeBtn = el.querySelector(
+                            '[data-action="close"], [data-action="cancel"], .wizard-header__close-btn, .doc-modal__close-btn, [aria-label="Fechar"], button[onclick*="fechar"]'
+                        );
+                        if (closeBtn && typeof closeBtn.click === 'function') {
+                            closeBtn.click();
+                            syncBackdropState();
+                            return true;
+                        }
+
+                        return false;
+                    };
+
+                    // 1. Observa mutações de estilo/classe apenas nos nós-alvo já injetados
+                    const modalObserver = new MutationObserver(syncBackdropState);
+
+                    const attachObservers = () => {
+                        TOOL_MODAL_CONFIGS.forEach(({ id }) => {
+                            const el = document.getElementById(id);
+                            if (el && !el.dataset.backdropObserved) {
+                                el.dataset.backdropObserved = 'true';
+                                modalObserver.observe(el, {
+                                    attributes: true,
+                                    attributeFilter: ['style', 'class', 'hidden', 'aria-hidden']
+                                });
+                            }
+                        });
+                    };
+
+                    attachObservers();
+
+                    // Caso algum módulo recrie seu nó raiz dentro de #modais-dinamicos-container
+                    const containerDinamico = document.getElementById('modais-dinamicos-container');
+                    if (containerDinamico) {
+                        const containerObserver = new MutationObserver(() => {
+                            attachObservers();
+                            syncBackdropState();
+                        });
+                        containerObserver.observe(containerDinamico, { childList: true });
+                    }
+
+                    // 2. Clique no backdrop fecha apenas o painel que estiver aberto
+                    backdrop.addEventListener('click', () => {
+                        TOOL_MODAL_CONFIGS.forEach(closeToolSafely);
+                    });
+
+                    // 3. Integração com tecla Escape (respeitando se o JurisPrompt 5000 estiver ativo por cima)
+                    document.addEventListener('keydown', (event) => {
+                        if (event.key !== 'Escape') return;
+                        const jurisPromptEl = document.getElementById('juris-prompt-backdrop');
+                        if (jurisPromptEl && jurisPromptEl.classList.contains('is-active')) return;
+
+                        for (const config of TOOL_MODAL_CONFIGS) {
+                            if (closeToolSafely(config)) {
+                                event.stopPropagation();
+                                break;
+                            }
+                        }
+                    });
+
+                    syncBackdropState();
+                })();
 
                 // PASSO 4: Tudo carregado e inicializado. Removemos o Splash Screen.
                 const splash = document.getElementById('juris-splash');

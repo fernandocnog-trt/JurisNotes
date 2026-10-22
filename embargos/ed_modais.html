@@ -72,6 +72,25 @@
     </div>
 </div>
 
+<!-- MODAL NOTAS OCULTAS GLOBAIS -->
+<div id="notas-ocultas-modal-backdrop" class="backdrop-seguro" style="display: none;" onclick="TopicsManager.fecharModalNotasOcultas()"></div>
+<div id="modal-notas-ocultas" class="crop-wizard-popup modal-notas-ocultas-painel fechavel-por-esc" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="notas-ocultas-modal-title">
+    <div class="wizard-header wizard-header--flex" style="color: var(--ed-neon-stroke, #a3008a); border-bottom-color: #fce4ec;">
+        <span class="wizard-header__title" id="notas-ocultas-modal-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 20px; height: 20px;">
+                <path d="M9 18h6"></path><path d="M10 22h4"></path>
+                <path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A4.65 4.65 0 0 0 18 8 6 6 0 0 0 6 8c0 1 .23 2.23 1.5 3.5A4.61 4.61 0 0 1 8.91 14"></path>
+            </svg>
+            Notas Ocultas Pendentes
+        </span>
+        <button type="button" class="wizard-header__close-btn" onclick="TopicsManager.fecharModalNotasOcultas()" aria-label="Fechar">✕</button>
+    </div>
+    <p class="popup-label" style="margin-top: 4px; text-transform: none; font-size: 0.8rem; color: #64748b;">
+        Passe o mouse sobre o círculo colorido para ver o tópico e clique para ir até a nota:
+    </p>
+    <div id="lista-topicos-notas-ocultas" class="hidden-notes-grid" role="list"></div>
+</div>
+
 <!-- MODAL EDITOR DE TEXTO -->
 <div id="text-edit-backdrop" class="modal-backdrop-modern" onclick="fecharModalEdicaoSeguro()"></div>
 <div id="text-edit-modal" class="text-edit-modal" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="edit-modal-title" onkeydown="handleModalEditorKeydown(event)">
@@ -363,7 +382,7 @@
     </div>
 </div>
 
-<div id="pilha-modal-backdrop" style="display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.40); z-index: 4004;" onclick="TopicsManager.fecharModalPilha()"></div>
+<div id="pilha-modal-backdrop" class="backdrop-seguro" style="display: none; z-index: 4004;" onclick="TopicsManager.fecharModalPilha()"></div>
 <div id="modal-editar-pilha" class="crop-wizard-popup" style="display:none; z-index: 4005; max-width: 450px; width: 90%;">
     <div class="wizard-header">📚 Personalizar Grupo de Ideias</div>
     <p class="popup-label">Título do Grupo:</p>
@@ -388,7 +407,7 @@
 </div>
 
 <!-- REORDENAR E TRANSFERIR -->
-<div id="reordenar-modal-backdrop" style="display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.40); z-index: 4004;" onclick="fecharModalReordenar()"></div>
+<div id="reordenar-modal-backdrop" class="backdrop-seguro" style="display: none; z-index: 4004;" onclick="fecharModalReordenar()"></div>
 <div id="modal-reordenar" class="crop-wizard-popup" style="display:none; z-index: 4005;">
     <div class="wizard-header">↕️ Reposicionar Item</div>
     <p class="popup-label">Digite a nova posição que este item deve assumir:</p>
@@ -400,7 +419,7 @@
     </div>
 </div>
 
-<div id="transferir-sub-backdrop" style="display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.40); z-index: 4004;" onclick="fecharModalTransferirSub()"></div>
+<div id="transferir-sub-backdrop" class="backdrop-seguro" style="display: none; z-index: 4004;" onclick="fecharModalTransferirSub()"></div>
 <div id="modal-transferir-sub" class="crop-wizard-popup" style="display:none; z-index: 4005;">
     <div class="wizard-header">🚀 Transferir Nó de Ideia</div>
     <p class="popup-label">Para qual Ideia Principal este nó deve ser enviado?</p>
@@ -433,7 +452,7 @@
 <div id="quick-intent-tooltip" class="quick-tooltip" style="display: none;"></div>
 
 <!-- MODAL SMART SHORTCUTS -->
-<div id="shortcut-modal-backdrop" style="display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.40); z-index: 4004;" onclick="ShortcutManager.fecharModal()"></div>
+<div id="shortcut-modal-backdrop" class="backdrop-seguro" style="display: none; z-index: 4004;" onclick="ShortcutManager.fecharModal()"></div>
 <div id="shortcut-modal" class="crop-wizard-popup" style="display:none; z-index: 4005; width: min(92vw, 420px);">
     <div class="wizard-header" id="shortcut-modal-header">📍 Configurar Atalho</div>
     <p class="popup-label" id="shortcut-modal-title">Página do documento:</p>
@@ -561,7 +580,7 @@
 </div>
 
 <input type="file" id="upload-html-balanca" accept=".html" style="display: none;" onchange="BalancaManager.processarUpload(event)">
-<div id="balanca-modal-backdrop" style="display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.40); z-index: var(--z-wizard-backdrop);" onclick="BalancaManager.fecharPainel()"></div>
+<div id="balanca-modal-backdrop" class="backdrop-seguro" style="display: none; z-index: var(--z-wizard-backdrop);" onclick="BalancaManager.fecharPainel()"></div>
 <div id="balanca-painel" class="crop-wizard-popup" style="display:none; z-index: var(--z-wizard-modal); width: 92vw; height: 88vh; max-width: 1300px; padding: 0; overflow: hidden; flex-direction: column; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);">
     <div class="wizard-header" style="display: flex; justify-content: space-between; align-items: center; padding: 16px 20px; background: white; margin: 0; border-bottom: 2px solid var(--border-color);">
         <span style="font-weight: 700; color: var(--trt-blue);">⚖️ Dossiê Recursal</span>
@@ -575,7 +594,7 @@
 </div>
 
 <!-- TIME TRACKER E GERADOR DE CONTEXTO -->
-<div id="modal-tracker-backdrop" style="display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.25); z-index: 4004;" onclick="TimeTrackerManager.fecharModal()"></div>
+<div id="modal-tracker-backdrop" class="backdrop-seguro" style="display: none; z-index: 4004;" onclick="TimeTrackerManager.fecharModal()"></div>
 <div id="modal-tracker-config" class="crop-wizard-popup" style="display:none; z-index: 4005; min-width: 320px;">
     <div class="wizard-header" id="tracker-modal-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px; height:18px; margin-right:6px; vertical-align:middle;"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>Iniciar Contagem</div>
     <div id="tracker-start-step">
@@ -589,7 +608,7 @@
     </div>
 </div>
 
-<div id="gerador-contexto-backdrop" style="display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.40); z-index: 4004;" onclick="fecharModalGeradorContexto()"></div>
+<div id="gerador-contexto-backdrop" class="backdrop-seguro" style="display: none; z-index: 4004;" onclick="fecharModalGeradorContexto()"></div>
 <div id="modal-gerador-contexto" class="crop-wizard-popup" style="display:none; z-index: 4005;">
     <div class="wizard-header" style="display: flex; justify-content: space-between; align-items: center;">
         <span style="display: flex; align-items: center; gap: 8px; color: var(--text-dark);">🧩 Gerador de Contexto para IA</span>
@@ -660,7 +679,7 @@
     </div>
 </div>
 
-<div id="prompt-notebooklm-backdrop" style="display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.40); z-index: 4008;" onclick="fecharModalPromptNotebookLM()"></div>
+<div id="prompt-notebooklm-backdrop" class="backdrop-seguro" style="display: none; z-index: 4008;" onclick="fecharModalPromptNotebookLM()"></div>
 <div id="modal-prompt-notebooklm" class="crop-wizard-popup" style="display:none; z-index: 4009; max-width: 750px; width: 90vw;">
     <div class="wizard-header" style="display: flex; justify-content: space-between; align-items: center;"><span>🤖 Exportação Concluída! Auditoria no NotebookLM</span><button style="background: none; border: none; font-size: 1.2rem; cursor: pointer; color: #64748b;" onclick="fecharModalPromptNotebookLM()">✕</button></div>
     <p class="popup-label" style="margin-top: 12px;">Seu arquivo de conhecimento foi baixado.</p>
@@ -695,7 +714,7 @@ Crie um sumário hierárquico enxuto com as Grandes Categorias e Subcategorias q
 </div>
 
 <!-- EXTRATOR E EXPORTAÇÃO -->
-<div id="extrator-modal-backdrop" style="display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.40); z-index: 4004;" onclick="cancelarMarcadorExtracao()"></div>
+<div id="extrator-modal-backdrop" class="backdrop-seguro" style="display: none; z-index: 4004;" onclick="cancelarMarcadorExtracao()"></div>
 <div id="extrator-wizard-popup" class="crop-wizard-popup" style="display:none; z-index: 4005;">
     <div class="wizard-header">📍 Definir Limite de Extração</div>
     <p class="popup-label">Vincular a qual Vício Analisado?</p>
@@ -724,7 +743,7 @@ Crie um sumário hierárquico enxuto com as Grandes Categorias e Subcategorias q
     <div class="wizard-actions"><button class="chip-btn chip-cancelar" onclick="cancelarMarcadorExtracao()">✕ Cancelar</button><button class="chip-btn chip-autora" onclick="salvarMarcadorExtracao()">✔ Fixar Alfinete</button></div>
 </div>
 
-<div id="export-avancado-backdrop" style="display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.40); z-index: 4010;" onclick="ExportManager.fecharPainelExportacao()"></div>
+<div id="export-avancado-backdrop" class="backdrop-seguro" style="display: none; z-index: 4010;" onclick="ExportManager.fecharPainelExportacao()"></div>
 <div id="modal-exportacao-avancada" class="crop-wizard-popup" style="display:none; z-index: 4011; max-width: 600px; width: 90vw;">
     <div class="wizard-header" style="display: flex; justify-content: space-between; align-items: center;"><span style="display: flex; align-items: center; gap: 8px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 20px; height: 20px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>Hub de Exportação de Contexto (IA)</span><button style="background: none; border: none; font-size: 1.2rem; cursor: pointer; color: #64748b;" onclick="ExportManager.fecharPainelExportacao()">✕</button></div>
     <p class="popup-label" style="margin-top: 12px;">Selecione os documentos para compor a base de conhecimento:</p>
@@ -733,7 +752,7 @@ Crie um sumário hierárquico enxuto com as Grandes Categorias e Subcategorias q
 </div>
 
 <!-- FILTRO REPETIÇÃO -->
-<div id="filtro-repeticao-backdrop" style="display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.50); z-index: 4020;" onclick="ExportManager.fecharModalFiltro()"></div>
+<div id="filtro-repeticao-backdrop" class="backdrop-seguro" style="display: none; z-index: 4020;" onclick="ExportManager.fecharModalFiltro()"></div>
 <div id="modal-filtro-repeticao" class="crop-wizard-popup" style="display:none; z-index: 4021; max-width: 550px; width: 90vw;">
     <div class="wizard-header" style="display: flex; justify-content: space-between; align-items: center;"><span style="display: flex; align-items: center; gap: 8px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 20px; height: 20px;"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>Borracha Inteligente</span><button style="background: none; border: none; font-size: 1.2rem; cursor: pointer; color: #64748b;" onclick="ExportManager.fecharModalFiltro()">✕</button></div>
     <p class="popup-label" style="margin-top: 12px;">Documento: <span id="label-doc-filtro" style="color: var(--trt-blue); font-weight: bold;"></span></p>
@@ -745,7 +764,7 @@ Crie um sumário hierárquico enxuto com as Grandes Categorias e Subcategorias q
 </div>
 
 <!-- LEITURA, OUTLINE E MINUTA -->
-<div id="reading-mode-backdrop" style="display: none; position: fixed; inset: 0; background: rgba(15, 37, 61, 0.85); backdrop-filter: blur(4px); z-index: var(--z-reading-backdrop);" onclick="TopicsManager.fecharModoLeitura()"></div>
+<div id="reading-mode-backdrop" class="backdrop-seguro" style="display: none; z-index: var(--z-reading-backdrop, 4048);" onclick="TopicsManager.fecharModoLeitura()"></div>
 <div id="reading-mode-modal" class="crop-wizard-popup" style="display:none; z-index: var(--z-reading-modal); max-width: 800px; width: 90vw; max-height: 85vh; flex-direction: column; padding: 0; overflow: hidden; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);">
     <div class="wizard-header" style="display: flex; justify-content: space-between; align-items: center; padding: 16px 24px; background: #fdfdfd; border-bottom: 1px solid var(--border-color);"><span id="reading-mode-title" style="font-weight: 700; color: var(--ed-neon-stroke, #a3008a); font-size: 1.1rem; display: flex; align-items: center; gap: 10px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:20px; height:20px; flex-shrink:0;"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path></svg><span id="reading-mode-title-text">Modo de Leitura</span></span><button style="background: none; border: none; font-size: 1.2rem; cursor: pointer; color: #64748b;" onclick="TopicsManager.fecharModoLeitura()">✕</button></div>
     <div id="reading-mode-content" style="flex: 1; overflow-y: auto; padding: 32px 40px; background: #ffffff; font-size: 1.1rem; line-height: 1.8; color: #2c2c2c;"></div>
@@ -771,7 +790,7 @@ Crie um sumário hierárquico enxuto com as Grandes Categorias e Subcategorias q
 </div>
 
 <!-- NOVOS TÓPICOS E PILHA PROCESSUAL -->
-<div id="novo-topico-backdrop" style="display: none; position: fixed; inset: 0; background: rgba(15, 37, 61, 0.85); backdrop-filter: blur(4px); z-index: 4004;" onclick="fecharModalCriarTopico()"></div>
+<div id="novo-topico-backdrop" class="backdrop-seguro" style="display: none; z-index: 4004;" onclick="fecharModalCriarTopico()"></div>
 <div id="modal-novo-topico" class="crop-wizard-popup" style="display:none; z-index: 4005; width: 90vw; max-width: 850px; background: #f8fafc;">
     <div class="wizard-header" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid var(--border-color); padding-bottom: 12px;"><span style="font-weight: 700; color: var(--trt-blue); display: flex; align-items: center; gap: 8px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 22px; height: 22px;"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>Criar Tópico Recursal (Mérito dos Embargos)</span><button style="background: none; border: none; font-size: 1.2rem; cursor: pointer; color: #64748b;" onclick="fecharModalCriarTopico()">✕</button></div>
     <div style="margin-top: 16px;">
@@ -790,7 +809,7 @@ Crie um sumário hierárquico enxuto com as Grandes Categorias e Subcategorias q
     <div class="wizard-actions" style="margin-top: 24px; padding-top: 16px;"><button class="chip-btn chip-cancelar" onclick="fecharModalCriarTopico()">Cancelar</button><button class="chip-btn chip-autora" style="background: var(--trt-blue); color: white; border: none; padding: 10px 24px; font-weight: 700;" onclick="confirmarCriacaoTopico()">✔ Iniciar Análise</button></div>
 </div>
 
-<div id="pilha-processual-backdrop" style="display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.50); z-index: 4004;" onclick="TopicsManager.fecharModalPilhaProcessual()"></div>
+<div id="pilha-processual-backdrop" class="backdrop-seguro" style="display: none; z-index: 4004;" onclick="TopicsManager.fecharModalPilhaProcessual()"></div>
 <div id="modal-pilha-processual" class="crop-wizard-popup" style="display:none; z-index: 4005; max-width: 500px; width: 90vw;">
     <div class="wizard-header"><span style="display:flex; align-items:center; gap:8px;">🗂️ Criar Pilha de Informação Processual</span><button style="background:none; border:none; cursor:pointer; color:#64748b;" onclick="TopicsManager.fecharModalPilhaProcessual()">✕</button></div>
     <p class="popup-label" style="margin-top: 12px;">Selecione as provas que deseja empilhar:</p>
@@ -811,7 +830,7 @@ Crie um sumário hierárquico enxuto com as Grandes Categorias e Subcategorias q
     </div>
 </div>
 
-<div id="contrato-modal-backdrop" style="display: none; position: fixed; inset: 0; background: rgba(15, 37, 61, 0.85); backdrop-filter: blur(4px); z-index: 4004;" onclick="ContratoManager.fecharModal()"></div>
+<div id="contrato-modal-backdrop" class="backdrop-seguro" style="display: none; z-index: 4004;" onclick="ContratoManager.fecharModal()"></div>
 <div id="modal-contrato-trabalho" class="crop-wizard-popup" style="display:none; z-index: 4005; min-width: 450px; max-width: 90vw;">
     <div class="wizard-header" style="display: flex; justify-content: space-between; align-items: center;"><span style="font-weight: 700; color: var(--trt-blue);">📝 Parâmetros do Contrato</span><button style="background: none; border: none; font-size: 1.2rem; cursor: pointer; color: #64748b;" onclick="ContratoManager.fecharModal()">✕</button></div>
     <div style="padding: 16px 0; display: flex; flex-direction: column; gap: 12px;">
@@ -842,3 +861,6 @@ Crie um sumário hierárquico enxuto com as Grandes Categorias e Subcategorias q
         </div>
     </div>
 </div>
+
+<!-- BACKDROP TRANSLÚCIDO COMPARTILHADO (JURIS RELATÓRIO E JURIS PROMPTS) -->
+<div id="shared-tools-backdrop" class="backdrop-seguro" style="display: none;" aria-hidden="true"></div>
