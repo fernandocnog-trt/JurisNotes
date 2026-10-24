@@ -572,23 +572,45 @@ window.TopicsManager = (function () {
 
             // PRESERVAÇÃO CRÍTICA: Lógica de Comentários e Degravações
             let comentarios = [];
-            if (anotacao.comentario) comentarios.push(`<strong>Contexto:</strong> ${escaparHTML(anotacao.comentario)}`);
+            let blocosLeitura = [];
+            const comentarioTexto = anotacao.comentario || dadosAudio.comentario || '';
+
+            if (comentarioTexto) {
+                comentarios.push(`<div class="audio-comentario-item"><strong>Contexto:</strong> ${escaparHTML(comentarioTexto)}</div>`);
+                blocosLeitura.push(`**Contexto:** ${comentarioTexto}`);
+            }
+
             if (dadosAudio.transcricao) {
-                // A MÁGICA DA QUEBRA DE LINHA ACONTECE NO STYLE ABAIXO (white-space: pre-wrap)
+                const btnCopiar = !anotacao.uuid ? '' : `
+                    <button class="btn-copy-degravacao" title="Copiar Degravação" onclick="window.copiarDegravacao('${anotacao.topicoIdOrigem || activeTabId}', '${anotacao.uuid || ''}')">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px;">
+                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                        </svg>
+                    </button>`;
+
                 comentarios.push(`
-                    <div style="display:flex; align-items:flex-start; gap:4px;">
-                        <div style="flex: 1; white-space: pre-wrap; overflow-wrap: break-word;"><strong>Degravação:</strong> <em>"${escaparHTML(dadosAudio.transcricao)}"</em></div>
-                        <button class="btn-copy-degravacao" title="Copiar Degravação" onclick="window.copiarDegravacao('${anotacao.topicoIdOrigem || activeTabId}', '${anotacao.uuid || ''}')">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px;">
-                                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                            </svg>
-                        </button>
+                    <div class="audio-comentario-item audio-degravacao-row">
+                        <div class="audio-degravacao-text"><strong>Degravação:</strong> <em>"${escaparHTML(dadosAudio.transcricao)}"</em></div>
+                        ${btnCopiar}
                     </div>
                 `);
+                const rotuloTempo = `${safeFormatTime(inicioNum)} a ${safeFormatTime(fimNum)}`;
+                blocosLeitura.push(`**Degravação (${rotuloTempo}):**\n"${dadosAudio.transcricao}"`);
             }
             
             if (comentarios.length > 0) {
-                htmlComentario = `<div class="card-comentario" style="display:flex; flex-direction:column; gap:6px;">${comentarios.join('<br>')}</div>`;
+                const rawTextAudio = escaparHTML(blocosLeitura.join('\n\n'));
+                const rawTitleAudio = escaparHTML(`Oitiva: ${nomePapel}`);
+                htmlComentario = `
+                    <div class="card-comentario juris-scroll-fade">
+                        <div class="juris-scroll-fade-body" 
+                             data-raw-text="${rawTextAudio}" 
+                             data-raw-title="${rawTitleAudio}" 
+                             ondblclick="TopicsManager.abrirModoLeitura(this)"
+                             title="Duplo clique para abrir em Modo Leitura">
+                            ${comentarios.join('')}
+                        </div>
+                    </div>`;
             }
         } catch (e) {
             htmlConteudo = `<p class="card-texto" style="color:#c62828;">[Erro: metadados do áudio corrompidos]</p>`;
@@ -794,9 +816,28 @@ window.TopicsManager = (function () {
             
             const btnEditar = (tipoDoItem === 'texto' || tipoDoItem === 'audio') ? `<button title="Editar" onclick="_menuAnotacaoCtx={topicoId:'${activeTabId}', index:${index}${ctxCidx}}; ${acaoEditar}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg></button>` : '';
             
-            // NOVO: Renderiza botão apenas se for tipo texto. Variáveis tratadas para não quebrar o DOM.
-            const btnLeitura = tipoDoItem === 'texto' ? `
-                <button title="Modo Leitura" onclick="TopicsManager.abrirModoLeitura(this)" data-raw-text="${escaparHTML(itemReal.conteudo)}" data-raw-title="${escaparHTML(itemReal.documento || itemReal.polo || 'Anotação')}">
+            let rawText = '';
+            let rawTitle = '';
+            let habilitaModoLeitura = false;
+
+            if (tipoDoItem === 'texto') {
+                rawText = escaparHTML(itemReal.conteudo || '');
+                rawTitle = escaparHTML(itemReal.documento || itemReal.polo || (isCorrelacionado ? 'Agrupamento' : 'Anotação'));
+                habilitaModoLeitura = true;
+            } else if (tipoDoItem === 'audio') {
+                const dadosAudio = _obterDadosAudioSeguros(itemReal);
+                if (dadosAudio && !dadosAudio.isCorrompido && (dadosAudio.transcricao || dadosAudio.comentario)) {
+                    const partes = [];
+                    if (dadosAudio.comentario) partes.push(`**Contexto:** ${dadosAudio.comentario}`);
+                    if (dadosAudio.transcricao) partes.push(`**Degravação (${dadosAudio.rotuloTempo}):**\n"${dadosAudio.transcricao}"`);
+                    rawText = escaparHTML(partes.join('\n\n'));
+                    rawTitle = escaparHTML(`Oitiva: ${dadosAudio.orador}`);
+                    habilitaModoLeitura = true;
+                }
+            }
+
+            const btnLeitura = habilitaModoLeitura ? `
+                <button class="btn-read-mode-trigger card-action-read" title="Modo Leitura" onclick="TopicsManager.abrirModoLeitura(this)" data-raw-text="${rawText}" data-raw-title="${rawTitle}">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path></svg>
                 </button>` : '';
 
@@ -1189,23 +1230,37 @@ window.TopicsManager = (function () {
      */
     function aplicarTruncamentoDinamicoSeguro() {
         requestAnimationFrame(() => {
-            const textNodes = Array.from(document.querySelectorAll('.sub-text-content, .card-texto'));
-            const measurements = textNodes.map(node => ({
-                el: node,
-                btn: node.parentElement.querySelector('.btn-expand-text'),
-                isOverflowing: node.scrollHeight > node.clientHeight
-            }));
+            const textNodes = Array.from(document.querySelectorAll('.sub-text-content, .card-texto, .juris-scroll-fade-body'));
+            const measurements = textNodes.map(node => {
+                const isScrollFadeBody = node.classList.contains('juris-scroll-fade-body');
+                return {
+                    el: node,
+                    isScrollFadeBody,
+                    truncateTarget: isScrollFadeBody ? node.parentElement : node,
+                    parentCard: node.closest('.annotation-card, .sub-annotation-card'),
+                    btn: node.parentElement ? node.parentElement.querySelector('.btn-expand-text') : null,
+                    isOverflowing: (node.scrollHeight - node.clientHeight) > 2,
+                    noFim: isScrollFadeBody ? Math.ceil(node.scrollTop + node.clientHeight) >= node.scrollHeight - 4 : false
+                };
+            });
 
             requestAnimationFrame(() => {
                 measurements.forEach(m => {
                     if (m.isOverflowing) {
-                        // Exibe o botão e aplica a classe do fade-out
                         if (m.btn) m.btn.style.display = 'inline-flex';
-                        m.el.classList.add('is-truncated');
+                        if (m.truncateTarget) {
+                            m.truncateTarget.classList.add('is-truncated');
+                            if (m.isScrollFadeBody) {
+                                m.truncateTarget.classList.toggle('is-scrolled-end', m.noFim);
+                            }
+                        }
+                        if (m.parentCard) m.parentCard.classList.add('has-truncated-text');
                     } else {
-                        // Garante a limpeza do estado caso a tela seja redimensionada
                         if (m.btn) m.btn.style.display = 'none';
-                        m.el.classList.remove('is-truncated');
+                        if (m.truncateTarget) {
+                            m.truncateTarget.classList.remove('is-truncated', 'is-scrolled-end');
+                        }
+                        if (m.parentCard) m.parentCard.classList.remove('has-truncated-text');
                     }
                 });
             });
@@ -1643,7 +1698,7 @@ window.TopicsManager = (function () {
         }
             
         requestAnimationFrame(() => {
-            document.querySelectorAll('.sub-text-content, .card-texto').forEach(el => {
+            document.querySelectorAll('.sub-text-content, .card-texto, .juris-scroll-fade-body').forEach(el => {
                 if (typeof resizeObserver !== 'undefined') resizeObserver.observe(el);
             });
             const historyContainer = document.getElementById('history-container');
@@ -2182,6 +2237,17 @@ window.TopicsManager = (function () {
         }, { passive: false });
     }
 
+    document.addEventListener('scroll', (e) => {
+        const target = e.target;
+        if (target && target.classList && target.classList.contains('juris-scroll-fade-body')) {
+            const wrapper = target.parentElement;
+            if (wrapper && wrapper.classList.contains('is-truncated')) {
+                const chegouAoFim = Math.ceil(target.scrollTop + target.clientHeight) >= target.scrollHeight - 4;
+                wrapper.classList.toggle('is-scrolled-end', chegouAoFim);
+            }
+        }
+    }, { capture: true, passive: true });
+
     function abrirModoLeituraPilha(topicoId, grupoId, numeroRomano) {
         const topico = topicos.find(t => t.id === topicoId);
         if (!topico) return;
@@ -2690,6 +2756,7 @@ window.TopicsManager = (function () {
             return {
                 isCorrompido: false,
                 transcricao: dados.transcricao || '',
+                comentario: alvo.comentario || dados.comentario || '',
                 orador: dados.role || dados.oradorStr || 'Orador',
                 rotuloTempo: (dados.inicio !== undefined && dados.fim !== undefined) 
                     ? `${formatter(dados.inicio)} a ${formatter(dados.fim)}` 
