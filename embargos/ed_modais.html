@@ -847,8 +847,43 @@ Crie um sumário hierárquico enxuto com as Grandes Categorias e Subcategorias q
 <!-- SAFETY CHECKPOINT (TESOURA ED) -->
 <div id="safecut-backdrop" class="safe-cut-backdrop" onclick="TopicsManager.fecharModalPreDivisao()"></div>
 <div id="modal-predivisao" class="safe-cut-modal fechavel-por-esc" role="alertdialog" aria-modal="true" aria-labelledby="safecut-title" aria-describedby="safecut-desc safecut-warning">
-    <div class="wizard-header safe-cut-header"><svg class="safecut-icon" aria-hidden="true"><use href="#icon-scissors"></use></svg><span id="safecut-title">Antes de dividir o tópico</span></div>
-    <p id="safecut-desc" class="safe-cut-body-text">Organizar ideias é o primeiro passo para fazer justiça. Ao dividir este tópico, <strong>um novo volume será criado</strong> para manter a Inteligência Artificial focada e o seu mapa mental estruturado e leve.</p>
+    <div class="wizard-header safe-cut-header">
+        <svg class="safecut-icon" aria-hidden="true"><use href="#icon-scissors"></use></svg>
+        <span id="safecut-title">Dividir Tópico e Organizar Volumes</span>
+    </div>
+    <p id="safecut-desc" class="safe-cut-body-text">
+        Ao dividir este tópico, <strong>um novo volume será criado</strong> para manter a Inteligência Artificial focada e o seu mapa mental estruturado e leve.
+    </p>
+
+    <!-- ETAPA INTERMEDIÁRIA: SELEÇÃO E CORTE EM LOTE DE GRUPOS DE IDEIAS -->
+    <div id="safecut-transfer-section" class="safe-cut-transfer-section">
+        <div class="safe-cut-transfer-header">
+            <span class="safe-cut-transfer-label">📦 Mover Grupos de Ideias para o novo volume?</span>
+            <div class="safe-cut-transfer-quick-actions">
+                <button type="button" class="btn-safecut-link" data-safecut-action="select-all" title="Selecionar todos os grupos">Marcar todos</button>
+                <span aria-hidden="true" style="color:#cbd5e1;">|</span>
+                <button type="button" class="btn-safecut-link" data-safecut-action="clear-all" title="Desmarcar todos os grupos">Limpar</button>
+                <span aria-hidden="true" style="color:#cbd5e1;">|</span>
+                <button type="button" id="btn-safecut-expand-list" class="btn-safecut-expand" data-safecut-action="toggle-expand" aria-pressed="false" title="Aumentar ou restaurar a área de visualização das ideias">
+                    ⤢ Expandir
+                </button>
+            </div>
+        </div>
+        <p class="safe-cut-transfer-hint">
+            Marque os grupos desejados ou clique em <strong>"⤵ Daqui até o fim"</strong> para fatiar o tópico a partir de uma ideia:
+        </p>
+
+        <!-- Lista redimensionável verticalmente com o mouse -->
+        <div id="safecut-ideas-list" class="safe-cut-ideas-list" role="group" aria-label="Grupos de ideias disponíveis para transferência"></div>
+
+        <div class="safe-cut-transfer-footer">
+            <span class="safe-cut-resize-tip" title="Arraste o canto inferior direito da lista acima para ajustar a altura">↕ Arraste o canto inferior direito da lista para ajustar a altura</span>
+            <div id="safecut-transfer-summary" class="safe-cut-transfer-summary" aria-live="polite">
+                Nenhum grupo selecionado (o novo volume iniciará vazio).
+            </div>
+        </div>
+    </div>
+
     <div id="safecut-warning" class="safe-cut-warning-box">
         <p class="warning-title"><svg class="safecut-icon-small" aria-hidden="true"><use href="#icon-info-circle"></use></svg>Rede de Segurança</p>
         <p class="warning-text">O arquivo <code>_PRE_CORTE.json</code> salvará o estado exato de agora. Recomendamos baixar este backup para que você possa restaurar o trabalho a qualquer momento, caso mude de ideia.</p>
@@ -857,7 +892,7 @@ Crie um sumário hierárquico enxuto com as Grandes Categorias e Subcategorias q
         <button type="button" class="chip-btn chip-cancelar" onclick="TopicsManager.fecharModalPreDivisao()">Cancelar</button>
         <div class="safe-cut-btn-group">
             <button type="button" class="chip-btn btn-safe-backup" onclick="TopicsManager.baixarBackupPreCorte()" title="Gera um arquivo de segurança" autofocus><svg class="safecut-icon" aria-hidden="true"><use href="#icon-download"></use></svg>Baixar Cópia de Segurança</button>
-            <button type="button" id="btn-executar-tesoura" class="chip-btn chip-re btn-confirmar-corte-guiado" onclick="TopicsManager.executarDivisaoTopico()"><svg class="safecut-icon" aria-hidden="true"><use href="#icon-scissors"></use></svg>Dividir em Volumes</button>
+            <button type="button" id="btn-executar-tesoura" class="chip-btn chip-re btn-confirmar-corte-guiado" onclick="TopicsManager.executarDivisaoTopico()"><svg class="safecut-icon" aria-hidden="true"><use href="#icon-scissors"></use></svg><span id="btn-executar-tesoura-label">Dividir em Volumes</span></button>
         </div>
     </div>
 </div>

@@ -1782,6 +1782,292 @@ body.fab-layout-vertical .scroll-fab-container {
 }
 
 /* ================================================
+   SELETOR DE GRUPOS DE IDEIAS (MODAL TESOURA - ED) — REFINAMENTO ELÁSTICO
+   ================================================ */
+.safe-cut-modal {
+    width: min(680px, 94vw);
+    max-width: 680px;
+    max-height: 92vh;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto; /* Permite rolar o modal caso o usuário arraste e aumente bastante a lista */
+    overscroll-behavior: contain;
+}
+
+/* Quando o modo "Expandir" rápido é ativado, oculta provisoriamente os avisos secundários para dar foco total à lista */
+.safe-cut-modal.is-list-expanded .safe-cut-body-text,
+.safe-cut-modal.is-list-expanded .safe-cut-warning-box,
+.safe-cut-modal.is-list-expanded .safe-cut-transfer-hint {
+    display: none;
+}
+
+.safe-cut-transfer-section {
+    margin: 0 20px;
+    padding: 12px 14px;
+    background: #f8fafc;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.safe-cut-modal.is-list-expanded .safe-cut-transfer-section {
+    margin-top: 12px;
+    margin-bottom: 12px;
+}
+
+.safe-cut-transfer-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.safe-cut-transfer-label {
+    font-size: 0.85rem;
+    font-weight: 800;
+    color: var(--trt-blue);
+}
+
+.safe-cut-transfer-quick-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.btn-safecut-link {
+    background: none;
+    border: none;
+    color: var(--trt-blue-mid);
+    font-size: 0.75rem;
+    font-weight: 700;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 4px;
+    transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.btn-safecut-link:hover {
+    background: rgba(26, 58, 92, 0.08);
+    text-decoration: underline;
+}
+
+.btn-safecut-expand {
+    background: #e2e8f0;
+    border: 1px solid #cbd5e1;
+    color: var(--trt-blue);
+    font-size: 0.73rem;
+    font-weight: 800;
+    padding: 2px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.btn-safecut-expand:hover {
+    background: #cbd5e1;
+}
+
+.btn-safecut-expand[aria-pressed="true"] {
+    background: var(--trt-blue);
+    color: #ffffff;
+    border-color: var(--trt-blue);
+}
+
+.safe-cut-transfer-hint {
+    font-size: 0.75rem;
+    color: #64748b;
+    line-height: 1.4;
+    margin: 0;
+}
+
+/* LISTA REDIMENSIONÁVEL COM O MOUSE (RESIZE: VERTICAL) */
+.safe-cut-ideas-list {
+    height: 230px;          /* Altura inicial confortável (~3 a 4 ideias visíveis de imediato) */
+    min-height: 110px;      /* Limite mínimo ao encolher com o mouse */
+    max-height: 68vh;       /* Limite máximo ao esticar com o mouse */
+    resize: vertical;       /* Habilita a alça nativa de arrastar na vertical */
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 6px;
+    background: #f1f5f9;
+    border: 1px inset #cbd5e1;
+    border-radius: 6px;
+    scrollbar-width: thin;
+    scrollbar-color: #94a3b8 transparent;
+}
+
+/* Quando o botão "Expandir" é clicado, amplia automaticamente a caixa */
+.safe-cut-modal.is-list-expanded .safe-cut-ideas-list {
+    height: 54vh;
+}
+
+.safe-cut-ideas-list::-webkit-scrollbar { width: 6px; }
+.safe-cut-ideas-list::-webkit-scrollbar-track { background: transparent; }
+.safe-cut-ideas-list::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 4px; }
+
+.safe-cut-idea-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 8px 10px;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
+    user-select: none;
+}
+
+.safe-cut-idea-item:hover {
+    border-color: var(--trt-blue-mid);
+    background: #fdfdfd;
+}
+
+.safe-cut-idea-item:has(.safecut-idea-checkbox:checked) {
+    background: #fff8e1;
+    border-color: #fbc02d;
+    box-shadow: 0 2px 4px rgba(251, 192, 45, 0.14);
+}
+
+.safecut-idea-checkbox {
+    margin-top: 4px;
+    width: 16px;
+    height: 16px;
+    accent-color: var(--safecut-accent-dark);
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.safe-cut-idea-badge {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    font-size: 0.74rem;
+    font-weight: 800;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    margin-top: 1px;
+    border: 1px solid rgba(0, 0, 0, 0.12);
+}
+
+.safe-cut-idea-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.safe-cut-idea-title-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.safe-cut-idea-title-left {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    min-width: 0;
+}
+
+.safe-cut-idea-doc {
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--text-dark);
+}
+
+.safe-cut-idea-meta {
+    font-size: 0.72rem;
+    color: #64748b;
+    font-weight: 600;
+}
+
+.safe-cut-idea-tese {
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: #6a1b9a;
+    background: #f3e5f5;
+    border: 1px solid #e1bee7;
+    padding: 1px 7px;
+    border-radius: 10px;
+}
+
+.btn-safecut-from-here {
+    background: #f1f5f9;
+    border: 1px solid #cbd5e1;
+    color: #334155;
+    font-size: 0.68rem;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 12px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.btn-safecut-from-here:hover,
+.btn-safecut-from-here:focus-visible {
+    background: var(--safecut-accent-dark);
+    color: #ffffff;
+    border-color: var(--safecut-accent-dark);
+    outline: none;
+}
+
+.safe-cut-idea-preview {
+    font-size: 0.75rem;
+    color: #475569;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-style: italic;
+}
+
+.safe-cut-transfer-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding-top: 4px;
+    border-top: 1px dashed #e2e8f0;
+}
+
+.safe-cut-resize-tip {
+    font-size: 0.7rem;
+    color: #64748b;
+    font-style: italic;
+    user-select: none;
+}
+
+.safe-cut-transfer-summary {
+    font-size: 0.76rem;
+    font-weight: 700;
+    color: var(--safecut-accent-dark);
+    text-align: right;
+    margin-left: auto;
+}
+
+/* CORREÇÃO DOS BOTÕES DO RODAPÉ: Impede que ocupem 100% da largura empilhados */
+.safe-cut-actions .chip-btn {
+    width: auto;
+    padding: 8px 16px;
+    flex-shrink: 0;
+}
+
+/* ================================================
    OCULTADOR RÁPIDO + RADAR DE SUGESTÕES (LGPD - GERADOR IA)
    ================================================ */
 .quick-redact-panel {
