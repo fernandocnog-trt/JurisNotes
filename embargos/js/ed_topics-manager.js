@@ -2571,7 +2571,7 @@ window.TopicsManager = (function () {
     }
 
     // ==========================================
-    // INÍCIO: LÓGICA DA TESOURA E CHECKPOINT (ED)
+    // INÍCIO: LÓGICA DA TESOURA E CHECKPOINT (ED - COM TRANSFERÊNCIA SELETIVA E EXPANSÃO)
     // ==========================================
     
     const toRoman = (num) => {
@@ -2582,9 +2582,12 @@ window.TopicsManager = (function () {
     };
 
     let _debounceContagemItens = null;
+    let _ultimoIndiceClicadoCorte = null;
+
     function atualizarAlertaCapacidadeTopico(topico) {
         clearTimeout(_debounceContagemItens);
         _debounceContagemItens = setTimeout(() => {
+            if (!topico || !topico.anotacoes) return;
             let total = topico.anotacoes.length;
             topico.anotacoes.forEach(an => {
                 total += (an.subAnotacoes ? an.subAnotacoes.length : 0);
@@ -2645,21 +2648,238 @@ window.TopicsManager = (function () {
         botoes.forEach(b => b.addEventListener('click', onClick));
     }
 
+    /**
+     * Extrai um resumo estruturado do Grupo de Ideia (Mestre + Correlacionados + Sub-nós)
+     * para exibição clara no checklist do modal da Tesoura.
+     */
+    function _obterResumoGrupoIdeia(anotacao) {
+        const doc = anotacao.documento || anotacao.polo || 'Elemento Probatório';
+        const folha = anotacao.pagina ? `fl. ${anotacao.pagina}` : '';
+        const qtdCorrelacionados = anotacao.itensCorrelacionados ? anotacao.itensCorrelacionados.length : 0;
+        let qtdNos = anotacao.subAnotacoes ? anotacao.subAnotacoes.length : 0;
+
+        if (anotacao.itensCorrelacionados) {
+            anotacao.itensCorrelacionados.forEach(ic => {
+                qtdNos += (ic.subAnotacoes ? ic.subAnotacoes.length : 0);
+            });
+        }
+
+        let previewTexto = '';
+        if (anotacao.tipo === 'texto') {
+            previewTexto = anotacao.conteudo || '';
+        } else if (anotacao.tipo === 'imagem') {
+            previewTexto = `[Imagem] ${anotacao.comentario || ''}`;
+        } else if (anotacao.tipo === 'audio') {
+            const dadosAudio = _obterDadosAudioSeguros(anotacao);
+            previewTexto = dadosAudio && !dadosAudio.isCorrompido
+                ? `[Áudio: ${dadosAudio.orador}] ${dadosAudio.transcricao || dadosAudio.comentario || ''}`
+                : '[Trecho de Áudio]';
+        }
+
+        const partesExtras = [];
+        if (qtdCorrelacionados > 0) partesExtras.push(`+${qtdCorrelacionados} agrupada(s)`);
+        if (qtdNos > 0) partesExtras.push(`${qtdNos} nó(s)`);
+
+        return {
+            doc,
+            folha,
+            tese: anotacao.tese ? anotacao.tese.trim() : '',
+            detalhesAgrupamento: partesExtras.join(' • '),
+            preview: previewTexto.replace(/\s+/g, ' ').trim().substring(0, 110)
+        };
+    }
+
+    function _atualizarResumoSelecaoCorte() {
+        const checkboxes = document.querySelectorAll('#safecut-ideas-list .safecut-idea-checkbox');
+        const total = checkboxes.length;
+        let selecionados = 0;
+        checkboxes.forEach(chk => { if (chk.checked) selecionados++; });
+
+        const summaryEl = document.getElementById('safecut-transfer-summary');
+        const btnLabelEl = document.getElementById('btn-executar-tesoura-label');
+
+        if (summaryEl) {
+            if (total === 0) {
+                summaryEl.textContent = 'Nenhum grupo disponível para transferência.';
+            } else if (selecionados === 0) {
+                summaryEl.textContent = 'Nenhum grupo selecionado (o novo volume iniciará vazio).';
+            } else {
+                summaryEl.textContent = `${selecionados} de ${total} grupo(s) selecionado(s) para mover ao novo volume.`;
+            }
+        }
+
+        if (btnLabelEl) {
+            btnLabelEl.textContent = selecionados === 0
+                ? 'Dividir em Volumes'
+                : `Mover (${selecionados}) e Dividir`;
+        }
+    }
+
+    /**
+     * Alterna o modo expandido da lista de ideias dentro do modal da Tesoura.
+     */
+    function _alternarExpansaoListaCorte(forcarEstado) {
+        const modal = document.getElementById('modal-predivisao');
+        const btnExpand = document.getElementById('btn-safecut-expand-list');
+        const listEl = document.getElementById('safecut-ideas-list');
+        if (!modal || !btnExpand) return;
+
+        const novoEstado = typeof forcarEstado === 'boolean'
+            ? forcarEstado
+            : !modal.classList.contains('is-list-expanded');
+
+        modal.classList.toggle('is-list-expanded', novoEstado);
+        btnExpand.setAttribute('aria-pressed', novoEstado ? 'true' : 'false');
+        btnExpand.textContent = novoEstado ? '⤡ Restaurar tamanho' : '⤢ Expandir';
+
+        // Limpa altura inline deixada pelo resize manual do mouse para que a classe CSS assuma
+        if (listEl) listEl.style.height = '';
+    }
+
+    /**
+     * Inicializa de forma idempotente a delegação de eventos do modal de pré-divisão.
+     * Elimina a necessidade de onclick/onchange inline nos itens gerados dinamicamente.
+     */
+    function _inicializarEventosModalCorte() {
+        const modal = document.getElementById('modal-predivisao');
+        if (!modal || modal.dataset.safecutBound === 'true') return;
+
+        modal.addEventListener('click', (event) => {
+            // 0. Botão "⤢ Expandir / ⤡ Restaurar tamanho"
+            const btnExpand = event.target.closest('[data-safecut-action="toggle-expand"]');
+            if (btnExpand) {
+                event.preventDefault();
+                _alternarExpansaoListaCorte();
+                return;
+            }
+
+            // 1. Botão "⤵ Daqui até o fim" em um item específico
+            const btnFromHere = event.target.closest('[data-safecut-action="from-here"]');
+            if (btnFromHere) {
+                event.preventDefault();
+                event.stopPropagation();
+                const startOrder = parseInt(btnFromHere.dataset.orderIndex, 10);
+                if (!isNaN(startOrder)) {
+                    const allCheckboxes = Array.from(modal.querySelectorAll('.safecut-idea-checkbox'));
+                    allCheckboxes.forEach((chk, idx) => {
+                        chk.checked = (idx >= startOrder);
+                    });
+                    _ultimoIndiceClicadoCorte = startOrder;
+                    _atualizarResumoSelecaoCorte();
+                }
+                return;
+            }
+
+            // 2. Botões de cabeçalho: "Marcar todos" / "Limpar"
+            const btnBulk = event.target.closest('[data-safecut-action="select-all"], [data-safecut-action="clear-all"]');
+            if (btnBulk) {
+                event.preventDefault();
+                const marcar = btnBulk.dataset.safecutAction === 'select-all';
+                modal.querySelectorAll('.safecut-idea-checkbox').forEach(chk => {
+                    chk.checked = marcar;
+                });
+                _ultimoIndiceClicadoCorte = null;
+                _atualizarResumoSelecaoCorte();
+                return;
+            }
+
+            // 3. Suporte a Shift + Clique diretamente no checkbox para seleção de intervalo
+            const chkTarget = event.target.closest('.safecut-idea-checkbox');
+            if (chkTarget) {
+                const currentOrder = parseInt(chkTarget.dataset.orderIndex, 10);
+                if (event.shiftKey && _ultimoIndiceClicadoCorte !== null && !isNaN(currentOrder)) {
+                    const allCheckboxes = Array.from(modal.querySelectorAll('.safecut-idea-checkbox'));
+                    const min = Math.min(_ultimoIndiceClicadoCorte, currentOrder);
+                    const max = Math.max(_ultimoIndiceClicadoCorte, currentOrder);
+                    const targetState = chkTarget.checked;
+                    for (let i = min; i <= max; i++) {
+                        if (allCheckboxes[i]) allCheckboxes[i].checked = targetState;
+                    }
+                }
+                _ultimoIndiceClicadoCorte = currentOrder;
+                _atualizarResumoSelecaoCorte();
+            }
+        });
+
+        modal.addEventListener('change', (event) => {
+            if (event.target.classList.contains('safecut-idea-checkbox')) {
+                _atualizarResumoSelecaoCorte();
+            }
+        });
+
+        modal.dataset.safecutBound = 'true';
+    }
+
     function acionarDivisaoTopico() {
         if (!activeTabId) {
-            if(window.exibirToast) window.exibirToast('Nenhum tópico selecionado.', 'aviso');
+            if (window.exibirToast) window.exibirToast('Nenhum tópico selecionado.', 'aviso');
             return;
         }
 
-        // UX: Trava o scroll do fundo para evitar layout thrashing e bugs no mobile
+        const topicoAtual = topicos.find(t => t.id === activeTabId);
+        if (!topicoAtual) return;
+
+        // Guardrail de Integridade: Impede dividir novamente um volume que já foi encerrado
+        const jaPossuiSaida = (topicoAtual.anotacoes || []).some(a => a && a.tipo === 'checkpoint_saida');
+        if (jaPossuiSaida) {
+            if (window.exibirToast) {
+                window.exibirToast('Este volume já foi dividido anteriormente. Acesse o último volume criado para continuar ou realizar nova divisão.', 'aviso');
+            }
+            return;
+        }
+
+        _inicializarEventosModalCorte();
+        _ultimoIndiceClicadoCorte = null;
+
+        const listContainer = document.getElementById('safecut-ideas-list');
+        if (listContainer) {
+            const anotacoes = topicoAtual.anotacoes || [];
+            const mapaVisuais = _mapNumerosVisuais(anotacoes);
+            const corTopico = topicoAtual.cor || '#1a3a5c';
+            const corTexto = obterCorContraste(corTopico);
+            const htmlBuffer = [];
+            let orderIndex = 0;
+
+            anotacoes.forEach((an, idx) => {
+                if (_ehCheckpoint(an)) return;
+                const numVisual = mapaVisuais.get(idx);
+                const info = _obterResumoGrupoIdeia(an);
+                const currentOrder = orderIndex++;
+
+                htmlBuffer.push(`
+                <label class="safe-cut-idea-item">
+                    <input type="checkbox" class="safecut-idea-checkbox" value="${idx}" data-order-index="${currentOrder}">
+                    <span class="safe-cut-idea-badge" style="background-color: ${corTopico}; color: ${corTexto};">${numVisual}</span>
+                    <div class="safe-cut-idea-info">
+                        <div class="safe-cut-idea-title-row">
+                            <div class="safe-cut-idea-title-left">
+                                <span class="safe-cut-idea-doc">Ideia ${numVisual} — ${escaparHTML(info.doc)}</span>
+                                ${info.folha ? `<span class="safe-cut-idea-meta">(${escaparHTML(info.folha)})</span>` : ''}
+                                ${info.detalhesAgrupamento ? `<span class="safe-cut-idea-meta">• ${escaparHTML(info.detalhesAgrupamento)}</span>` : ''}
+                                ${info.tese ? `<span class="safe-cut-idea-tese">⚖️ ${escaparHTML(info.tese)}</span>` : ''}
+                            </div>
+                            <button type="button" class="btn-safecut-from-here" data-safecut-action="from-here" data-order-index="${currentOrder}" title="Marcar da Ideia ${numVisual} até o final">
+                                ⤵ Daqui até o fim
+                            </button>
+                        </div>
+                        ${info.preview ? `<div class="safe-cut-idea-preview">"${escaparHTML(info.preview)}"</div>` : ''}
+                    </div>
+                </label>`);
+            });
+
+            listContainer.innerHTML = htmlBuffer.length > 0
+                ? htmlBuffer.join('')
+                : '<p style="font-size:0.8rem; color:#64748b; text-align:center; padding:12px;">Este tópico ainda não possui grupos de ideias para transferir.</p>';
+            listContainer.scrollTop = 0;
+        }
+
+        _atualizarResumoSelecaoCorte();
+
         if (window.RenderCycle) RenderCycle.bloquearScrollBody(true);
 
         const backdrop = document.getElementById('safecut-backdrop');
-        
-        // Ativa via CSS Classes para aproveitar as animações de opacidade/transform
         if (backdrop) backdrop.classList.add('is-active');
         
-        // Garante que o botão de corte nasça com a atenção desativada (aguardando o backup)
         const btnCortar = document.getElementById('btn-executar-tesoura');
         if (btnCortar) btnCortar.classList.remove('ready-to-cut');
     }
@@ -2667,27 +2887,20 @@ window.TopicsManager = (function () {
     function fecharModalPreDivisao() {
         const backdrop = document.getElementById('safecut-backdrop');
         if (backdrop) backdrop.classList.remove('is-active');
-        
-        // Libera o scroll
+        _alternarExpansaoListaCorte(false);
+        _ultimoIndiceClicadoCorte = null;
         if (window.RenderCycle) RenderCycle.bloquearScrollBody(false);
     }
 
-    // Função ponte para assincronismo e feedback visual de UX
     async function baixarBackupPreCorte() {
         try {
-            // Dispara o motor global pedindo a injeção do sufixo especial
             await acionarCriacaoBackup('_PRE_CORTE');
-            
-            // Sucesso: Informa o usuário e anima o botão de corte para guiar o fluxo
             if (typeof exibirToast === 'function') {
                 exibirToast('Fotografia de segurança pré-corte salva com sucesso!', 'sucesso');
             }
-            
             const btnCortar = document.getElementById('btn-executar-tesoura');
             if (btnCortar) btnCortar.classList.add('ready-to-cut');
-            
         } catch (err) {
-            // Falha silenciosa (o usuário já viu o toast de cancelamento do app-core)
             console.log("[Tesoura ED] Backup de segurança cancelado pelo usuário.");
         }
     }
@@ -2696,6 +2909,53 @@ window.TopicsManager = (function () {
         console.log("[Tesoura ED] Processando divisão de volume...");
         const topicoAtual = topicos.find(t => t.id === activeTabId);
         if (!topicoAtual) return;
+
+        // 1. Coleta os índices originais marcados para transferência
+        const indicesSelecionados = new Set(
+            Array.from(document.querySelectorAll('#safecut-ideas-list .safecut-idea-checkbox:checked'))
+                .map(chk => parseInt(chk.value, 10))
+                .filter(n => !isNaN(n))
+        );
+
+        const anotacoesRestantes = [];
+        const anotacoesTransferidas = [];
+
+        (topicoAtual.anotacoes || []).forEach((an, idx) => {
+            if (!_ehCheckpoint(an) && indicesSelecionados.has(idx)) {
+                anotacoesTransferidas.push(an);
+            } else {
+                anotacoesRestantes.push(an);
+            }
+        });
+
+        // Desvincula os grupos transferidos do Volume atual
+        topicoAtual.anotacoes = anotacoesRestantes;
+
+        // 2. Herança e Particionamento seguro de Diretrizes (compatível com diretrizesPorVicio do ED e diretrizesPorTese)
+        const diretrizesPorVicioNovo = topicoAtual.diretrizesPorVicio
+            ? JSON.parse(JSON.stringify(topicoAtual.diretrizesPorVicio))
+            : {};
+
+        const diretrizesPorTeseNovo = {};
+        if (topicoAtual.diretrizesPorTese && anotacoesTransferidas.length > 0) {
+            const tesesTransferidas = new Set(
+                anotacoesTransferidas.map(a => a.tese || "Tese Não Nomeada")
+            );
+            const tesesRestantes = new Set(
+                anotacoesRestantes.filter(a => !_ehCheckpoint(a)).map(a => a.tese || "Tese Não Nomeada")
+            );
+
+            tesesTransferidas.forEach(chaveTese => {
+                if (topicoAtual.diretrizesPorTese[chaveTese]) {
+                    diretrizesPorTeseNovo[chaveTese] = JSON.parse(
+                        JSON.stringify(topicoAtual.diretrizesPorTese[chaveTese])
+                    );
+                    if (!tesesRestantes.has(chaveTese)) {
+                        delete topicoAtual.diretrizesPorTese[chaveTese];
+                    }
+                }
+            });
+        }
 
         const volAtual = topicoAtual.volumeData && topicoAtual.volumeData.sequencia ? topicoAtual.volumeData.sequencia : 1;
         const proxVol = volAtual + 1;
@@ -2712,7 +2972,14 @@ window.TopicsManager = (function () {
             metaHandoff: { alvo: novoNome, slug: slugA, versao: volAtual, chkId: chkId }
         });
 
-        // HERANÇA ESPECÍFICA DO ED: Herda também o vício e as diretrizesPorVicio
+        const checkpointEntrada = {
+            uuid: 'id-chk-in-' + Date.now(),
+            tipo: 'checkpoint_entrada',
+            conteudo: `CONTINUAÇÃO DO TÓPICO: "${topicoAtual.nome}" | ID: ${chkId}`,
+            metaHandoff: { origem: topicoAtual.nome, slug: slugA, versao: volAtual, chkId: chkId }
+        };
+
+        // HERANÇA ESPECÍFICA DO ED: Herda também o vício, diretrizesPorVicio e os grupos transferidos
         const novoTopico = {
             id: novoId,
             nome: novoNome,
@@ -2721,26 +2988,50 @@ window.TopicsManager = (function () {
             fundamentos: topicoAtual.fundamentos,
             veredito: topicoAtual.veredito, 
             vicio: topicoAtual.vicio,
-            diretrizesPorVicio: topicoAtual.diretrizesPorVicio ? JSON.parse(JSON.stringify(topicoAtual.diretrizesPorVicio)) : {},
+            diretrizesPorVicio: diretrizesPorVicioNovo,
+            diretrizesPorTese: diretrizesPorTeseNovo,
             volumeData: { sequencia: proxVol, anteriorId: topicoAtual.id, chkId: chkId },
             diretrizesGlobais: [], 
-            anotacoes: [{
-                uuid: 'id-chk-in-' + Date.now(),
-                tipo: 'checkpoint_entrada',
-                conteudo: `CONTINUAÇÃO DO TÓPICO: "${topicoAtual.nome}" | ID: ${chkId}`,
-                metaHandoff: { origem: topicoAtual.nome, slug: slugA, versao: volAtual, chkId: chkId }
-            }]
+            anotacoes: [checkpointEntrada, ...anotacoesTransferidas]
         };
 
         topicos.push(novoTopico);
-        activeTabId = novoId; 
+        activeTabId = novoId;
+
+        // Suprime a restauração do yOffset do Volume anterior para iniciar no topo do novo Volume
+        suprimirProximaRestauracao();
         renderizarFichario(topicos); 
-        
-        // Desmonta a interface visual após processamento
         fecharModalPreDivisao();
-        
+
+        // Feedback visual tátil no primeiro grupo transferido sem conflitar com o _scrollGuard
+        if (anotacoesTransferidas.length > 0) {
+            const primeiroUuid = anotacoesTransferidas[0].uuid;
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                    const wrapperAlvo = primeiroUuid
+                        ? document.getElementById(`timeline-wrapper-${primeiroUuid}`)
+                        : null;
+                    const cardAlvo = wrapperAlvo
+                        ? wrapperAlvo.querySelector('.main-card-wrapper > .annotation-card')
+                        : null;
+                    if (cardAlvo) {
+                        cardAlvo.classList.remove('card-flash-focus');
+                        void cardAlvo.offsetWidth;
+                        cardAlvo.classList.add('card-flash-focus');
+                    }
+                });
+            });
+        }
+
+        // Sincroniza os badges numéricos nas páginas do PDF e salva o backup
+        if (typeof window.sincronizarHighlightsGerais === 'function') window.sincronizarHighlightsGerais();
         if (typeof salvarBackupAutomatico === 'function') salvarBackupAutomatico();
-        if (typeof exibirToast === 'function') exibirToast('Novo volume criado com sucesso.', 'sucesso');
+        if (typeof exibirToast === 'function') {
+            const msg = anotacoesTransferidas.length > 0
+                ? `Volume ${toRoman(proxVol)} criado com ${anotacoesTransferidas.length} grupo(s) transferido(s) e renumerado(s)!`
+                : 'Novo volume criado com sucesso.';
+            exibirToast(msg, 'sucesso');
+        }
     }
 
     // ==========================================
