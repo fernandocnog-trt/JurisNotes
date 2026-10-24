@@ -666,9 +666,14 @@ window.TopicsManager = (function () {
             </div>`;
 
         let comentarios = [];
-        if (dados.comentario) comentarios.push(`<strong>Contexto:</strong> ${escaparHTML(dados.comentario)}`);
+        let blocosLeitura = [];
+
+        if (dados.comentario) {
+            comentarios.push(`<div class="audio-comentario-item"><strong>Contexto:</strong> ${escaparHTML(dados.comentario)}</div>`);
+            blocosLeitura.push(`**Contexto:** ${dados.comentario}`);
+        }
+
         if (dados.transcricao) {
-            // Guarda robusta: oculta se for contexto de pilha OU se o item não possuir UUID
             const btnCopiar = (opts.ocultarCopiar || !anotacao.uuid) ? '' : `
                 <button class="btn-copy-degravacao" title="Copiar Degravação" onclick="window.copiarDegravacao('${anotacao.topicoIdOrigem || activeTabId}', '${anotacao.uuid || ''}')">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px;">
@@ -676,17 +681,28 @@ window.TopicsManager = (function () {
                     </svg>
                 </button>`;
 
-            // A MÁGICA DA QUEBRA DE LINHA ACONTECE NO STYLE ABAIXO (white-space: pre-wrap)
             comentarios.push(`
-                <div style="display:flex; align-items:flex-start; gap:4px;">
-                    <div style="flex: 1; white-space: pre-wrap; overflow-wrap: break-word;"><strong>Degravação:</strong> <em>"${escaparHTML(dados.transcricao)}"</em></div>
+                <div class="audio-comentario-item audio-degravacao-row">
+                    <div class="audio-degravacao-text"><strong>Degravação:</strong> <em>"${escaparHTML(dados.transcricao)}"</em></div>
                     ${btnCopiar}
                 </div>
             `);
+            blocosLeitura.push(`**Degravação (${dados.rotuloTempo}):**\n"${dados.transcricao}"`);
         }
         
         if (comentarios.length > 0) {
-            htmlComentario = `<div class="card-comentario" style="display:flex; flex-direction:column; gap:6px;">${comentarios.join('<br>')}</div>`;
+            const rawTextAudio = escaparHTML(blocosLeitura.join('\n\n'));
+            const rawTitleAudio = escaparHTML(`Oitiva: ${dados.orador}`);
+            htmlComentario = `
+                <div class="card-comentario juris-scroll-fade">
+                    <div class="juris-scroll-fade-body" 
+                         data-raw-text="${rawTextAudio}" 
+                         data-raw-title="${rawTitleAudio}" 
+                         ondblclick="TopicsManager.abrirModoLeitura(this)"
+                         title="Duplo clique para abrir em Modo Leitura">
+                        ${comentarios.join('')}
+                    </div>
+                </div>`;
         }
         
         return { htmlConteudo, htmlComentario };
@@ -822,23 +838,31 @@ window.TopicsManager = (function () {
             // Injeção segura do cIdx no contexto do botão (resolve o bug da falta de índice)
             const ctxCidx = isCorrelacionado && cIdx != null ? `, cIdx: ${cIdx}` : '';
             
-            // Verifica o tipo do item na hierarquia correta (principal vs correlacionado)
-            const tipoDoItem = isCorrelacionado && cIdx != null ? anotacao.itensCorrelacionados[cIdx].tipo : anotacao.tipo;
-            
-            // Direciona para a função de edição adequada
+            const itemAlvo = isCorrelacionado && cIdx != null ? anotacao.itensCorrelacionados[cIdx] : anotacao;
+            const tipoDoItem = itemAlvo.tipo;
             const acaoEditar = isCorrelacionado ? 'editarItemCorrelacionado()' : 'editarAnotacao()';
             
             let rawText = '';
             let rawTitle = '';
-            if (isCorrelacionado && cIdx != null) {
-                rawText = escaparHTML(anotacao.itensCorrelacionados[cIdx].conteudo || '');
-                rawTitle = escaparHTML(anotacao.itensCorrelacionados[cIdx].documento || anotacao.itensCorrelacionados[cIdx].polo || 'Agrupamento');
-            } else {
-                rawText = escaparHTML(anotacao.conteudo || '');
-                rawTitle = escaparHTML(anotacao.documento || anotacao.polo || 'Anotação');
+            let habilitaModoLeitura = false;
+
+            if (tipoDoItem === 'texto') {
+                rawText = escaparHTML(itemAlvo.conteudo || '');
+                rawTitle = escaparHTML(itemAlvo.documento || itemAlvo.polo || (isCorrelacionado ? 'Agrupamento' : 'Anotação'));
+                habilitaModoLeitura = true;
+            } else if (tipoDoItem === 'audio') {
+                const dadosAudio = _obterDadosAudioSeguros(itemAlvo);
+                if (dadosAudio && !dadosAudio.isCorrompido && (dadosAudio.transcricao || dadosAudio.comentario)) {
+                    const partes = [];
+                    if (dadosAudio.comentario) partes.push(`**Contexto:** ${dadosAudio.comentario}`);
+                    if (dadosAudio.transcricao) partes.push(`**Degravação (${dadosAudio.rotuloTempo}):**\n"${dadosAudio.transcricao}"`);
+                    rawText = escaparHTML(partes.join('\n\n'));
+                    rawTitle = escaparHTML(`Oitiva: ${dadosAudio.orador}`);
+                    habilitaModoLeitura = true;
+                }
             }
 
-            const btnLeitura = (tipoDoItem === 'texto') 
+            const btnLeitura = habilitaModoLeitura
                 ? `<button class="btn-read-mode-trigger card-action-read" title="Modo Leitura" data-raw-text="${rawText}" data-raw-title="${rawTitle}" onclick="TopicsManager.abrirModoLeitura(this)"><svg><use href="#icon-book-open"></use></svg></button>` 
                 : '';
 
@@ -1697,15 +1721,27 @@ window.TopicsManager = (function () {
         }
             
         requestAnimationFrame(() => {
-            document.querySelectorAll('.sub-text-content, .card-texto').forEach(el => {
+            document.querySelectorAll('.sub-text-content, .card-texto, .juris-scroll-fade-body').forEach(el => {
                 if (typeof resizeObserver !== 'undefined') resizeObserver.observe(el);
                 
-                if (el.scrollHeight > el.clientHeight) {
-                    el.classList.add('is-truncated');
+                const isScrollFadeBody = el.classList.contains('juris-scroll-fade-body');
+                const truncateTarget = isScrollFadeBody ? el.parentElement : el;
+                const isOverflowing = (el.scrollHeight - el.clientHeight) > 2;
+
+                if (isOverflowing) {
+                    if (truncateTarget) {
+                        truncateTarget.classList.add('is-truncated');
+                        if (isScrollFadeBody) {
+                            const noFim = Math.ceil(el.scrollTop + el.clientHeight) >= el.scrollHeight - 4;
+                            truncateTarget.classList.toggle('is-scrolled-end', noFim);
+                        }
+                    }
                     const parentCard = el.closest('.annotation-card, .sub-annotation-card');
                     if (parentCard) parentCard.classList.add('has-truncated-text');
                 } else {
-                    el.classList.remove('is-truncated');
+                    if (truncateTarget) {
+                        truncateTarget.classList.remove('is-truncated', 'is-scrolled-end');
+                    }
                     const parentCard = el.closest('.annotation-card, .sub-annotation-card');
                     if (parentCard) parentCard.classList.remove('has-truncated-text');
                 }
@@ -2227,6 +2263,17 @@ window.TopicsManager = (function () {
             }
         }, { passive: false });
     }
+
+    document.addEventListener('scroll', (e) => {
+        const target = e.target;
+        if (target && target.classList && target.classList.contains('juris-scroll-fade-body')) {
+            const wrapper = target.parentElement;
+            if (wrapper && wrapper.classList.contains('is-truncated')) {
+                const chegouAoFim = Math.ceil(target.scrollTop + target.clientHeight) >= target.scrollHeight - 4;
+                wrapper.classList.toggle('is-scrolled-end', chegouAoFim);
+            }
+        }
+    }, { capture: true, passive: true });
 
     function abrirModoLeituraPilha(topicoId, grupoId, numeroRomano) {
         const topico = topicos.find(t => t.id === topicoId);
