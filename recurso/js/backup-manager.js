@@ -208,6 +208,59 @@ window.BackupManager = (function () {
             }
         });
 
+        // MUDANÇA ARQUITETURAL: Saneamento de Checkpoints de Volume (v7.3 Auto-Healing)
+        // Resgata itensCorrelacionados ou subAnotacoes que tenham sido anexados acidentalmente
+        // a um objeto checkpoint_entrada/checkpoint_saida devido ao deslocamento de índice nos Volumes II+.
+        pacote.dados.forEach(topico => {
+            if (!Array.isArray(topico.anotacoes)) return;
+
+            const EhChk = (a) => !!(a && typeof a.tipo === 'string' && a.tipo.startsWith('checkpoint'));
+            const orfaosCorrelacionados = [];
+            const orfaosSubAnotacoes = [];
+
+            topico.anotacoes.forEach(anotacao => {
+                if (EhChk(anotacao)) {
+                    if (Array.isArray(anotacao.itensCorrelacionados) && anotacao.itensCorrelacionados.length > 0) {
+                        orfaosCorrelacionados.push(...anotacao.itensCorrelacionados.splice(0, anotacao.itensCorrelacionados.length));
+                    }
+                    if (Array.isArray(anotacao.subAnotacoes) && anotacao.subAnotacoes.length > 0) {
+                        orfaosSubAnotacoes.push(...anotacao.subAnotacoes.splice(0, anotacao.subAnotacoes.length));
+                    }
+                }
+            });
+
+            if (orfaosCorrelacionados.length > 0 || orfaosSubAnotacoes.length > 0) {
+                let primeiroCardValido = topico.anotacoes.find(a => !EhChk(a));
+
+                // Se o volume ainda não tinha nenhum Card Mestre válido além do checkpoint,
+                // promove o primeiro órfão a Card Mestre para hospedar os demais.
+                if (!primeiroCardValido && orfaosCorrelacionados.length > 0) {
+                    primeiroCardValido = orfaosCorrelacionados.shift();
+                    primeiroCardValido.itensCorrelacionados = primeiroCardValido.itensCorrelacionados || [];
+                    primeiroCardValido.subAnotacoes = primeiroCardValido.subAnotacoes || [];
+                    
+                    const idxSaida = topico.anotacoes.findIndex(a => a && a.tipo === 'checkpoint_saida');
+                    if (idxSaida !== -1) topico.anotacoes.splice(idxSaida, 0, primeiroCardValido);
+                    else topico.anotacoes.push(primeiroCardValido);
+                }
+
+                if (primeiroCardValido) {
+                    if (orfaosCorrelacionados.length > 0) {
+                        if (!Array.isArray(primeiroCardValido.itensCorrelacionados)) {
+                            primeiroCardValido.itensCorrelacionados = [];
+                        }
+                        primeiroCardValido.itensCorrelacionados.push(...orfaosCorrelacionados);
+                    }
+                    if (orfaosSubAnotacoes.length > 0) {
+                        if (!Array.isArray(primeiroCardValido.subAnotacoes)) {
+                            primeiroCardValido.subAnotacoes = [];
+                        }
+                        primeiroCardValido.subAnotacoes.push(...orfaosSubAnotacoes);
+                    }
+                }
+            }
+        });
+
         return pacote;
     }
 

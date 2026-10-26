@@ -553,10 +553,18 @@ window.PdfEngine = (function () {
         topicos.forEach(topico => {
             const borderCor = topico.cor;
 
-            const desenharMarcacoes = (itens, parentIndex) => {
+            // Mapa O(N) de índice real -> número visual (ignora checkpoints)
+            const mapaVisuais = window.JurisIndexUtils
+                ? window.JurisIndexUtils.construirMapaVisual(topico.anotacoes)
+                : new Map((topico.anotacoes || []).map((_, i) => [i, i + 1]));
+
+            const desenharMarcacoes = (itens, parentRealIndex) => {
                 if (!itens) return;
                 itens.forEach((item, idx) => {
-                    const numIdeia = (parentIndex !== undefined ? parentIndex : idx) + 1;
+                    if (window.JurisIndexUtils && window.JurisIndexUtils.ehCheckpoint(item)) return;
+
+                    const realIndex = (parentRealIndex !== undefined) ? parentRealIndex : idx;
+                    const numIdeia = mapaVisuais.get(realIndex) ?? (realIndex + 1);
 
                     if (item.tipo === 'texto' || item.tipo === 'imagem') {
                         
@@ -640,8 +648,7 @@ window.PdfEngine = (function () {
                                         e.preventDefault();
                                         e.stopPropagation(); 
                                         if (window.navegarParaAnotacao) {
-                                            const indiceDestino = parentIndex !== undefined ? parentIndex : idx;
-                                            window.navegarParaAnotacao(topico.id, indiceDestino);
+                                            window.navegarParaAnotacao(topico.id, realIndex);
                                         }
                                     }
                                 });
@@ -651,7 +658,7 @@ window.PdfEngine = (function () {
                         }
                     }
                     if (item.itensCorrelacionados) {
-                        desenharMarcacoes(item.itensCorrelacionados, parentIndex !== undefined ? parentIndex : idx);
+                        desenharMarcacoes(item.itensCorrelacionados, realIndex);
                     }
                 });
             };

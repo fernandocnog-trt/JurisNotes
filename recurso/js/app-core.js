@@ -1379,6 +1379,64 @@ async function capturarTrechoSelecionado() {
     }
 }
 
+/* ================================================
+   UTILITÁRIO DE INDEXAÇÃO FÍSICA VS VISUAL (CHECKPOINT-SAFE)
+   ================================================ */
+window.JurisIndexUtils = (function() {
+    'use strict';
+
+    function ehCheckpoint(anotacao) {
+        return !!(anotacao && typeof anotacao.tipo === 'string' && anotacao.tipo.startsWith('checkpoint'));
+    }
+
+    function obterIndicesReaisValidos(anotacoes) {
+        const indices = [];
+        if (!Array.isArray(anotacoes)) return indices;
+        for (let i = 0; i < anotacoes.length; i++) {
+            if (!ehCheckpoint(anotacoes[i])) {
+                indices.push(i);
+            }
+        }
+        return indices;
+    }
+
+    function visualParaReal(anotacoes, numeroVisual) {
+        const num = parseInt(numeroVisual, 10);
+        if (isNaN(num) || num < 1) return -1;
+        const validos = obterIndicesReaisValidos(anotacoes);
+        return (num <= validos.length) ? validos[num - 1] : -1;
+    }
+
+    function realParaVisual(anotacoes, realIndex) {
+        if (!Array.isArray(anotacoes) || realIndex < 0 || realIndex >= anotacoes.length) return 1;
+        let contador = 0;
+        for (let i = 0; i <= realIndex; i++) {
+            if (!ehCheckpoint(anotacoes[i])) contador++;
+        }
+        return Math.max(1, contador);
+    }
+
+    function construirMapaVisual(anotacoes) {
+        const mapa = new Map();
+        if (!Array.isArray(anotacoes)) return mapa;
+        let contador = 1;
+        for (let i = 0; i < anotacoes.length; i++) {
+            if (!ehCheckpoint(anotacoes[i])) {
+                mapa.set(i, contador++);
+            }
+        }
+        return mapa;
+    }
+
+    return {
+        ehCheckpoint,
+        obterIndicesReaisValidos,
+        visualParaReal,
+        realParaVisual,
+        construirMapaVisual
+    };
+})();
+
 function identificarFaseMetodologica(docNome) {
     if (!docNome) return 4; 
     
@@ -1457,24 +1515,63 @@ async function salvarAnotacao(tipo, conteudo, documento, polo, topicoId, comenta
     const faseNova = identificarFaseMetodologica(documento);
 
     if (targetParentIndex !== null && targetParentIndex !== '') {
-        const parentNode = topicoAlvo.anotacoes[targetParentIndex];
-        if (!parentNode.itensCorrelacionados) parentNode.itensCorrelacionados = [];
-        parentNode.itensCorrelacionados.push(novaExtracao);
-        exibirToast(`Item agrupado à Ideia ${parseInt(targetParentIndex) + 1}.`);
+        let idxAlvo = parseInt(targetParentIndex, 10);
+        let parentNode = topicoAlvo.anotacoes[idxAlvo];
+
+        // GUARDRAIL DE INTEGRIDADE: Se o índice apontar acidentalmente para um checkpoint,
+        // redireciona para o primeiro card probatório válido do volume.
+        if (window.JurisIndexUtils.ehCheckpoint(parentNode)) {
+            const validos = window.JurisIndexUtils.obterIndicesReaisValidos(topicoAlvo.anotacoes);
+            if (validos.length > 0) {
+                idxAlvo = validos[0];
+                parentNode = topicoAlvo.anotacoes[idxAlvo];
+            } else {
+                parentNode = null;
+            }
+        }
+
+        if (parentNode) {
+            if (!parentNode.itensCorrelacionados) parentNode.itensCorrelacionados = [];
+            parentNode.itensCorrelacionados.push(novaExtracao);
+            const numVisual = window.JurisIndexUtils.realParaVisual(topicoAlvo.anotacoes, idxAlvo);
+            exibirToast(`Item agrupado à Ideia ${numVisual}.`);
+        } else {
+            // Caso o volume só possua o checkpoint_entrada e nenhuma ideia ainda, cria como 1ª ideia
+            novaExtracao.subAnotacoes = [];
+            novaExtracao.itensCorrelacionados = [];
+            const idxSaida = topicoAlvo.anotacoes.findIndex(a => a && a.tipo === 'checkpoint_saida');
+            if (idxSaida !== -1) topicoAlvo.anotacoes.splice(idxSaida, 0, novaExtracao);
+            else topicoAlvo.anotacoes.push(novaExtracao);
+            exibirToast(`Anotação salva como Ideia 1 em "${topicoAlvo.nome}".`);
+        }
     } else {
         novaExtracao.subAnotacoes = [];
         novaExtracao.itensCorrelacionados = [];
         
-        const temFase2 = topicoAlvo.anotacoes.some(a => identificarFaseMetodologica(a.documento) === 2);
+        const temFase2 = topicoAlvo.anotacoes.some(a => 
+            !window.JurisIndexUtils.ehCheckpoint(a) && identificarFaseMetodologica(a.documento) === 2
+        );
         if (faseNova === 3 && !temFase2) {
             exibirToast("Atenção: Você avançou para a Sentença. Já verificou a Inicial/Contestação?", "aviso");
         } else {
             exibirToast(`Anotação salva em "${topicoAlvo.nome}".`);
         }
 
+        // Busca de inserção ordenada por Fase Metodológica (1 a 4), respeitando as fronteiras de Checkpoint
         let insertIndex = topicoAlvo.anotacoes.length;
         for (let i = 0; i < topicoAlvo.anotacoes.length; i++) {
-            if (identificarFaseMetodologica(topicoAlvo.anotacoes[i].documento) > faseNova) {
+            const itemAtual = topicoAlvo.anotacoes[i];
+            
+            // Nunca insere antes de um checkpoint_entrada
+            if (itemAtual && itemAtual.tipo === 'checkpoint_entrada') continue;
+            
+            // Nunca insere depois de um checkpoint_saida
+            if (itemAtual && itemAtual.tipo === 'checkpoint_saida') {
+                insertIndex = i;
+                break;
+            }
+
+            if (identificarFaseMetodologica(itemAtual.documento) > faseNova) {
                 insertIndex = i;
                 break;
             }
