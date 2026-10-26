@@ -720,9 +720,10 @@ function reordenarAnotacao() {
     if (!_menuAnotacaoCtx) return;
     const { topicoId, index } = _menuAnotacaoCtx;
     const topico = topicos.find(t => t.id === topicoId);
-    if (topico.anotacoes.length <= 1) return exibirToast('Apenas uma anotação existente.', 'aviso');
+    const validos = window.JurisIndexUtils.obterIndicesReaisValidos(topico.anotacoes);
+    if (validos.length <= 1) return exibirToast('Apenas uma anotação existente.', 'aviso');
 
-    abrirModalReordenar('main', topicoId, index, topico.anotacoes.length);
+    abrirModalReordenar('main', topicoId, index, validos.length);
     document.getElementById('annotation-context-menu').style.display = 'none';
 }
 
@@ -759,7 +760,10 @@ function acionarReordenarSub() {
 
 function abrirModalReordenar(tipo, topicoId, index, total, subIndex = null) {
     _reordenarCtx = { tipo, topicoId, index, total, subIndex };
-    const posAtual = tipo === 'main' ? index + 1 : subIndex + 1;
+    const topico = topicos.find(t => t.id === topicoId);
+    const posAtual = tipo === 'main' 
+        ? window.JurisIndexUtils.realParaVisual(topico.anotacoes, index) 
+        : subIndex + 1;
 
     document.getElementById('input-nova-posicao').value = posAtual;
     document.getElementById('input-nova-posicao').max = total;
@@ -785,9 +789,16 @@ function confirmarReordenacaoPosicao() {
 
     if (_reordenarCtx.tipo === 'main') {
         const [item] = topico.anotacoes.splice(_reordenarCtx.index, 1);
-        topico.anotacoes.splice(novaPos - 1, 0, item);
+        const validosRestantes = window.JurisIndexUtils.obterIndicesReaisValidos(topico.anotacoes);
+        let targetRealIdx;
+        if (novaPos <= validosRestantes.length) {
+            targetRealIdx = validosRestantes[novaPos - 1];
+        } else {
+            const idxSaida = topico.anotacoes.findIndex(a => a && a.tipo === 'checkpoint_saida');
+            targetRealIdx = idxSaida !== -1 ? idxSaida : topico.anotacoes.length;
+        }
+        topico.anotacoes.splice(targetRealIdx, 0, item);
     } else if (_reordenarCtx.tipo === 'sub') {
-        // Novo suporte arquitetural para nós de ideia
         const alvo = _resolverSubAlvo(topico, _reordenarCtx.index, _menuSubAnotacaoCtx.viewSource);
         const [item] = alvo.subAnotacoes.splice(_reordenarCtx.subIndex, 1);
         alvo.subAnotacoes.splice(novaPos - 1, 0, item);
@@ -866,9 +877,11 @@ function carregarSubAlvosTransferencia() {
     select.innerHTML = '';
     targetBox.style.display = 'none';
 
-    if (isNaN(inputVal) || inputVal < 1 || inputVal > topico.anotacoes.length) return;
+    const validos = window.JurisIndexUtils.obterIndicesReaisValidos(topico.anotacoes);
+    if (isNaN(inputVal) || inputVal < 1 || inputVal > validos.length) return;
 
-    const cardDestino = topico.anotacoes[inputVal - 1];
+    const destinoRealIdx = validos[inputVal - 1];
+    const cardDestino = topico.anotacoes[destinoRealIdx];
     
     // Mapeamento dinâmico de pilhas (Grupos) existentes no card alvo
     const gruposEncontrados = new Set();
@@ -908,12 +921,13 @@ function confirmarTransferenciaSub() {
     if (!_menuSubAnotacaoCtx) return;
     const topico = topicos.find(t => t.id === _menuSubAnotacaoCtx.topicoId);
     const destinoTarget = parseInt(document.getElementById('input-transferir-sub-destino').value, 10);
+    const validos = window.JurisIndexUtils.obterIndicesReaisValidos(topico.anotacoes);
     
-    if (isNaN(destinoTarget) || destinoTarget < 1 || destinoTarget > topico.anotacoes.length) {
-        return exibirToast(`Destino inválido. Escolha um número entre 1 e ${topico.anotacoes.length}.`, 'erro');
+    if (isNaN(destinoTarget) || destinoTarget < 1 || destinoTarget > validos.length) {
+        return exibirToast(`Destino inválido. Escolha um número entre 1 e ${validos.length}.`, 'erro');
     }
     
-    const destinoIndex = destinoTarget - 1;
+    const destinoIndex = validos[destinoTarget - 1];
     const cardDestino = topico.anotacoes[destinoIndex];
     const selectVal = document.getElementById('select-transferir-sub-alvo').value;
     
@@ -1225,7 +1239,10 @@ function abrirModalTese(topicoId, index) {
     const topico = topicos.find(t => t.id === topicoId);
     if (!topico || !topico.anotacoes[index]) return;
 
-    document.getElementById('tese-ideia-num').textContent = index + 1;
+    // Exibe o número visual real da Ideia (e não index + 1 que contava o checkpoint)
+    document.getElementById('tese-ideia-num').textContent = window.JurisIndexUtils
+        ? window.JurisIndexUtils.realParaVisual(topico.anotacoes, index)
+        : (index + 1);
     const anotacao = topico.anotacoes[index];
     const textarea = document.getElementById('input-texto-tese');
     textarea.value = anotacao.tese || '';
@@ -1304,26 +1321,27 @@ function confirmarSmartMove() {
     const topico = topicos.find(t => t.id === _smartMoveCtx.topicoId);
     const isNova = document.querySelector('input[name="smart_move_tipo"]:checked').value === 'nova';
     const inputVal = document.getElementById('input-smart-move-destino').value;
+    const validos = window.JurisIndexUtils.obterIndicesReaisValidos(topico.anotacoes);
+    let destinoVisual = null;
     let destinoIdx = null;
 
-    // 1. Validação Robusta para ambas as escolhas
+    // 1. Validação baseada estritamente nas ideias visuais válidas (ignorando checkpoints)
     if (!isNova) {
         const destinoVal = parseInt(inputVal, 10);
-        if (isNaN(destinoVal) || destinoVal < 1 || destinoVal > topico.anotacoes.length) {
-            return exibirToast('Número de destino inválido.', 'erro');
+        if (isNaN(destinoVal) || destinoVal < 1 || destinoVal > validos.length) {
+            return exibirToast(`Número de destino inválido. Escolha entre 1 e ${validos.length}.`, 'erro');
         }
-        destinoIdx = destinoVal - 1;
+        destinoIdx = validos[destinoVal - 1];
         if (_smartMoveCtx.correlacionadoIndex === null && destinoIdx === _smartMoveCtx.parentIndex) {
             return exibirToast('Não é possível mover a ideia para ela mesma.', 'erro');
         }
     } else {
-        // Se escolheu Nova Ideia e digitou um número
         if (inputVal.trim() !== '') {
             const destinoVal = parseInt(inputVal, 10);
-            if (isNaN(destinoVal) || destinoVal < 1 || destinoVal > topico.anotacoes.length + 1) {
+            if (isNaN(destinoVal) || destinoVal < 1 || destinoVal > validos.length + 1) {
                 return exibirToast('Posição para a nova ideia é inválida.', 'erro');
             }
-            destinoIdx = destinoVal - 1;
+            destinoVisual = destinoVal;
         }
     }
 
@@ -1332,63 +1350,59 @@ function confirmarSmartMove() {
     let arrayReduziu = false;
 
     if (_smartMoveCtx.correlacionadoIndex !== null) {
-        // Cenário A: Movendo um filho (mantém comportamento original atômico via splice)
         itemMovido = topico.anotacoes[_smartMoveCtx.parentIndex].itensCorrelacionados.splice(_smartMoveCtx.correlacionadoIndex, 1)[0];
     } else {
-        // Cenário B: Movendo o Card Principal
         const cardOriginal = topico.anotacoes[_smartMoveCtx.parentIndex];
 
         if (cardOriginal.itensCorrelacionados && cardOriginal.itensCorrelacionados.length > 0) {
-            // FASE 1: CONSTRUÇÃO EM MEMÓRIA (Deep Clone para evitar mutação cruzada)
             const cloneProfundo = structuredClone(cardOriginal);
-            
-            // O "novo líder" será o primeiro item dos filhos clonados
             const novoMainCard = cloneProfundo.itensCorrelacionados.shift();
-            
-            // Transferindo a "coroa" (herança de estado) para o novo líder
             novoMainCard.tese = cloneProfundo.tese;
             novoMainCard.itensCorrelacionados = cloneProfundo.itensCorrelacionados;
 
-            // Preparando o card que vai viajar.
-            // Usamos defaults em vez de 'delete' para preservar a otimização da Hidden Class no V8
             itemMovido = structuredClone(cardOriginal);
             itemMovido.itensCorrelacionados = [];
             itemMovido.tese = ""; 
 
-            // FASE 2: ESCRITA ATÔMICA (Commit no array oficial)
             topico.anotacoes[_smartMoveCtx.parentIndex] = novoMainCard;
-            arrayReduziu = false; // A posição foi apenas substituída, o array não diminuiu
-            
+            arrayReduziu = false;
         } else {
-            // Cenário C: Card Principal solteiro
             itemMovido = topico.anotacoes.splice(_smartMoveCtx.parentIndex, 1)[0];
             arrayReduziu = true;
         }
     }
 
-    // Compensação matemática de índice de destino
-    if (arrayReduziu && _smartMoveCtx.correlacionadoIndex === null) {
-        if (!isNova && destinoIdx > _smartMoveCtx.parentIndex) destinoIdx--;
-        if (isNova && destinoIdx !== null && destinoIdx > _smartMoveCtx.parentIndex) destinoIdx--; 
+    // Compensação de índice real quando o array encolheu (para o modo Agrupar em Existente)
+    if (arrayReduziu && _smartMoveCtx.correlacionadoIndex === null && !isNova && destinoIdx > _smartMoveCtx.parentIndex) {
+        destinoIdx--;
     }
 
-    // 3. Inserção no Destino Final
+    // 3. Inserção no Destino Final respeitando fronteiras de Checkpoint
     if (isNova) {
         if (!itemMovido.itensCorrelacionados) itemMovido.itensCorrelacionados = [];
         if (!itemMovido.subAnotacoes) itemMovido.subAnotacoes = [];
         
-        if (destinoIdx !== null) {
-            topico.anotacoes.splice(destinoIdx, 0, itemMovido); // Insere no meio
-            exibirToast(`Prova transformada em Nova Ideia na posição ${destinoIdx + 1}.`, 'sucesso');
+        const validosAposExtracao = window.JurisIndexUtils.obterIndicesReaisValidos(topico.anotacoes);
+        const idxSaida = topico.anotacoes.findIndex(a => a && a.tipo === 'checkpoint_saida');
+        const posFinalSegura = idxSaida !== -1 ? idxSaida : topico.anotacoes.length;
+
+        if (destinoVisual !== null) {
+            const realInsertIdx = (destinoVisual <= validosAposExtracao.length)
+                ? validosAposExtracao[destinoVisual - 1]
+                : posFinalSegura;
+            topico.anotacoes.splice(realInsertIdx, 0, itemMovido);
+            const posConfirmada = window.JurisIndexUtils.realParaVisual(topico.anotacoes, realInsertIdx);
+            exibirToast(`Prova transformada em Nova Ideia na posição ${posConfirmada}.`, 'sucesso');
         } else {
-            topico.anotacoes.push(itemMovido); // Joga pro final
+            topico.anotacoes.splice(posFinalSegura, 0, itemMovido);
             exibirToast('Prova transformada em Nova Ideia no final.', 'sucesso');
         }
     } else {
         const cardDestino = topico.anotacoes[destinoIdx];
         if (!cardDestino.itensCorrelacionados) cardDestino.itensCorrelacionados = [];
         cardDestino.itensCorrelacionados.push(itemMovido);
-        exibirToast(`Prova agrupada à Ideia ${destinoIdx + 1}.`, 'sucesso');
+        const numVisualDestino = window.JurisIndexUtils.realParaVisual(topico.anotacoes, destinoIdx);
+        exibirToast(`Prova agrupada à Ideia ${numVisualDestino}.`, 'sucesso');
     }
 
     renderizarTopicos(); 

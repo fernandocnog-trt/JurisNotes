@@ -312,13 +312,17 @@ function processarAgrupamento(topicoId, inputId) {
     
     if (document.querySelector(`input[name="${radioName}"]:checked`).value === 'agrupar') {
         const topico = topicos.find(t => t.id === topicoId);
-        const numero = parseInt(document.getElementById(inputId).value, 10);
+        const numeroVisual = parseInt(document.getElementById(inputId).value, 10);
         
-        if (isNaN(numero) || numero < 1 || numero > topico.anotacoes.length) {
-            exibirToast(`Número inválido. O tópico tem ${topico.anotacoes.length} ideia(s).`, 'erro');
+        const indicesValidos = window.JurisIndexUtils 
+            ? window.JurisIndexUtils.obterIndicesReaisValidos(topico.anotacoes)
+            : topico.anotacoes.map((_, i) => i);
+
+        if (isNaN(numeroVisual) || numeroVisual < 1 || numeroVisual > indicesValidos.length) {
+            exibirToast(`Número inválido. O tópico tem ${indicesValidos.length} ideia(s).`, 'erro');
             return false;
         }
-        return numero - 1; // Retorna índice base 0
+        return indicesValidos[numeroVisual - 1]; // Retorna o índice físico exato no array
     }
     return null;
 }

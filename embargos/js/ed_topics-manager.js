@@ -1290,15 +1290,16 @@ window.TopicsManager = (function () {
         topico.anotacoes.forEach((anotacao, index) => {
             if (_ehCheckpoint(anotacao)) return; // Ignora checkpoints na barra lateral
 
+            const numVisual = mapaVisuais.get(index);
             const btn = document.createElement('div');
             btn.className = 'fab-idea-marker';
             btn.style.backgroundColor = _activeTopicoCor;
             btn.style.color = corTexto;
-            btn.textContent = mapaVisuais.get(index);
+            btn.textContent = numVisual;
             
-            // UX Rica: Tooltip injeta o título da tese se existir
+            // UX Rica: Tooltip usa numVisual em vez de index + 1
             const nomeTese = anotacao.tese ? ` - ${escaparHTML(anotacao.tese)}` : '';
-            btn.title = `Ir para a Ideia ${index + 1}${nomeTese}`;
+            btn.title = `Ir para a Ideia ${numVisual}${nomeTese}`;
 
             // 4. Feitiçaria Matemática de Scroll (Alerta 1 resolvido)
             btn.onclick = (e) => {
