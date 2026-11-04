@@ -407,6 +407,37 @@ body.theme-anotacoes-jasmine {
 /* ================================================
    4. COMPONENTES UI GENÉRICOS E TAGS
    ================================================ */
+.polo-tag-wrapper {
+    display: inline-flex;
+    align-items: center;
+    min-width: 0;
+    max-width: 100%;
+}
+
+/* Quando há duas tags: --doc e --semantic têm flex-shrink: 0 (zero perda sub-pixel)
+   e tetos complementares (48% + 6px gap + calc(52% - 6px) = 100%) para zoom extremo. */
+.polo-tag-wrapper--doc {
+    flex: 0 0 auto;
+    max-width: 48%;
+}
+
+.polo-tag-wrapper--solo,
+.polo-tag-wrapper--doc:only-child {
+    flex: 0 1 auto;
+    max-width: 100%;
+}
+
+.polo-tag-wrapper--semantic {
+    flex: 0 0 auto;
+    max-width: calc(52% - 6px);
+}
+
+/* Tags manuais customizadas absorvem 100% do encolhimento na linha */
+.polo-tag-wrapper--custom {
+    flex: 0 1 auto;
+    min-width: 48px;
+}
+
 .polo-tag {
     padding: 3px 10px;
     border-radius: 12px;
@@ -417,6 +448,27 @@ body.theme-anotacoes-jasmine {
     display: inline-block;
     line-height: 1.5;
     white-space: nowrap;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    vertical-align: bottom;
+}
+
+.polo-tag.is-tag-truncated {
+    cursor: help;
+}
+
+/* Anel de foco interno (inset): nunca é cortado por overflow:hidden do container */
+.polo-tag.is-tag-truncated:focus-visible {
+    outline: 2px solid var(--trt-blue-mid);
+    outline-offset: -2px;
+}
+
+/* Fallback visual exclusivo para entradas manuais (preserva tags nativas intactas) */
+.tag-custom {
+    background: #f1f5f9;
+    color: #334155;
+    border: 1px solid #cbd5e1;
 }
 
 .doc-tag { background: #eceff1; color: #37474f; border: 1px solid #cfd8dc; }
@@ -427,6 +479,37 @@ body.theme-anotacoes-jasmine {
 .tag-laudo-pericial { background: #fff8e1; color: #e65100; }
 .tag-juizo          { background: #e3f2fd; color: #0d47a1; }
 .tag-perito         { background: #fff8e1; color: #e65100; }
+
+/* Tooltip Flutuante Singleton para Tags Truncadas */
+.juris-tag-tooltip {
+    position: fixed;
+    left: 0;
+    top: 0;
+    z-index: var(--z-context-menu, 4000);
+    max-width: min(360px, calc(100vw - 24px));
+    background: var(--trt-blue, #1a3a5c);
+    color: #ffffff;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 0.76rem;
+    font-weight: 600;
+    line-height: 1.45;
+    letter-spacing: 0.02em;
+    white-space: normal;
+    word-break: break-word;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.22);
+    pointer-events: none;
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(4px);
+    transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s ease;
+}
+
+.juris-tag-tooltip.is-visible {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0);
+}
 
 .chip-btn {
     padding: 9px 14px;

@@ -153,6 +153,29 @@
 
 .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 4px; }
 .card-meta { font-size: 0.75rem; color: #888; font-weight: 400; }
+
+/* Cabeçalho exclusivo dos Cartões de Prova (Mestre, Correlacionado e Pilha) */
+.card-header.card-header--tags {
+    flex-wrap: nowrap;
+    gap: 8px;
+    min-width: 0;
+    max-width: 100%;
+}
+
+.card-header--tags .card-meta {
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+
+.card-tags-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1 1 0%;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+}
 .card-texto { 
     font-size: 0.88rem; color: #333; line-height: 1.6; font-style: italic; margin-top: 4px; 
     /* Regras aditivas para truncamento */
@@ -429,7 +452,24 @@
 .card-audio { background: #fdfaf4; border: 1px solid #f2e3c6; padding: 12px; border-radius: 6px; margin-top: 10px; display: flex; align-items: center; gap: 12px; }
 .audio-icon-box { background: #ffe082; color: #d84315; padding: 10px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .audio-icon-box svg { width: 20px; height: 20px; }
-.audio-card-meta { line-height: 1.5; }
+/* Contenção elástica para Cartões de Áudio (filho flex de .card-audio) */
+.audio-card-meta {
+    line-height: 1.5;
+    flex: 1 1 0%;
+    min-width: 0;
+}
+
+.audio-oitiva-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    max-width: 100%;
+}
+
+.audio-oitiva-row > strong {
+    flex-shrink: 0;
+}
 .audio-card-meta strong { color: var(--trt-blue-mid); }
 .audio-card-meta span:not([class]) { font-size: 0.85rem; color: #555; }
 .correlated-card .audio-icon-box { transform: scale(0.85); margin-left: -8px; }
