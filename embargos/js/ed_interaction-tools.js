@@ -258,7 +258,8 @@ const DOC_CONFIG = [
 
 let _docSelecionado = null;
 let _isWizardContext = false;
-let _pendingTargetIndex = null;
+// REMOVIDO: let _pendingTargetIndex = null; (Causava congelamento prematuro do modo de inserção)
+let _wizardRascunhoRefazer = null; // Preserva comentário e agrupamento ao clicar em "Refazer Área"
 let _wizardVicioSelecionado = null; // Variável global de transporte para o vício
 
 function renderizarFasesModais(context) {
@@ -297,22 +298,47 @@ function renderizarFasesModais(context) {
 }
 
 function toggleAgruparPopup() {
-    const isAgrupar = document.querySelector('input[name="modo_agrupar_popup"]:checked').value === 'agrupar';
-    document.getElementById('input-ideia-popup').style.display = isAgrupar ? 'block' : 'none';
+    const radioChecked = document.querySelector('input[name="modo_agrupar_popup"]:checked');
+    const isAgrupar = radioChecked && radioChecked.value === 'agrupar';
+    const input = document.getElementById('input-ideia-popup');
+    if (!input) return;
+
+    input.style.display = isAgrupar ? 'block' : 'none';
+    if (isAgrupar) {
+        input.focus();
+    } else {
+        input.value = '';
+    }
 }
 
 function toggleAgruparWizard() {
-    const isAgrupar = document.querySelector('input[name="modo_agrupar_wizard"]:checked').value === 'agrupar';
-    document.getElementById('input-ideia-wizard').style.display = isAgrupar ? 'block' : 'none';
+    const radioChecked = document.querySelector('input[name="modo_agrupar_wizard"]:checked');
+    const isAgrupar = radioChecked && radioChecked.value === 'agrupar';
+    const input = document.getElementById('input-ideia-wizard');
+    if (!input) return;
+
+    input.style.display = isAgrupar ? 'block' : 'none';
+    if (isAgrupar) {
+        input.focus();
+    } else {
+        input.value = '';
+    }
 }
 
 function processarAgrupamento(topicoId, inputId) {
     const isWizard = inputId.includes('wizard');
     const radioName = isWizard ? 'modo_agrupar_wizard' : 'modo_agrupar_popup';
+    const radioChecked = document.querySelector(`input[name="${radioName}"]:checked`);
     
-    if (document.querySelector(`input[name="${radioName}"]:checked`).value === 'agrupar') {
+    if (radioChecked && radioChecked.value === 'agrupar') {
         const topico = topicos.find(t => t.id === topicoId);
-        const numeroVisual = parseInt(document.getElementById(inputId).value, 10);
+        if (!topico || !Array.isArray(topico.anotacoes)) {
+            exibirToast('Tópico de destino não encontrado.', 'erro');
+            return false;
+        }
+
+        const inputEl = document.getElementById(inputId);
+        const numeroVisual = parseInt(inputEl ? inputEl.value.trim() : '', 10);
         
         const indicesValidos = window.JurisIndexUtils 
             ? window.JurisIndexUtils.obterIndicesReaisValidos(topico.anotacoes)
@@ -320,9 +346,10 @@ function processarAgrupamento(topicoId, inputId) {
 
         if (isNaN(numeroVisual) || numeroVisual < 1 || numeroVisual > indicesValidos.length) {
             exibirToast(`Número inválido. O tópico tem ${indicesValidos.length} ideia(s).`, 'erro');
+            if (inputEl) inputEl.focus();
             return false;
         }
-        return indicesValidos[numeroVisual - 1]; // Retorna o índice físico exato no array
+        return indicesValidos[numeroVisual - 1]; // Retorna o índice físico exato no array (0 para Ideia 1)
     }
     return null;
 }
@@ -332,10 +359,11 @@ function selecionarDocumento(docLabel, polo, context) {
     if (!topicoId) { exibirToast('Selecione o tópico de destino primeiro.', 'aviso'); return; }
 
     const inputId = context === 'popup' ? 'input-ideia-popup' : 'input-ideia-wizard';
-    const targetIndex = processarAgrupamento(topicoId, inputId);
-    if (targetIndex === false) return; 
-
-    _pendingTargetIndex = targetIndex;
+    
+    // Validação preventiva (fail-fast): bloqueia avanço se "Agrupar" já estiver marcado com valor inválido.
+    // O valor NÃO é salvo em cache para permitir alterações de modo na etapa seguinte (polo).
+    const validacaoPrevia = processarAgrupamento(topicoId, inputId);
+    if (validacaoPrevia === false) return; 
     
     if (polo === 'DUAL') {
         _docSelecionado = docLabel;
@@ -372,29 +400,42 @@ function selecionarDocumento(docLabel, polo, context) {
         document.getElementById(`${context}-step-doc`).style.display = 'none';
         document.getElementById(`${context}-step-polo`).style.display = 'block';
     } else {
-        executarSalvamento(docLabel, polo, topicoId, _pendingTargetIndex, context);
+        executarSalvamento(docLabel, polo, topicoId, context);
     }
 }
 
 function confirmarPolo(polo, event) {
-    if(event) event.stopPropagation();
+    if (event) event.stopPropagation();
     const context = _isWizardContext ? 'wizard' : 'popup';
     const topicoId = context === 'popup' ? document.getElementById('seletor-topico').value : _wizardTopicoSelecionado;
-    executarSalvamento(_docSelecionado, polo, topicoId, _pendingTargetIndex, context);
+    executarSalvamento(_docSelecionado, polo, topicoId, context);
 }
 
 function voltarParaDocumentos(context, event) {
-    if(event) event.stopPropagation();
+    if (event) event.stopPropagation();
     document.getElementById(`${context}-step-polo`).style.display = 'none';
     document.getElementById(`${context}-step-doc`).style.display = 'block';
     _docSelecionado = null;
 }
 
-function executarSalvamento(docLabel, polo, topicoId, targetIndex, context) {
+function executarSalvamento(docLabel, polo, topicoId, context) {
+    if (!docLabel) {
+        exibirToast('Selecione o documento antes de confirmar.', 'aviso');
+        voltarParaDocumentos(context);
+        return;
+    }
+
+    // Resolução Just-In-Time (JIT) no momento exato do salvamento
+    const inputId = context === 'popup' ? 'input-ideia-popup' : 'input-ideia-wizard';
+    const targetIndex = processarAgrupamento(topicoId, inputId);
+    if (targetIndex === false) return;
+
+    const normalizedTargetIndex = Number.isInteger(targetIndex) ? targetIndex : null;
+
     const conf = DOC_CONFIG.find(d => d.label === docLabel);
     const faseNova = conf ? conf.fase : 4;
 
-    if (faseNova === 4 && targetIndex === null) {
+    if (faseNova === 4 && normalizedTargetIndex === null) {
         const topicoAlvo = topicos.find(t => t.id === topicoId);
         if (topicoAlvo) {
             const qtdFase4 = topicoAlvo.anotacoes.filter(a => {
@@ -410,12 +451,12 @@ function executarSalvamento(docLabel, polo, topicoId, targetIndex, context) {
 
     if (context === 'popup') {
         const comentario = document.getElementById('comentario-input').value.trim();
-        salvarAnotacao(pendingTipo, pendingConteudo, docLabel, polo, topicoId, comentario, targetIndex, null, null);
+        salvarAnotacao(pendingTipo, pendingConteudo, docLabel, polo, topicoId, comentario, normalizedTargetIndex, null, null);
         fecharPopupClassificacao();
     } else {
         _ultimoTopicoUsadoId = topicoId;
         const comentario = document.getElementById('crop-comment-input').value.trim();
-        salvarAnotacao('imagem', _wizardImagemCapturada, docLabel, polo, topicoId, comentario, targetIndex, null, null);
+        salvarAnotacao('imagem', _wizardImagemCapturada, docLabel, polo, topicoId, comentario, normalizedTargetIndex, null, null);
         fecharTudoWizard();
     }
 }
@@ -428,17 +469,42 @@ function executarSalvamento(docLabel, polo, topicoId, targetIndex, context) {
    ================================================ */
 
 /**
+ * Restaura as sub-etapas internas do Passo 2 do Wizard (Documento vs. Polo)
+ * para garantir que um novo recorte nunca abra preso na tela de polo do recorte anterior.
+ */
+function resetarSubEtapasWizardPasso2() {
+    const stepPolo = document.getElementById('wizard-step-polo');
+    const stepDoc  = document.getElementById('wizard-step-doc');
+    const poloBox  = document.getElementById('wizard-polo-buttons-container');
+    const docText  = document.getElementById('wizard-doc-selecionado');
+
+    if (stepPolo) stepPolo.style.display = 'none';
+    if (stepDoc)  stepDoc.style.display  = 'block';
+    if (poloBox)  poloBox.innerHTML      = '';
+    if (docText)  docText.innerText      = '';
+
+    _docSelecionado  = null;
+    _isWizardContext = false;
+}
+
+/**
  * PASSO 0 — Ponto de entrada.
  * Abre o Passo 1 do wizard (seleção de tópico).
  * Bloqueia a interface com o backdrop.
  */
 function iniciarRecorteWizard() {
-    window.toggleModoFoco(true);
+    // Defesa contra colisão de modais: fecha o popup de classificação de texto se estiver aberto
+    if (typeof fecharPopupClassificacao === 'function') {
+        fecharPopupClassificacao();
+    }
+
     if (topicos.length === 0) {
+        window.toggleModoFoco(false);
         exibirToast('Crie pelo menos um Tópico Recursal antes de realizar recortes.', 'aviso');
         return;
     }
 
+    window.toggleModoFoco(true);
     DropdownManager.renderizar('crop-topic-select', topicos, _ultimoTopicoUsadoId);
 
     document.getElementById('wizard-backdrop').style.display  = 'block';
@@ -460,7 +526,7 @@ function avancarParaRecorte() {
     document.getElementById('crop-wizard-step1').style.display = 'none';
     document.getElementById('wizard-backdrop').style.display   = 'none';
 
-    // NOVO: Remove o desfoque do documento para garantir precisão no recorte
+    // Remove o desfoque do documento para garantir precisão no recorte
     window.toggleModoFoco(false);
 
     modoRecorteAtivo = true;
@@ -472,8 +538,7 @@ function avancarParaRecorte() {
     overlay.style.height   = r.height + 'px';
     overlay.style.display  = 'block';
 
-    // CORREÇÃO ARQUITETURAL: Desativa a camada de texto E a camada de links (annotationLayer).
-    // A highlightLayer NÃO é alterada aqui para respeitar seu estado CSS base.
+    // Desativa a camada de texto E a camada de links (annotationLayer).
     document.querySelectorAll('.textLayer, .annotationLayer').forEach(l => l.style.pointerEvents = 'none');
     
     document.getElementById('btn-ferramenta-recorte').classList.add('ativo');
@@ -489,7 +554,7 @@ function desativarOverlayRecorte() {
     overlay.style.display = 'none';
     document.getElementById('btn-ferramenta-recorte').classList.remove('ativo');
     
-    // RESTAURAÇÃO: Devolve a interatividade APENAS para as camadas que foram bloqueadas.
+    // Devolve a interatividade APENAS para as camadas que foram bloqueadas.
     document.querySelectorAll('.textLayer, .annotationLayer').forEach(l => l.style.pointerEvents = 'auto');
 }
 
@@ -499,24 +564,41 @@ function desativarOverlayRecorte() {
  */
 function abrirConfirmacaoRecorteWizard() {
     desativarOverlayRecorte();
-    
-    // NOVO: Reativa o desfoque para centralizar a atenção cognitiva no formulário
     window.toggleModoFoco(true);
 
+    // Garante que a sub-etapa inicial seja sempre a de escolha de Fase/Documento
+    resetarSubEtapasWizardPasso2();
+
     document.getElementById('crop-preview-img').src = _wizardImagemCapturada;
-    document.getElementById('crop-comment-input').value = '';
-    
-    // NOVO: Resetar modal e popular seletor com o tópico escolhido no Passo 1
-    document.querySelector('input[name="modo_agrupar_wizard"][value="nova"]').checked = true;
-    toggleAgruparWizard();
+
+    const commentInput = document.getElementById('crop-comment-input');
+    const ideiaInput   = document.getElementById('input-ideia-wizard');
+
+    // Se o usuário veio de "Refazer Área", restaura os campos que ele já havia preenchido
+    if (_wizardRascunhoRefazer) {
+        if (commentInput) commentInput.value = _wizardRascunhoRefazer.comentario || '';
+        const radioAlvo = document.querySelector(`input[name="modo_agrupar_wizard"][value="${_wizardRascunhoRefazer.modo}"]`);
+        if (radioAlvo) radioAlvo.checked = true;
+        toggleAgruparWizard();
+        if (_wizardRascunhoRefazer.modo === 'agrupar' && ideiaInput) {
+            ideiaInput.value = _wizardRascunhoRefazer.numeroIdeia || '';
+        }
+        _wizardRascunhoRefazer = null;
+    } else {
+        if (commentInput) commentInput.value = '';
+        if (ideiaInput) ideiaInput.value = '';
+        const radioNova = document.querySelector('input[name="modo_agrupar_wizard"][value="nova"]');
+        if (radioNova) radioNova.checked = true;
+        toggleAgruparWizard();
+    }
     
     renderizarFasesModais('wizard');
     const tabsWizard = document.getElementById('wizard-phase-tabs');
-    if(tabsWizard && tabsWizard.firstElementChild) tabsWizard.firstElementChild.click();
+    if (tabsWizard && tabsWizard.firstElementChild) tabsWizard.firstElementChild.click();
 
     const topicoObj = topicos.find(t => t.id === _wizardTopicoSelecionado);
     const wizardHeader = document.getElementById('wizard-topic-color-feedback');
-    if(topicoObj && wizardHeader) {
+    if (topicoObj && wizardHeader) {
         wizardHeader.style.backgroundColor = topicoObj.cor;
         wizardHeader.style.height = '6px';
     }
@@ -525,28 +607,24 @@ function abrirConfirmacaoRecorteWizard() {
     document.getElementById('crop-wizard-step2').style.display = 'flex';
 }
 
-/**
- * PASSO_2 → IDLE.
- * Salva a anotação com o polo selecionado e encerra o wizard.
- */
-function finalizarRecorteWizard(polo) {
-    const comentario = document.getElementById('crop-comment-input').value.trim();
-    _ultimoTopicoUsadoId = _wizardTopicoSelecionado;
-    
-    let targetIndex = null;
-    if (document.querySelector('input[name="modo_agrupar_wizard"]:checked').value === 'agrupar') {
-        targetIndex = document.getElementById('seletor-ideia-wizard').value;
-    }
-
-    salvarAnotacao('imagem', _wizardImagemCapturada, polo, _wizardTopicoSelecionado, comentario, targetIndex);
-    fecharTudoWizard();
-}
+// REMOVIDO: function finalizarRecorteWizard(polo) (Código morto que referenciava #seletor-ideia-wizard inexistente)
 
 /**
  * PASSO_2 → RECORTANDO.
- * Volta ao overlay sem retornar ao Passo 1: o tópico já foi escolhido.
+ * Preserva o que já foi digitado no Passo 2 e volta ao overlay sem retornar ao Passo 1.
  */
 function refazerRecorteArea() {
+    const commentInput = document.getElementById('crop-comment-input');
+    const radioChecked = document.querySelector('input[name="modo_agrupar_wizard"]:checked');
+    const ideiaInput   = document.getElementById('input-ideia-wizard');
+
+    _wizardRascunhoRefazer = {
+        comentario:  commentInput ? commentInput.value : '',
+        modo:        radioChecked ? radioChecked.value : 'nova',
+        numeroIdeia: ideiaInput   ? ideiaInput.value   : ''
+    };
+
+    resetarSubEtapasWizardPasso2();
     document.getElementById('crop-wizard-step2').style.display = 'none';
     document.getElementById('wizard-backdrop').style.display   = 'none';
     avancarParaRecorte();
@@ -561,17 +639,32 @@ function cancelarRecorteWizard() {
     desativarOverlayRecorte();
 }
 
-/** Utilitário interno: fecha os painéis visuais e zera as variáveis de estado. */
+/** Utilitário interno: fecha os painéis visuais e zera todas as variáveis de estado do Wizard. */
 function fecharTudoWizard() {
     window.toggleModoFoco(false);
+    resetarSubEtapasWizardPasso2();
+
     document.getElementById('crop-wizard-step1').style.display = 'none';
     document.getElementById('crop-wizard-step2').style.display = 'none';
     document.getElementById('wizard-backdrop').style.display   = 'none';
 
+    const commentInput = document.getElementById('crop-comment-input');
+    if (commentInput) commentInput.value = '';
+
+    const ideiaInput = document.getElementById('input-ideia-wizard');
+    if (ideiaInput) {
+        ideiaInput.value = '';
+        ideiaInput.style.display = 'none';
+    }
+
+    const radioNova = document.querySelector('input[name="modo_agrupar_wizard"][value="nova"]');
+    if (radioNova) radioNova.checked = true;
+
     _wizardTopicoSelecionado = null;
     _wizardImagemCapturada   = null;
+    _wizardRascunhoRefazer   = null;
     
-    // NOVO: Prevenção de State Leakage
+    // Prevenção de State Leakage
     if (typeof _tempHighlightState !== 'undefined') {
         _tempHighlightState.rects = null;
         _tempHighlightState.paginaFisica = null;
