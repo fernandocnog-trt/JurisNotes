@@ -282,7 +282,8 @@ window.DOC_CONFIG = [
 
 let _docSelecionado = null;
 let _isWizardContext = false;
-let _pendingTargetIndex = null;
+// REMOVIDO: let _pendingTargetIndex = null; (Causava congelamento prematuro do modo de inserção)
+let _wizardRascunhoRefazer = null; // Preserva comentário e agrupamento ao clicar em "Refazer Área"
 
 function renderizarFasesModais(context) {
     const tabsContainer = document.getElementById(`${context}-phase-tabs`);
@@ -307,10 +308,7 @@ function renderizarFasesModais(context) {
             listContainer.innerHTML = '';
             let inseriuSeparadorExecucao = false;
 
-            // Usa a nova matriz global
             window.DOC_CONFIG.filter(doc => doc.fase === f.id).forEach(doc => {
-                
-                // Injeta um mini-separador visual na Fase 1 para dividir Conhecimento de Execução
                 if (f.id === 1 && doc.isExecucao && !inseriuSeparadorExecucao) {
                     const sep = document.createElement('div');
                     sep.style.cssText = "width:100%; text-align:center; margin: 12px 0 6px 0; font-size:0.75rem; color:#64748b; font-weight:bold; text-transform:uppercase; border-bottom:1px dashed #cbd5e1; padding-bottom:4px;";
@@ -331,26 +329,47 @@ function renderizarFasesModais(context) {
 }
 
 function toggleAgruparPopup() {
-    const agrupar = document.querySelector('input[name="modo_agrupar_popup"]:checked').value === 'agrupar';
+    const radioChecked = document.querySelector('input[name="modo_agrupar_popup"]:checked');
+    const agrupar = radioChecked && radioChecked.value === 'agrupar';
     const input = document.getElementById('input-ideia-popup');
+    if (!input) return;
+
     input.style.display = agrupar ? 'block' : 'none';
-    if(agrupar) input.focus();
+    if (agrupar) {
+        input.focus();
+    } else {
+        input.value = '';
+    }
 }
 
 function toggleAgruparWizard() {
-    const agrupar = document.querySelector('input[name="modo_agrupar_wizard"]:checked').value === 'agrupar';
+    const radioChecked = document.querySelector('input[name="modo_agrupar_wizard"]:checked');
+    const agrupar = radioChecked && radioChecked.value === 'agrupar';
     const input = document.getElementById('input-ideia-wizard');
+    if (!input) return;
+
     input.style.display = agrupar ? 'block' : 'none';
-    if(agrupar) input.focus();
+    if (agrupar) {
+        input.focus();
+    } else {
+        input.value = '';
+    }
 }
 
 function processarAgrupamento(topicoId, inputId) {
     const isWizard = inputId.includes('wizard');
     const radioName = isWizard ? 'modo_agrupar_wizard' : 'modo_agrupar_popup';
+    const radioChecked = document.querySelector(`input[name="${radioName}"]:checked`);
     
-    if (document.querySelector(`input[name="${radioName}"]:checked`).value === 'agrupar') {
+    if (radioChecked && radioChecked.value === 'agrupar') {
         const topico = topicos.find(t => t.id === topicoId);
-        const numeroVisual = parseInt(document.getElementById(inputId).value, 10);
+        if (!topico || !Array.isArray(topico.anotacoes)) {
+            exibirToast('Tópico de destino não encontrado.', 'erro');
+            return false;
+        }
+
+        const inputEl = document.getElementById(inputId);
+        const numeroVisual = parseInt(inputEl ? inputEl.value.trim() : '', 10);
         
         const indicesValidos = window.JurisIndexUtils 
             ? window.JurisIndexUtils.obterIndicesReaisValidos(topico.anotacoes)
@@ -358,9 +377,10 @@ function processarAgrupamento(topicoId, inputId) {
 
         if (isNaN(numeroVisual) || numeroVisual < 1 || numeroVisual > indicesValidos.length) {
             exibirToast(`Número inválido. O tópico tem ${indicesValidos.length} ideia(s).`, 'erro');
+            if (inputEl) inputEl.focus();
             return false;
         }
-        return indicesValidos[numeroVisual - 1]; // Retorna o índice físico exato no array
+        return indicesValidos[numeroVisual - 1]; // Retorna o índice físico exato no array (0 para Ideia 1)
     }
     return null;
 }
@@ -370,16 +390,16 @@ function selecionarDocumento(docLabel, polo, context) {
     if (!topicoId) { exibirToast('Selecione o tópico de destino primeiro.', 'aviso'); return; }
 
     const inputId = context === 'popup' ? 'input-ideia-popup' : 'input-ideia-wizard';
-    const targetIndex = processarAgrupamento(topicoId, inputId);
-    if (targetIndex === false) return;
-
-    _pendingTargetIndex = targetIndex;
+    
+    // Validação preventiva (fail-fast): bloqueia avanço se "Agrupar" já estiver marcado com valor inválido.
+    // O valor NÃO é salvo em cache para permitir alterações de modo na etapa seguinte (polo).
+    const validacaoPrevia = processarAgrupamento(topicoId, inputId);
+    if (validacaoPrevia === false) return;
 
     if (polo === 'DUAL') {
         _docSelecionado = docLabel;
         _isWizardContext = (context === 'wizard');
         
-        // CORREÇÃO AQUI: Agora lê do window.DOC_CONFIG
         const conf = window.DOC_CONFIG.find(d => d.label === docLabel);
 
         const targetDocText = context === 'popup' ? 'popup-doc-selecionado' : 'wizard-doc-selecionado';
@@ -394,8 +414,6 @@ function selecionarDocumento(docLabel, polo, context) {
             executada: `<button class="chip-btn chip-executada" onclick="confirmarPolo('Parte Executada', event)">✔ Parte Executada</button>`,
             juizo:     `<button class="chip-btn chip-juizo" onclick="confirmarPolo('Juízo / Tribunal', event)">🏛️ Juízo / Tribunal</button>`,
             auxiliar:  `<button class="chip-btn chip-auxiliar" onclick="confirmarPolo('Auxiliar da Justiça', event)">⚖️ Auxiliar da Justiça</button>`,
-            
-            // AQUI ENTRA O NOSSO BLOCO DO TERCEIRO
             terceiro:  `<div style="display:flex; flex-direction:column; gap:6px; margin-top:6px; padding-top:8px; border-top:1px dashed #cbd5e1;">
                           <p class="popup-label" style="margin:0;">Atos de Terceiros (Opcional):</p>
                           <div style="display:flex; gap:6px;">
@@ -407,13 +425,9 @@ function selecionarDocumento(docLabel, polo, context) {
 
         let htmlBotoes = '';
         
-        // LÓGICA BLINDADA:
-        // Se for um recurso da Fase 1 E for de execução (Agravo/Contraminuta)
         if (conf && conf.isExecucao && conf.fase === 1) {
             htmlBotoes += `${botoesDef.exequente}${botoesDef.executada}`;
-        } 
-        // Lógicas antigas mantidas para segurança
-        else if (conf && conf.isHibrido) {
+        } else if (conf && conf.isHibrido) {
             htmlBotoes += `${botoesDef.autora}${botoesDef.re}${botoesDef.exequente}${botoesDef.executada}${botoesDef.juizo}`;
         } else if (conf && conf.isExecucao) {
             htmlBotoes += `${botoesDef.exequente}${botoesDef.executada}${botoesDef.juizo}${botoesDef.auxiliar}`;
@@ -421,7 +435,6 @@ function selecionarDocumento(docLabel, polo, context) {
             htmlBotoes += `${botoesDef.autora}${botoesDef.re}`;
         }
 
-        // 3. INJEÇÃO DO TERCEIRO (Sempre no final das opções principais)
         htmlBotoes += botoesDef.terceiro;
 
         if (context === 'popup') {
@@ -435,33 +448,46 @@ function selecionarDocumento(docLabel, polo, context) {
         document.getElementById(`${context}-step-doc`).style.display = 'none';
         document.getElementById(`${context}-step-polo`).style.display = 'block';
     } else {
-        executarSalvamento(docLabel, polo, topicoId, _pendingTargetIndex, context);
+        executarSalvamento(docLabel, polo, topicoId, context);
     }
 }
 
 function confirmarPolo(polo, event) {
-    if(event) event.stopPropagation();
+    if (event) event.stopPropagation();
     const context = _isWizardContext ? 'wizard' : 'popup';
     const topicoId = context === 'popup' ? document.getElementById('seletor-topico').value : _wizardTopicoSelecionado;
-    executarSalvamento(_docSelecionado, polo, topicoId, _pendingTargetIndex, context);
+    executarSalvamento(_docSelecionado, polo, topicoId, context);
 }
 
 function voltarParaDocumentos(context, event) {
-    if(event) event.stopPropagation();
+    if (event) event.stopPropagation();
     document.getElementById(`${context}-step-polo`).style.display = 'none';
     document.getElementById(`${context}-step-doc`).style.display = 'block';
     _docSelecionado = null;
 }
 
-function executarSalvamento(docLabel, polo, topicoId, targetIndex, context) {
+function executarSalvamento(docLabel, polo, topicoId, context) {
+    if (!docLabel) {
+        exibirToast('Selecione o documento antes de confirmar.', 'aviso');
+        voltarParaDocumentos(context);
+        return;
+    }
+
+    // Resolução Just-In-Time (JIT) no momento exato do salvamento
+    const inputId = context === 'popup' ? 'input-ideia-popup' : 'input-ideia-wizard';
+    const targetIndex = processarAgrupamento(topicoId, inputId);
+    if (targetIndex === false) return;
+
+    const normalizedTargetIndex = Number.isInteger(targetIndex) ? targetIndex : null;
+
     if (context === 'popup') {
         const comentario = document.getElementById('comentario-input').value.trim();
-        salvarAnotacao(pendingTipo, pendingConteudo, docLabel, polo, topicoId, comentario, targetIndex);
+        salvarAnotacao(pendingTipo, pendingConteudo, docLabel, polo, topicoId, comentario, normalizedTargetIndex);
         fecharPopupClassificacao();
     } else {
         _ultimoTopicoUsadoId = topicoId;
         const comentario = document.getElementById('crop-comment-input').value.trim();
-        salvarAnotacao('imagem', _wizardImagemCapturada, docLabel, polo, topicoId, comentario, targetIndex);
+        salvarAnotacao('imagem', _wizardImagemCapturada, docLabel, polo, topicoId, comentario, normalizedTargetIndex);
         fecharTudoWizard();
     }
 }
@@ -474,17 +500,42 @@ function executarSalvamento(docLabel, polo, topicoId, targetIndex, context) {
    ================================================ */
 
 /**
+ * Restaura as sub-etapas internas do Passo 2 do Wizard (Documento vs. Polo)
+ * para garantir que um novo recorte nunca abra preso na tela de polo do recorte anterior.
+ */
+function resetarSubEtapasWizardPasso2() {
+    const stepPolo = document.getElementById('wizard-step-polo');
+    const stepDoc  = document.getElementById('wizard-step-doc');
+    const poloBox  = document.getElementById('wizard-polo-buttons-container');
+    const docText  = document.getElementById('wizard-doc-selecionado');
+
+    if (stepPolo) stepPolo.style.display = 'none';
+    if (stepDoc)  stepDoc.style.display  = 'block';
+    if (poloBox)  poloBox.innerHTML      = '';
+    if (docText)  docText.innerText      = '';
+
+    _docSelecionado  = null;
+    _isWizardContext = false;
+}
+
+/**
  * PASSO 0 — Ponto de entrada.
  * Abre o Passo 1 do wizard (seleção de tópico).
  * Bloqueia a interface com o backdrop.
  */
 function iniciarRecorteWizard() {
-    window.toggleModoFoco(true);
+    // Defesa contra colisão de modais: fecha o popup de classificação de texto se estiver aberto
+    if (typeof fecharPopupClassificacao === 'function') {
+        fecharPopupClassificacao();
+    }
+
     if (topicos.length === 0) {
+        window.toggleModoFoco(false);
         exibirToast('Crie pelo menos um Tópico Recursal antes de realizar recortes.', 'aviso');
         return;
     }
 
+    window.toggleModoFoco(true);
     DropdownManager.renderizar('crop-topic-select', topicos, _ultimoTopicoUsadoId);
 
     document.getElementById('wizard-backdrop').style.display  = 'block';
@@ -506,7 +557,6 @@ function avancarParaRecorte() {
     document.getElementById('crop-wizard-step1').style.display = 'none';
     document.getElementById('wizard-backdrop').style.display   = 'none';
 
-    // NOVO: Remove o desfoque do documento para garantir precisão no recorte
     window.toggleModoFoco(false);
 
     modoRecorteAtivo = true;
@@ -518,8 +568,6 @@ function avancarParaRecorte() {
     overlay.style.height   = r.height + 'px';
     overlay.style.display  = 'block';
 
-    // CORREÇÃO ARQUITETURAL: Desativa a camada de texto E a camada de links (annotationLayer).
-    // A highlightLayer NÃO é alterada aqui para respeitar seu estado CSS base.
     document.querySelectorAll('.textLayer, .annotationLayer').forEach(l => l.style.pointerEvents = 'none');
     
     document.getElementById('btn-ferramenta-recorte').classList.add('ativo');
@@ -535,7 +583,6 @@ function desativarOverlayRecorte() {
     overlay.style.display = 'none';
     document.getElementById('btn-ferramenta-recorte').classList.remove('ativo');
     
-    // RESTAURAÇÃO: Devolve a interatividade APENAS para as camadas que foram bloqueadas.
     document.querySelectorAll('.textLayer, .annotationLayer').forEach(l => l.style.pointerEvents = 'auto');
 }
 
@@ -545,24 +592,41 @@ function desativarOverlayRecorte() {
  */
 function abrirConfirmacaoRecorteWizard() {
     desativarOverlayRecorte();
-    
-    // NOVO: Reativa o desfoque para centralizar a atenção cognitiva no formulário
     window.toggleModoFoco(true);
 
+    // Garante que a sub-etapa inicial seja sempre a de escolha de Fase/Documento
+    resetarSubEtapasWizardPasso2();
+
     document.getElementById('crop-preview-img').src = _wizardImagemCapturada;
-    document.getElementById('crop-comment-input').value = '';
-    
-    // NOVO: Resetar modal e popular seletor com o tópico escolhido no Passo 1
-    document.querySelector('input[name="modo_agrupar_wizard"][value="nova"]').checked = true;
-    toggleAgruparWizard();
+
+    const commentInput = document.getElementById('crop-comment-input');
+    const ideiaInput   = document.getElementById('input-ideia-wizard');
+
+    // Se o usuário veio de "Refazer Área", restaura os campos que ele já havia preenchido
+    if (_wizardRascunhoRefazer) {
+        if (commentInput) commentInput.value = _wizardRascunhoRefazer.comentario || '';
+        const radioAlvo = document.querySelector(`input[name="modo_agrupar_wizard"][value="${_wizardRascunhoRefazer.modo}"]`);
+        if (radioAlvo) radioAlvo.checked = true;
+        toggleAgruparWizard();
+        if (_wizardRascunhoRefazer.modo === 'agrupar' && ideiaInput) {
+            ideiaInput.value = _wizardRascunhoRefazer.numeroIdeia || '';
+        }
+        _wizardRascunhoRefazer = null;
+    } else {
+        if (commentInput) commentInput.value = '';
+        if (ideiaInput) ideiaInput.value = '';
+        const radioNova = document.querySelector('input[name="modo_agrupar_wizard"][value="nova"]');
+        if (radioNova) radioNova.checked = true;
+        toggleAgruparWizard();
+    }
     
     renderizarFasesModais('wizard');
     const tabsWizard = document.getElementById('wizard-phase-tabs');
-    if(tabsWizard && tabsWizard.firstElementChild) tabsWizard.firstElementChild.click();
+    if (tabsWizard && tabsWizard.firstElementChild) tabsWizard.firstElementChild.click();
 
     const topicoObj = topicos.find(t => t.id === _wizardTopicoSelecionado);
     const wizardHeader = document.getElementById('wizard-topic-color-feedback');
-    if(topicoObj && wizardHeader) {
+    if (topicoObj && wizardHeader) {
         wizardHeader.style.backgroundColor = topicoObj.cor;
         wizardHeader.style.height = '6px';
     }
@@ -571,28 +635,24 @@ function abrirConfirmacaoRecorteWizard() {
     document.getElementById('crop-wizard-step2').style.display = 'flex';
 }
 
-/**
- * PASSO_2 → IDLE.
- * Salva a anotação com o polo selecionado e encerra o wizard.
- */
-function finalizarRecorteWizard(polo) {
-    const comentario = document.getElementById('crop-comment-input').value.trim();
-    _ultimoTopicoUsadoId = _wizardTopicoSelecionado;
-    
-    let targetIndex = null;
-    if (document.querySelector('input[name="modo_agrupar_wizard"]:checked').value === 'agrupar') {
-        targetIndex = document.getElementById('seletor-ideia-wizard').value;
-    }
-
-    salvarAnotacao('imagem', _wizardImagemCapturada, polo, _wizardTopicoSelecionado, comentario, targetIndex);
-    fecharTudoWizard();
-}
+// REMOVIDO: function finalizarRecorteWizard(polo) (Código morto que referenciava #seletor-ideia-wizard inexistente)
 
 /**
  * PASSO_2 → RECORTANDO.
- * Volta ao overlay sem retornar ao Passo 1: o tópico já foi escolhido.
+ * Preserva o que já foi digitado no Passo 2 e volta ao overlay sem retornar ao Passo 1.
  */
 function refazerRecorteArea() {
+    const commentInput = document.getElementById('crop-comment-input');
+    const radioChecked = document.querySelector('input[name="modo_agrupar_wizard"]:checked');
+    const ideiaInput   = document.getElementById('input-ideia-wizard');
+
+    _wizardRascunhoRefazer = {
+        comentario:  commentInput ? commentInput.value : '',
+        modo:        radioChecked ? radioChecked.value : 'nova',
+        numeroIdeia: ideiaInput   ? ideiaInput.value   : ''
+    };
+
+    resetarSubEtapasWizardPasso2();
     document.getElementById('crop-wizard-step2').style.display = 'none';
     document.getElementById('wizard-backdrop').style.display   = 'none';
     avancarParaRecorte();
@@ -607,16 +667,31 @@ function cancelarRecorteWizard() {
     desativarOverlayRecorte();
 }
 
-/** Utilitário interno: fecha os painéis visuais e zera as variáveis de estado. */
+/** Utilitário interno: fecha os painéis visuais e zera todas as variáveis de estado do Wizard. */
 function fecharTudoWizard() {
     window.toggleModoFoco(false);
+    resetarSubEtapasWizardPasso2();
+
     document.getElementById('crop-wizard-step1').style.display = 'none';
     document.getElementById('crop-wizard-step2').style.display = 'none';
     document.getElementById('wizard-backdrop').style.display   = 'none';
+
+    const commentInput = document.getElementById('crop-comment-input');
+    if (commentInput) commentInput.value = '';
+
+    const ideiaInput = document.getElementById('input-ideia-wizard');
+    if (ideiaInput) {
+        ideiaInput.value = '';
+        ideiaInput.style.display = 'none';
+    }
+
+    const radioNova = document.querySelector('input[name="modo_agrupar_wizard"][value="nova"]');
+    if (radioNova) radioNova.checked = true;
+
     _wizardTopicoSelecionado = null;
     _wizardImagemCapturada   = null;
+    _wizardRascunhoRefazer   = null;
     
-    // NOVO: Prevenção de State Leakage
     if (typeof _tempHighlightState !== 'undefined') {
         _tempHighlightState.rects = null;
         _tempHighlightState.paginaFisica = null;

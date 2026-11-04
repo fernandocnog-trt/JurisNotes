@@ -594,17 +594,277 @@ window.TopicsManager = (function () {
         return CORES_TOPICOS[index % CORES_TOPICOS.length];
     }
 
+    // Conjunto de classes CSS de polo com estilização semântica em juris-core.css.
+    // IMPORTANTE: Manter sincronizado caso novas classes .tag-* sejam criadas no CSS.
+    const POLO_CLASSES_CONHECIDAS = new Set([
+        'tag-parte-autora',
+        'tag-parte-re',
+        'tag-sentenca',
+        'tag-sentenca-de-ed',
+        'tag-laudo-pericial',
+        'tag-juizo',
+        'tag-perito',
+        'tag-parte-exequente',
+        'tag-parte-executada',
+        'tag-auxiliar-justica'
+    ]);
+
     /**
-     * Converte a string do polo em uma classe CSS válida.
+     * Converte a string do polo em uma classe CSS válida (protegida contra null/undefined).
      */
     function poloParaClasse(polo) {
-        return 'tag-' + polo
+        if (!polo) return 'tag-custom';
+        const slug = String(polo)
             .toLowerCase()
             .normalize('NFD')
-            .replace(/[\u0300-\u036f]/g, '') 
-            .replace(/[^a-z0-9]+/g, '-')     
-            .replace(/^-|-$/g, '');          
+            .replace(/[\u0300-\u036f]/g, '')
+            .replace(/[^a-z0-9]+/g, '-')
+            .replace(/^-|-$/g, '');
+        return slug ? `tag-${slug}` : 'tag-custom';
     }
+
+    /**
+     * Resolve a classe CSS da etiqueta de polo/teor e indica se é uma entrada manual customizada.
+     */
+    function obterInfoClassePolo(polo) {
+        const candidata = poloParaClasse(polo);
+        const isConhecida = POLO_CLASSES_CONHECIDAS.has(candidata);
+        return {
+            classeCss: isConhecida ? candidata : 'tag-custom',
+            isCustom: !isConhecida
+        };
+    }
+
+    /**
+     * Fábrica Unificada de Tags de Cabeçalho (Documento + Parte/Teor).
+     * @param {string|null} documento - Nome do documento ou papel principal.
+     * @param {string|null} polo - Nome da parte, teor manual ou orador.
+     * @param {Object} [opts] - Opções ({ prefixoDoc: string, poloSemanticoRef: string }).
+     */
+    function _gerarGrupoTagsHeader(documento, polo, opts = {}) {
+        const prefixoDoc = opts.prefixoDoc || '';
+        const docLimpo = documento ? String(documento).trim() : String(polo ?? '').trim();
+        const poloLimpo = (documento && polo) ? String(polo).trim() : '';
+
+        const docSeguro = escaparHTML(docLimpo);
+        const poloSeguro = escaparHTML(poloLimpo);
+        const temSegundaTag = Boolean(poloSeguro && poloSeguro !== docSeguro);
+
+        // Em cartões de áudio com tag única de orador, preserva a cor semântica de poloTag
+        let classePrimeiraTag = 'doc-tag';
+        if (!documento && opts.poloSemanticoRef) {
+            classePrimeiraTag = obterInfoClassePolo(opts.poloSemanticoRef).classeCss;
+        }
+
+        const wrapperPrimeiraMod = temSegundaTag ? 'polo-tag-wrapper--doc' : 'polo-tag-wrapper--solo';
+        const docLabelCompleto = escaparHTML(`${prefixoDoc}${docLimpo}`);
+
+        let html = `
+            <span class="polo-tag-wrapper ${wrapperPrimeiraMod}">
+                <span class="polo-tag ${classePrimeiraTag}" data-full-text="${docLabelCompleto}">${prefixoDoc}${docSeguro}</span>
+            </span>`;
+
+        if (temSegundaTag) {
+            const refCorPolo = opts.poloSemanticoRef || poloLimpo;
+            const { classeCss, isCustom } = obterInfoClassePolo(refCorPolo);
+            const wrapperSegundaMod = isCustom ? 'polo-tag-wrapper--custom' : 'polo-tag-wrapper--semantic';
+
+            html += `
+            <span class="polo-tag-wrapper ${wrapperSegundaMod}">
+                <span class="polo-tag ${classeCss}" data-full-text="${poloSeguro}">${poloSeguro}</span>
+            </span>`;
+        }
+
+        return `<div class="card-tags-group">${html}</div>`;
+    }
+
+    /**
+     * Sincroniza tabindex="0" e .is-tag-truncated apenas nas tags efetivamente cortadas (scrollWidth > clientWidth).
+     */
+    function _sincronizarAcessibilidadeTagsTruncadas(rootEl = document) {
+        if (!rootEl) return;
+        const tags = rootEl.querySelectorAll('.polo-tag[data-full-text]');
+        const leituras = [];
+
+        // Fase 1: Leitura geométrica em lote
+        tags.forEach(tag => {
+            if (tag.offsetParent === null) return;
+            const truncada = (tag.scrollWidth - tag.clientWidth) > 1;
+            leituras.push({ tag, truncada });
+        });
+
+        // Fase 2: Escrita no DOM em lote
+        leituras.forEach(({ tag, truncada }) => {
+            tag.classList.toggle('is-tag-truncated', truncada);
+            if (truncada) {
+                if (tag.getAttribute('tabindex') !== '0') tag.setAttribute('tabindex', '0');
+            } else {
+                if (tag.hasAttribute('tabindex')) tag.removeAttribute('tabindex');
+            }
+        });
+    }
+
+    /**
+     * Controlador Singleton do Tooltip Flutuante de Tags e Observador de Largura.
+     */
+    const _TagTooltipController = (function() {
+        let _tooltipEl = null;
+        let _activeTarget = null;
+        let _bound = false;
+        let _lastPointerType = 'mouse';
+        let _isPointerFocusing = false;
+        let _widthRaf = null;
+        let _lastContainerWidth = 0;
+
+        const _tagWidthObserver = new ResizeObserver((entries) => {
+            for (const entry of entries) {
+                if (!entry.target || entry.target.offsetParent === null) continue;
+                const width = Math.round(entry.contentRect.width);
+                if (width > 0 && Math.abs(width - _lastContainerWidth) >= 2) {
+                    _lastContainerWidth = width;
+                    ocultar();
+                    if (_widthRaf) cancelAnimationFrame(_widthRaf);
+                    _widthRaf = requestAnimationFrame(() => {
+                        _sincronizarAcessibilidadeTagsTruncadas(entry.target);
+                    });
+                }
+            }
+        });
+
+        function _getOrCreateTooltip() {
+            if (_tooltipEl && document.body.contains(_tooltipEl)) return _tooltipEl;
+            _tooltipEl = document.getElementById('juris-tag-tooltip');
+            if (!_tooltipEl) {
+                _tooltipEl = document.createElement('div');
+                _tooltipEl.id = 'juris-tag-tooltip';
+                _tooltipEl.className = 'juris-tag-tooltip';
+                _tooltipEl.setAttribute('role', 'tooltip');
+                _tooltipEl.setAttribute('aria-hidden', 'true');
+                document.body.appendChild(_tooltipEl);
+            }
+            return _tooltipEl;
+        }
+
+        function mostrar(tagEl) {
+            if (!tagEl) return;
+            const estaTruncada = (tagEl.scrollWidth - tagEl.clientWidth) > 1;
+            if (!estaTruncada) {
+                ocultar();
+                return;
+            }
+
+            const textoIntegral = tagEl.getAttribute('data-full-text');
+            if (!textoIntegral) return;
+
+            const tooltip = _getOrCreateTooltip();
+            if (_activeTarget && _activeTarget !== tagEl) {
+                _activeTarget.removeAttribute('aria-describedby');
+            }
+            _activeTarget = tagEl;
+            tagEl.setAttribute('aria-describedby', 'juris-tag-tooltip');
+
+            // Reseta left/top antes de medir para evitar quebra precoce por posição residual
+            tooltip.style.left = '0px';
+            tooltip.style.top = '0px';
+            tooltip.textContent = textoIntegral;
+            tooltip.classList.add('is-visible');
+            tooltip.setAttribute('aria-hidden', 'false');
+
+            const tagRect = tagEl.getBoundingClientRect();
+            const tipRect = tooltip.getBoundingClientRect();
+            const MARGEM_VIEWPORT = 12;
+            const GAP_VERTICAL = 8;
+
+            let left = tagRect.left + (tagRect.width / 2) - (tipRect.width / 2);
+            left = Math.max(MARGEM_VIEWPORT, Math.min(left, window.innerWidth - tipRect.width - MARGEM_VIEWPORT));
+
+            let top = tagRect.top - tipRect.height - GAP_VERTICAL;
+            if (top < MARGEM_VIEWPORT) {
+                top = tagRect.bottom + GAP_VERTICAL;
+            }
+
+            tooltip.style.left = `${Math.round(left)}px`;
+            tooltip.style.top = `${Math.round(top)}px`;
+        }
+
+        function ocultar() {
+            if (_activeTarget) {
+                _activeTarget.removeAttribute('aria-describedby');
+                _activeTarget = null;
+            }
+            if (!_tooltipEl) return;
+            _tooltipEl.classList.remove('is-visible');
+            _tooltipEl.setAttribute('aria-hidden', 'true');
+        }
+
+        function inicializarDelegacao() {
+            const historyContainer = document.getElementById('history-container');
+            if (!historyContainer) return;
+
+            _tagWidthObserver.observe(historyContainer);
+
+            if (_bound) return;
+
+            // Rastreia a origem do ponteiro antes de focusin/click e fecha ao tocar fora
+            document.addEventListener('pointerdown', (e) => {
+                _lastPointerType = e.pointerType || 'mouse';
+                _isPointerFocusing = true;
+                requestAnimationFrame(() => { _isPointerFocusing = false; });
+
+                if (_activeTarget && !e.target.closest('.polo-tag[data-full-text]')) {
+                    ocultar();
+                }
+            }, { capture: true, passive: true });
+
+            // Hover exclusivo para mouse físico
+            historyContainer.addEventListener('pointerover', (e) => {
+                if (e.pointerType !== 'mouse') return;
+                const tag = e.target.closest('.polo-tag[data-full-text]');
+                if (tag) mostrar(tag);
+            });
+
+            historyContainer.addEventListener('pointerout', (e) => {
+                if (e.pointerType !== 'mouse') return;
+                const tag = e.target.closest('.polo-tag[data-full-text]');
+                if (tag && (!e.relatedTarget || !tag.contains(e.relatedTarget))) {
+                    ocultar();
+                }
+            });
+
+            // Foco exclusivo para navegação por teclado (Tab) — ignora foco gerado por clique/toque
+            historyContainer.addEventListener('focusin', (e) => {
+                if (_isPointerFocusing) return;
+                const tag = e.target.closest('.polo-tag[data-full-text]');
+                if (tag && tag.matches(':focus-visible')) {
+                    mostrar(tag);
+                }
+            });
+
+            historyContainer.addEventListener('focusout', (e) => {
+                const tag = e.target.closest('.polo-tag[data-full-text]');
+                if (tag) ocultar();
+            });
+
+            // Alternância no clique exclusivamente para toque/caneta (mouse já usa hover)
+            historyContainer.addEventListener('click', (e) => {
+                if (_lastPointerType === 'mouse') return;
+                const tag = e.target.closest('.polo-tag[data-full-text]');
+                if (tag && (tag.scrollWidth - tag.clientWidth) > 1) {
+                    if (_activeTarget === tag) ocultar();
+                    else mostrar(tag);
+                } else if (_activeTarget) {
+                    ocultar();
+                }
+            });
+
+            // Fecha em qualquer rolagem da página ou de sub-containers internos
+            document.addEventListener('scroll', ocultar, { capture: true, passive: true });
+
+            _bound = true;
+        }
+
+        return { inicializarDelegacao, ocultar };
+    })();
 
     /**
      * Motor unificado para construção de cards de áudio.
@@ -620,11 +880,9 @@ window.TopicsManager = (function () {
             return { htmlConteudo: `<p class="card-texto" style="color:#c62828;">[Erro: metadados do áudio corrompidos]</p>`, htmlComentario: '' };
         }
             
-        const classePolo = dados.poloTag ? poloParaClasse(dados.poloTag) : 'doc-tag';
-        let tagVisual = `<span class="polo-tag ${classePolo}">${escaparHTML(dados.orador)}</span>`;
-        if ((dados.role === 'Testemunha' || dados.role === 'Advogado') && dados.poloTag) {
-            tagVisual = `<span class="polo-tag doc-tag">${escaparHTML(dados.role)}</span> <span class="polo-tag ${classePolo}">${escaparHTML(dados.poloTag)}</span>`;
-        }
+        const tagVisual = ((dados.role === 'Testemunha' || dados.role === 'Advogado') && dados.poloTag)
+            ? _gerarGrupoTagsHeader(dados.role, dados.poloTag, { poloSemanticoRef: dados.poloTag })
+            : _gerarGrupoTagsHeader(null, dados.orador, { poloSemanticoRef: dados.poloTag });
 
         const inicioNum = Number(dados.inicioNum);
         const fimNum = Number(dados.fimNum);
@@ -660,7 +918,9 @@ window.TopicsManager = (function () {
                     </svg>
                 </div>
                 <div class="audio-card-meta">
-                    <strong>Oitiva:</strong> ${tagVisual}<br>
+                    <div class="audio-oitiva-row">
+                        <strong>Oitiva:</strong> ${tagVisual}
+                    </div>
                     <span class="audio-time-badge">${dados.rotuloTempo}</span>
                 </div>
             </div>`;
@@ -826,14 +1086,6 @@ window.TopicsManager = (function () {
         
         const corTextoBadge = obterCorContraste(_activeTopicoCor);
         
-        const docSeguro = anotacao.documento ? escaparHTML(anotacao.documento) : escaparHTML(anotacao.polo);
-        const poloSeguro = (anotacao.documento && anotacao.polo) ? escaparHTML(anotacao.polo) : '';
-        
-        let tagsHtml = `<span class="polo-tag doc-tag">${docSeguro}</span>`;
-        if (poloSeguro && poloSeguro !== docSeguro) {
-            tagsHtml += ` <span class="polo-tag ${poloParaClasse(anotacao.polo)}">${poloSeguro}</span>`;
-        }
-
         function gerarBarraAcoes(isCorrelacionado, cIdx) {
             // Injeção segura do cIdx no contexto do botão (resolve o bug da falta de índice)
             const ctxCidx = isCorrelacionado && cIdx != null ? `, cIdx: ${cIdx}` : '';
@@ -1053,11 +1305,8 @@ window.TopicsManager = (function () {
                         ${_htmlConectorCorrelacao('Arraste a pasta inteira para reordenar')}
                         
                         <div class="annotation-card correlated-card pilha-processual-card ${faseClass}">
-                            <div class="card-header">
-                                <div style="display:flex; gap:6px;">
-                                    <span class="polo-tag doc-tag">🗂️ ${docSeguro}</span>
-                                    ${(poloSeguro && poloSeguro !== docSeguro) ? `<span class="polo-tag ${itemTag}">${poloSeguro}</span>` : ''}
-                                </div>
+                            <div class="card-header card-header--tags">
+                                ${_gerarGrupoTagsHeader(item.documento, item.polo, { prefixoDoc: '🗂️ ' })}
                             </div>
                             <div class="scrollable-stack-text">${htmlTextosInternos}</div>
                             
@@ -1103,11 +1352,8 @@ window.TopicsManager = (function () {
                      ondragend="DnDManager.dragEnd(event)">
                     ${_htmlConectorCorrelacao('Arraste para reordenar')}
                     <div class="annotation-card correlated-card fase-${typeof identificarFaseMetodologica === 'function' ? identificarFaseMetodologica(item.documento) : 4}">
-                        <div class="card-header">
-                            <div style="display:flex; gap:6px;">
-                                <span class="polo-tag doc-tag">${docSeguro}</span>
-                                ${(poloSeguro && poloSeguro !== docSeguro) ? `<span class="polo-tag ${itemTag}">${poloSeguro}</span>` : ''}
-                            </div>
+                        <div class="card-header card-header--tags">
+                            ${_gerarGrupoTagsHeader(item.documento, item.polo)}
                             <span class="card-meta" style="cursor:pointer;" title="Clique: Copiar | Shift+Clique: Editar folha | Ctrl+Clique: Ir ao PDF" onclick="handleMetaClick(event, '${activeTabId}', ${index}, true, ${cIdx})">${itemMeta}</span>
                         </div>
                         ${cConteudo}
@@ -1138,8 +1384,8 @@ window.TopicsManager = (function () {
                         </div>
                     </div>
                     <div class="annotation-card ${bgZoneClass} ${bgPoloClass}">
-                        <div class="card-header">
-                            <div style="display:flex; gap:6px;">${tagsHtml}</div>
+                        <div class="card-header card-header--tags">
+                            ${_gerarGrupoTagsHeader(anotacao.documento, anotacao.polo)}
                             <span class="card-meta" style="cursor:pointer;" title="Clique: Copiar | Shift+Clique: Editar folha | Ctrl+Clique: Ir ao PDF" onclick="handleMetaClick(event, '${activeTabId}', ${index}, false)">${metaTexto}</span>
                         </div>
                         ${htmlConteudo}
@@ -1771,6 +2017,10 @@ window.TopicsManager = (function () {
                 restaurarScroll();
             }
             
+            _TagTooltipController.inicializarDelegacao();
+            _TagTooltipController.ocultar();
+            _sincronizarAcessibilidadeTagsTruncadas(contentEl);
+
             _atualizarMarcadoresDeIdeia(topicoAtivo);
             atualizarContadorNotasOcultas();
         });
@@ -3054,6 +3304,7 @@ window.TopicsManager = (function () {
                 if (container && container.offsetParent !== null) {
                     posicionarNosDeIdeia(container);
                     desenharConexoes();
+                    _sincronizarAcessibilidadeTagsTruncadas(container);
                 }
             });
         });
