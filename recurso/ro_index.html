@@ -106,6 +106,12 @@
             <line x1="14.47" y1="14.48" x2="20" y2="20"></line>
             <line x1="8.12" y1="8.12" x2="12" y2="12"></line>
         </symbol>
+        <symbol id="icon-transfer-volumes" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="17 1 21 5 17 9"></polyline>
+            <path d="M3 11V9a4 4 0 0 1 4-4h14"></path>
+            <polyline points="7 23 3 19 7 15"></polyline>
+            <path d="M21 13v2a4 4 0 0 1-4 4H3"></path>
+        </symbol>
         <symbol id="icon-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
             <polyline points="7 10 12 15 17 10"></polyline>
@@ -238,6 +244,10 @@
                         <line x1="14.47" y1="14.48" x2="20" y2="20"></line>
                         <line x1="8.12" y1="8.12" x2="12" y2="12"></line>
                     </svg>
+                </button>
+
+                <button class="icon-btn" id="btn-transitar-volumes" onclick="TopicsManager.abrirModalTransitarVolumes()" title="Mover Grupos de Ideias entre Volumes (Requer 2+ volumes no tópico)" disabled>
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#icon-transfer-volumes"></use></svg>
                 </button>
 
                 <!-- NOVO BOTÃO: Visão Estruturada (Nasce desabilitado) -->
