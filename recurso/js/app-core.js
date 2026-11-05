@@ -888,9 +888,11 @@ function trocarAba(aba) {
     const isAnotacoes = (aba === 'historico' && topicos.length > 0);
     const isLeitura   = (aba === 'leitura');
     
-    const btnTesoura = document.getElementById('btn-dividir-topico');
-    if (btnTesoura) {
-        btnTesoura.disabled = !isAnotacoes;
+    if (window.TopicsManager && typeof TopicsManager.atualizarEstadoFerramentasVolume === 'function') {
+        TopicsManager.atualizarEstadoFerramentasVolume();
+    } else {
+        const btnTesoura = document.getElementById('btn-dividir-topico');
+        if (btnTesoura) btnTesoura.disabled = !isAnotacoes;
     }
     
     const btnExportar = document.getElementById('btn-exportar-topico');
@@ -1003,6 +1005,10 @@ function habilitarFerramentasDeTrabalho() {
         window.ShortcutManager.toggleVisibility(true);
         window.ShortcutManager.updateUI();
     }
+
+    if (window.TopicsManager && typeof TopicsManager.atualizarEstadoFerramentasVolume === 'function') {
+        TopicsManager.atualizarEstadoFerramentasVolume();
+    }
 }
 
 function encerrarSessao() {
@@ -1064,7 +1070,7 @@ function encerrarSessao() {
     }
     window._nomeArquivoSugerido = null;
 
-    ['btn-ferramenta-recorte', 'btn-ferramenta-texto', 'btn-novo-topico', 'btn-encerrar-sessao', 'btn-ferramenta-audio', 'btn-ferramenta-extrator', 'btn-visao-estruturada', 'btn-visao-minuta', 'btn-atualizar-pdf']
+    ['btn-ferramenta-recorte', 'btn-ferramenta-texto', 'btn-novo-topico', 'btn-encerrar-sessao', 'btn-ferramenta-audio', 'btn-ferramenta-extrator', 'btn-visao-estruturada', 'btn-visao-minuta', 'btn-atualizar-pdf', 'btn-dividir-topico', 'btn-transitar-volumes']
         .forEach(id => {
             const el = document.getElementById(id);
             if (el) {
@@ -1677,8 +1683,11 @@ document.addEventListener('keydown', function (e) {
                 if (modal.id === 'modal-notas-ocultas' && window.TopicsManager) TopicsManager.fecharModalNotasOcultas();
                 if (modal.id === 'modal-editar-tese' && typeof fecharModalTese === 'function') fecharModalTese();
                 
-                // NOVO: Delegar o fechamento ao TopicsManager (Tesoura)
+                // NOVO: Delegar o fechamento ao TopicsManager (Tesoura e Trânsito entre Volumes)
                 if (modal.id === 'modal-predivisao' && window.TopicsManager) TopicsManager.fecharModalPreDivisao();
+                if (modal.id === 'modal-transitar-volumes' && window.TopicsManager) {
+                    TopicsManager.fecharModalTransitarVolumes();
+                }
             }
         });
     }
@@ -1805,6 +1814,15 @@ function solicitarExclusaoAba(btnEl, id) {
             }
         }
         
+        const topicoExcluido = topicos.find(t => t.id === id);
+        if (topicoExcluido) {
+            const ancestralHerdado = topicoExcluido.volumeData?.anteriorId || null;
+            topicos.forEach(t => {
+                if (t.volumeData && t.volumeData.anteriorId === id) {
+                    t.volumeData.anteriorId = ancestralHerdado;
+                }
+            });
+        }
         topicos = topicos.filter(t => t.id !== id);
         renderizarTopicos();
         salvarBackupAutomatico();

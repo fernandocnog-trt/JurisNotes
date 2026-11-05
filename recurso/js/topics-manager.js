@@ -176,6 +176,7 @@ window.TopicsManager = (function () {
     
     function resetVisibilidadeGlobais() {
         _topicosComGlobaisAbertas.clear();
+        _ultimoSnapshotTransito = null; // Libera memória do snapshot ao encerrar/resetar sessão
     }
 
     /* ================================================
@@ -1566,7 +1567,7 @@ window.TopicsManager = (function () {
 
     /**
      * Sincroniza módulos externos dependentes do contexto da aba ativa
-     * (Cronômetro de Eficiência e Status do Extrator de Peças).
+     * (Cronômetro de Eficiência, Status do Extrator de Peças e Ferramentas de Volume).
      */
     function _sincronizarModulosPerifericos() {
         if (window.TimeTrackerManager && typeof window.TimeTrackerManager.sincronizarCor === 'function') {
@@ -1575,6 +1576,8 @@ window.TopicsManager = (function () {
         if (typeof window.atualizarStatusBotaoExtrator === 'function') {
             window.atualizarStatusBotaoExtrator();
         }
+        // Centraliza a atualização dos botões de volume nos 3 pontos de saída de renderizarFichario
+        atualizarEstadoFerramentasVolume();
     }
 
     /**
@@ -1627,6 +1630,7 @@ window.TopicsManager = (function () {
             contentEl.style.borderTop       = 'none';
             contentEl.style.backgroundColor = 'transparent';
             _ultimaAbaRenderizada = null;
+            _ultimoSnapshotTransito = null;
             _atualizarMarcadoresDeIdeia(null);
             atualizarContadorNotasOcultas();
             _sincronizarModulosPerifericos();
@@ -2882,29 +2886,137 @@ window.TopicsManager = (function () {
         return roman;
     };
 
+    const LIMITE_CAPACIDADE_VOLUME = 30;
     let _debounceContagemItens = null;
     let _ultimoIndiceClicadoCorte = null;
+    let _transitarTriggerEl = null;
+    let _ultimoSnapshotTransito = null;
+
+    /**
+     * Calcula o peso estrutural de um Grupo de Ideia (Mestre + Correlacionados + Sub-nós).
+     * Exclui cartões de checkpoint por serem banners estáticos sem impacto no motor SVG.
+     */
+    function _calcularPesoGrupoIdeia(an) {
+        if (!an || _ehCheckpoint(an)) return 0;
+        let peso = 1;
+        peso += Array.isArray(an.subAnotacoes) ? an.subAnotacoes.length : 0;
+        if (Array.isArray(an.itensCorrelacionados)) {
+            peso += an.itensCorrelacionados.length;
+            an.itensCorrelacionados.forEach(ic => {
+                peso += Array.isArray(ic.subAnotacoes) ? ic.subAnotacoes.length : 0;
+            });
+        }
+        return peso;
+    }
+
+    function _calcularPesoEstruturalTopico(topico) {
+        if (!topico || !Array.isArray(topico.anotacoes)) return 0;
+        let total = 0;
+        topico.anotacoes.forEach(an => { total += _calcularPesoGrupoIdeia(an); });
+        return total;
+    }
+
+    function _obterNumeroVolume(topico) {
+        if (!topico) return 1;
+        if (topico.volumeData && typeof topico.volumeData.sequencia === 'number') {
+            return topico.volumeData.sequencia;
+        }
+        return 1;
+    }
+
+    /**
+     * Sobe a cadeia volumeData.anteriorId até a raiz comum (com proteção contra ciclos).
+     */
+    function _obterRaizCadeiaVolume(topico, mapaPorId) {
+        const visitados = new Set();
+        let atual = topico;
+        let eloQuebrado = false;
+
+        while (atual && atual.volumeData && atual.volumeData.anteriorId) {
+            if (visitados.has(atual.id)) break;
+            visitados.add(atual.id);
+            const pai = mapaPorId.get(atual.volumeData.anteriorId);
+            if (!pai) {
+                eloQuebrado = true;
+                break;
+            }
+            atual = pai;
+        }
+        return { raizId: atual ? atual.id : null, eloQuebrado };
+    }
+
+    /**
+     * Retorna todos os volumes pertencentes à mesma família (mesma raiz anteriorId),
+     * ordenados crescentemente por número de sequência.
+     */
+    function obterFamiliaVolumes(topicoAlvo) {
+        if (!topicoAlvo || typeof topicos === 'undefined' || !Array.isArray(topicos)) return [];
+        const mapaPorId = new Map(topicos.map(t => [t.id, t]));
+        const { raizId } = _obterRaizCadeiaVolume(topicoAlvo, mapaPorId);
+        if (!raizId) return [topicoAlvo];
+
+        const familia = topicos.filter(t => _obterRaizCadeiaVolume(t, mapaPorId).raizId === raizId);
+        return familia.sort((a, b) => _obterNumeroVolume(a) - _obterNumeroVolume(b));
+    }
+
+    /**
+     * Atualiza de forma síncrona o estado habilitado/desabilitado de #btn-dividir-topico e #btn-transitar-volumes.
+     */
+    function atualizarEstadoFerramentasVolume(topicoOpcional = null) {
+        const btnTesoura = document.getElementById('btn-dividir-topico');
+        const btnTransitar = document.getElementById('btn-transitar-volumes');
+
+        const isAbaAnotacoes = document.body.dataset.activeTab === 'historico';
+        const listaTopicos = (typeof topicos !== 'undefined' && Array.isArray(topicos)) ? topicos : [];
+        const topicoRef = topicoOpcional || listaTopicos.find(t => t.id === activeTabId) || listaTopicos[0] || null;
+
+        if (!isAbaAnotacoes || !topicoRef || listaTopicos.length === 0) {
+            if (btnTesoura) {
+                btnTesoura.disabled = true;
+                btnTesoura.classList.remove('limite-pulse-alert');
+            }
+            if (btnTransitar) {
+                btnTransitar.disabled = true;
+                btnTransitar.title = 'Mover Grupos de Ideias entre Volumes (Disponível na aba Anotações quando houver 2+ volumes)';
+            }
+            return;
+        }
+
+        if (btnTesoura) {
+            btnTesoura.disabled = false;
+        }
+
+        if (btnTransitar) {
+            const familia = obterFamiliaVolumes(topicoRef);
+            const possuiMultiplosVolumes = familia.length >= 2;
+            btnTransitar.disabled = !possuiMultiplosVolumes;
+
+            if (possuiMultiplosVolumes) {
+                const volNum = _obterNumeroVolume(topicoRef);
+                btnTransitar.title = `Transitar Grupos de Ideias entre Volumes (${familia.length} volumes neste tópico — Atual: Vol. ${toRoman(volNum)})`;
+            } else {
+                btnTransitar.title = 'Mover Grupos de Ideias entre Volumes (Inativo: este tópico possui apenas 1 volume)';
+            }
+        }
+    }
 
     function atualizarAlertaCapacidadeTopico(topico) {
         clearTimeout(_debounceContagemItens);
         _debounceContagemItens = setTimeout(() => {
+            if (document.body.dataset.activeTab !== 'historico') return;
             if (!topico || !topico.anotacoes) return;
-            let total = topico.anotacoes.length;
-            topico.anotacoes.forEach(an => {
-                total += (an.subAnotacoes ? an.subAnotacoes.length : 0);
-                if (an.itensCorrelacionados) {
-                    total += an.itensCorrelacionados.length;
-                    an.itensCorrelacionados.forEach(ic => total += (ic.subAnotacoes ? ic.subAnotacoes.length : 0));
-                }
-            });
 
+            const total = _calcularPesoEstruturalTopico(topico);
             const btn = document.getElementById('btn-dividir-topico');
             if (btn) {
-                const limiteAtingido = total >= 30;
+                const jaDividido = topico.anotacoes.some(a => a && a.tipo === 'checkpoint_saida');
+                const limiteAtingido = total >= LIMITE_CAPACIDADE_VOLUME && !jaDividido;
                 btn.classList.toggle('limite-pulse-alert', limiteAtingido);
                 btn.disabled = false;
-                
-                if (limiteAtingido) {
+
+                if (jaDividido) {
+                    btn.title = 'Este volume já foi dividido. Acesse o último volume criado para realizar nova divisão.';
+                } else if (limiteAtingido) {
                     btn.title = '⚠️ Este tópico está muito longo! Clique para dividir em um novo volume e evitar que a IA se perca ou esqueça do contexto.';
                 } else {
                     btn.title = 'Dividir Tópico em Volumes (Checkpoint IA)';
@@ -2915,7 +3027,7 @@ window.TopicsManager = (function () {
 
     /**
      * Extrai um resumo estruturado do Grupo de Ideia (Mestre + Correlacionados + Sub-nós)
-     * para exibição clara no checklist do modal da Tesoura.
+     * para exibição no checklist dos modais da Tesoura e de Trânsito.
      */
     function _obterResumoGrupoIdeia(anotacao) {
         const doc = anotacao.documento || anotacao.polo || 'Elemento Probatório';
@@ -2980,13 +3092,10 @@ window.TopicsManager = (function () {
         }
     }
 
-    /**
-     * Alterna o modo expandido da lista de ideias dentro do modal da Tesoura.
-     */
-    function _alternarExpansaoListaCorte(forcarEstado) {
-        const modal = document.getElementById('modal-predivisao');
-        const btnExpand = document.getElementById('btn-safecut-expand-list');
-        const listEl = document.getElementById('safecut-ideas-list');
+    function _alternarExpansaoModalVolume(modalId, btnExpandId, listId, forcarEstado) {
+        const modal = document.getElementById(modalId);
+        const btnExpand = document.getElementById(btnExpandId);
+        const listEl = document.getElementById(listId);
         if (!modal || !btnExpand) return;
 
         const novoEstado = typeof forcarEstado === 'boolean'
@@ -2997,58 +3106,60 @@ window.TopicsManager = (function () {
         btnExpand.setAttribute('aria-pressed', novoEstado ? 'true' : 'false');
         btnExpand.textContent = novoEstado ? '⤡ Restaurar tamanho' : '⤢ Expandir';
 
-        // Limpa altura inline deixada pelo resize manual do mouse para que a classe CSS assuma
         if (listEl) listEl.style.height = '';
     }
 
+    function _alternarExpansaoListaCorte(forcarEstado) {
+        _alternarExpansaoModalVolume('modal-predivisao', 'btn-safecut-expand-list', 'safecut-ideas-list', forcarEstado);
+    }
+
     /**
-     * Inicializa de forma idempotente a delegação de eventos do modal de pré-divisão.
-     * Elimina a necessidade de onclick/onchange inline nos itens gerados dinamicamente.
+     * Helper compartilhado (DRY) para delegação de eventos de checklist em lote
+     * usado tanto por #modal-predivisao (Tesoura) quanto por #modal-transitar-volumes (Trânsito).
      */
-    function _inicializarEventosModalCorte() {
-        const modal = document.getElementById('modal-predivisao');
+    function _vincularChecklistVolumeModal(modalId, btnExpandId, listId, onSelectionChange, onCustomAction = null) {
+        const modal = document.getElementById(modalId);
         if (!modal || modal.dataset.safecutBound === 'true') return;
 
         modal.addEventListener('click', (event) => {
-            // 0. Botão "⤢ Expandir / ⤡ Restaurar tamanho"
-            const btnExpand = event.target.closest('[data-safecut-action="toggle-expand"]');
-            if (btnExpand) {
-                event.preventDefault();
-                _alternarExpansaoListaCorte();
-                return;
-            }
+            const actionEl = event.target.closest('[data-safecut-action]');
+            if (actionEl) {
+                const action = actionEl.dataset.safecutAction;
 
-            // 1. Botão "⤵ Daqui até o fim" em um item específico
-            const btnFromHere = event.target.closest('[data-safecut-action="from-here"]');
-            if (btnFromHere) {
-                event.preventDefault();
-                event.stopPropagation();
-                const startOrder = parseInt(btnFromHere.dataset.orderIndex, 10);
-                if (!isNaN(startOrder)) {
-                    const allCheckboxes = Array.from(modal.querySelectorAll('.safecut-idea-checkbox'));
-                    allCheckboxes.forEach((chk, idx) => {
-                        chk.checked = (idx >= startOrder);
-                    });
-                    _ultimoIndiceClicadoCorte = startOrder;
-                    _atualizarResumoSelecaoCorte();
+                if (action === 'toggle-expand') {
+                    event.preventDefault();
+                    _alternarExpansaoModalVolume(modalId, btnExpandId, listId);
+                    return;
                 }
-                return;
+
+                if (action === 'from-here') {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    const startOrder = parseInt(actionEl.dataset.orderIndex, 10);
+                    if (!isNaN(startOrder)) {
+                        const allCheckboxes = Array.from(modal.querySelectorAll('.safecut-idea-checkbox'));
+                        allCheckboxes.forEach((chk, idx) => { chk.checked = (idx >= startOrder); });
+                        _ultimoIndiceClicadoCorte = startOrder;
+                        onSelectionChange();
+                    }
+                    return;
+                }
+
+                if (action === 'select-all' || action === 'clear-all') {
+                    event.preventDefault();
+                    const marcar = action === 'select-all';
+                    modal.querySelectorAll('.safecut-idea-checkbox').forEach(chk => { chk.checked = marcar; });
+                    _ultimoIndiceClicadoCorte = null;
+                    onSelectionChange();
+                    return;
+                }
+
+                if (typeof onCustomAction === 'function') {
+                    onCustomAction(action, event);
+                    return;
+                }
             }
 
-            // 2. Botões de cabeçalho: "Marcar todos" / "Limpar"
-            const btnBulk = event.target.closest('[data-safecut-action="select-all"], [data-safecut-action="clear-all"]');
-            if (btnBulk) {
-                event.preventDefault();
-                const marcar = btnBulk.dataset.safecutAction === 'select-all';
-                modal.querySelectorAll('.safecut-idea-checkbox').forEach(chk => {
-                    chk.checked = marcar;
-                });
-                _ultimoIndiceClicadoCorte = null;
-                _atualizarResumoSelecaoCorte();
-                return;
-            }
-
-            // 3. Suporte a Shift + Clique diretamente no checkbox para seleção de intervalo
             const chkTarget = event.target.closest('.safecut-idea-checkbox');
             if (chkTarget) {
                 const currentOrder = parseInt(chkTarget.dataset.orderIndex, 10);
@@ -3062,17 +3173,21 @@ window.TopicsManager = (function () {
                     }
                 }
                 _ultimoIndiceClicadoCorte = currentOrder;
-                _atualizarResumoSelecaoCorte();
+                onSelectionChange();
             }
         });
 
         modal.addEventListener('change', (event) => {
             if (event.target.classList.contains('safecut-idea-checkbox')) {
-                _atualizarResumoSelecaoCorte();
+                onSelectionChange();
             }
         });
 
         modal.dataset.safecutBound = 'true';
+    }
+
+    function _inicializarEventosModalCorte() {
+        _vincularChecklistVolumeModal('modal-predivisao', 'btn-safecut-expand-list', 'safecut-ideas-list', _atualizarResumoSelecaoCorte);
     }
 
     function acionarDivisaoTopico() {
@@ -3292,6 +3407,639 @@ window.TopicsManager = (function () {
         }
     }
 
+    /**
+     * Clona profundamente a árvore mutável de cartões (metadados, subAnotacoes, itensCorrelacionados,
+     * highlightRects) preservando a referência da string primitiva imutável `conteudo` (evita duplicar Base64).
+     */
+    function _clonarAnotacoesParaSnapshot(listaAnotacoes) {
+        if (!Array.isArray(listaAnotacoes)) return [];
+        return listaAnotacoes.map(an => {
+            if (!an || typeof an !== 'object') return an;
+            const copia = { ...an };
+            if (an.metaHandoff) copia.metaHandoff = { ...an.metaHandoff };
+            if (Array.isArray(an.highlightRects)) {
+                copia.highlightRects = an.highlightRects.map(r => ({ ...r }));
+            }
+            if (Array.isArray(an.subAnotacoes)) {
+                copia.subAnotacoes = an.subAnotacoes.map(s => ({ ...s }));
+            }
+            if (Array.isArray(an.itensCorrelacionados)) {
+                copia.itensCorrelacionados = an.itensCorrelacionados.map(ic => {
+                    const copiaIc = { ...ic };
+                    if (Array.isArray(ic.highlightRects)) {
+                        copiaIc.highlightRects = ic.highlightRects.map(r => ({ ...r }));
+                    }
+                    if (Array.isArray(ic.subAnotacoes)) {
+                        copiaIc.subAnotacoes = ic.subAnotacoes.map(s => ({ ...s }));
+                    }
+                    return copiaIc;
+                });
+            }
+            return copia;
+        });
+    }
+
+    function _popularSelectsRotaTransito(familia, idOrigemSelecionado, idDestinoPreferido = null) {
+        const selectOrigem = document.getElementById('select-transitar-origem');
+        const selectDestino = document.getElementById('select-transitar-destino');
+        if (!selectOrigem || !selectDestino) return;
+
+        selectOrigem.innerHTML = '';
+        familia.forEach(vol => {
+            const numVol = _obterNumeroVolume(vol);
+            const qtdGrupos = (vol.anotacoes || []).filter(a => !_ehCheckpoint(a)).length;
+            const label = `Vol. ${toRoman(numVol)} — ${vol.nome} (${qtdGrupos} ideia${qtdGrupos === 1 ? '' : 's'})`;
+            const opt = new Option(label, vol.id);
+            opt.dataset.shortLabel = `Vol. ${toRoman(numVol)}`;
+            if (vol.id === idOrigemSelecionado) opt.selected = true;
+            selectOrigem.appendChild(opt);
+        });
+        selectOrigem.title = selectOrigem.selectedOptions[0]?.textContent || '';
+
+        const topicoOrigem = familia.find(t => t.id === selectOrigem.value) || familia[0];
+        const numOrigem = _obterNumeroVolume(topicoOrigem);
+        const irmaosDestino = familia.filter(t => t.id !== topicoOrigem.id);
+
+        let targetId = irmaosDestino[0]?.id;
+        if (idDestinoPreferido && irmaosDestino.some(i => i.id === idDestinoPreferido)) {
+            targetId = idDestinoPreferido;
+        } else {
+            const prox = irmaosDestino.find(i => _obterNumeroVolume(i) > numOrigem);
+            const ant = [...irmaosDestino].reverse().find(i => _obterNumeroVolume(i) < numOrigem);
+            if (prox) targetId = prox.id;
+            else if (ant) targetId = ant.id;
+        }
+
+        selectDestino.innerHTML = '';
+        irmaosDestino.forEach(irmao => {
+            const numIrmao = _obterNumeroVolume(irmao);
+            const qtdGrupos = (irmao.anotacoes || []).filter(a => !_ehCheckpoint(a)).length;
+            const seta = numIrmao > numOrigem ? 'Avançar ➔' : '⬅ Retornar';
+            const shortLabel = `Vol. ${toRoman(numIrmao)}`;
+            const label = `${seta} ${shortLabel} — ${irmao.nome} (${qtdGrupos} ideia${qtdGrupos === 1 ? '' : 's'})`;
+            const opt = new Option(label, irmao.id);
+            opt.dataset.shortLabel = shortLabel;
+            if (irmao.id === targetId) opt.selected = true;
+            selectDestino.appendChild(opt);
+        });
+        selectDestino.title = selectDestino.selectedOptions[0]?.textContent || '';
+    }
+
+    function _renderizarListaIdeiasOrigemTransito() {
+        const selectOrigem = document.getElementById('select-transitar-origem');
+        const listContainer = document.getElementById('transitar-ideas-list');
+        const modal = document.getElementById('modal-transitar-volumes');
+        if (!selectOrigem || !listContainer) return;
+
+        const topicoOrigem = topicos.find(t => t.id === selectOrigem.value);
+        _ultimoIndiceClicadoCorte = null;
+
+        if (!topicoOrigem) {
+            listContainer.innerHTML = '';
+            _atualizarResumoECapacidadeTransito();
+            return;
+        }
+
+        const corTopico = topicoOrigem.cor || '#1a3a5c';
+        const corTexto = obterCorContraste(corTopico);
+        if (modal) {
+            modal.style.setProperty('--transitar-topic-color', corTopico);
+        }
+
+        const anotacoes = topicoOrigem.anotacoes || [];
+        const mapaVisuais = _mapNumerosVisuais(anotacoes);
+        const htmlBuffer = [];
+        let orderIndex = 0;
+
+        anotacoes.forEach((an, idx) => {
+            if (_ehCheckpoint(an)) return;
+            const numVisual = mapaVisuais.get(idx);
+            const info = _obterResumoGrupoIdeia(an);
+            const pesoGrupo = _calcularPesoGrupoIdeia(an);
+            const currentOrder = orderIndex++;
+
+            htmlBuffer.push(`
+            <label class="safe-cut-idea-item">
+                <input type="checkbox" class="safecut-idea-checkbox" value="${idx}" data-order-index="${currentOrder}" data-peso="${pesoGrupo}">
+                <span class="safe-cut-idea-badge" style="background-color: ${corTopico}; color: ${corTexto};">${numVisual}</span>
+                <div class="safe-cut-idea-info">
+                    <div class="safe-cut-idea-title-row">
+                        <div class="safe-cut-idea-title-left">
+                            <span class="safe-cut-idea-doc">Ideia ${numVisual} — ${escaparHTML(info.doc)}</span>
+                            ${info.folha ? `<span class="safe-cut-idea-meta">(${escaparHTML(info.folha)})</span>` : ''}
+                            ${info.detalhesAgrupamento ? `<span class="safe-cut-idea-meta">• ${escaparHTML(info.detalhesAgrupamento)}</span>` : ''}
+                            ${info.tese ? `<span class="safe-cut-idea-tese">⚖️ ${escaparHTML(info.tese)}</span>` : ''}
+                        </div>
+                        <button type="button" class="btn-safecut-from-here" data-safecut-action="from-here" data-order-index="${currentOrder}" title="Marcar da Ideia ${numVisual} até o final">
+                            ⤵ Daqui até o fim
+                        </button>
+                    </div>
+                    ${info.preview ? `<div class="safe-cut-idea-preview">"${escaparHTML(info.preview)}"</div>` : ''}
+                </div>
+            </label>`);
+        });
+
+        listContainer.innerHTML = htmlBuffer.length > 0
+            ? htmlBuffer.join('')
+            : '<p style="font-size:0.8rem; color:#64748b; text-align:center; padding:16px;">Este volume de origem não possui grupos de ideias. Clique no botão <strong>⇄</strong> acima para inverter a rota e buscar ideias de outro volume.</p>';
+        listContainer.scrollTop = 0;
+
+        _atualizarResumoECapacidadeTransito();
+    }
+
+    function _atualizarResumoECapacidadeTransito() {
+        const checkboxes = document.querySelectorAll('#transitar-ideas-list .safecut-idea-checkbox');
+        const selectDestino = document.getElementById('select-transitar-destino');
+        const summaryEl = document.getElementById('transitar-transfer-summary');
+        const meterEl = document.getElementById('transitar-capacity-meter');
+        const btnConfirmar = document.getElementById('btn-confirmar-transitar-volumes');
+        const btnLabelEl = document.getElementById('btn-confirmar-transitar-label');
+        const btnDesfazer = document.getElementById('btn-desfazer-transito');
+
+        if (btnDesfazer) {
+            const snapshotValido = _ultimoSnapshotTransito &&
+                topicos.some(t => t.id === _ultimoSnapshotTransito.origemId) &&
+                topicos.some(t => t.id === _ultimoSnapshotTransito.destinoId);
+            btnDesfazer.style.display = snapshotValido ? 'inline-flex' : 'none';
+        }
+
+        const total = checkboxes.length;
+        let selecionados = 0;
+        let pesoSelecionado = 0;
+
+        checkboxes.forEach(chk => {
+            if (chk.checked) {
+                selecionados++;
+                pesoSelecionado += parseInt(chk.dataset.peso || '1', 10);
+            }
+        });
+
+        const topicoDestino = selectDestino ? topicos.find(t => t.id === selectDestino.value) : null;
+        const pesoAtualDestino = _calcularPesoEstruturalTopico(topicoDestino);
+        const pesoProjetado = pesoAtualDestino + pesoSelecionado;
+        const nomeDestino = selectDestino && selectDestino.selectedOptions[0]
+            ? selectDestino.selectedOptions[0].dataset.shortLabel || 'Destino'
+            : 'Destino';
+
+        if (meterEl) {
+            meterEl.textContent = `Carga no ${nomeDestino}: ${pesoProjetado} / ${LIMITE_CAPACIDADE_VOLUME} itens`;
+            meterEl.classList.remove('is-warning', 'is-danger');
+            if (pesoProjetado >= LIMITE_CAPACIDADE_VOLUME) {
+                meterEl.classList.add('is-danger');
+                meterEl.title = `⚠️ Atenção: O ${nomeDestino} ficará com ${pesoProjetado} itens (acima do limite recomendado de ${LIMITE_CAPACIDADE_VOLUME}).`;
+            } else if (pesoProjetado >= 25) {
+                meterEl.classList.add('is-warning');
+                meterEl.title = `O ${nomeDestino} ficará próximo da capacidade máxima (${pesoProjetado}/${LIMITE_CAPACIDADE_VOLUME} itens).`;
+            } else {
+                meterEl.title = `Capacidade saudável no ${nomeDestino} (${pesoProjetado}/${LIMITE_CAPACIDADE_VOLUME} itens).`;
+            }
+        }
+
+        if (summaryEl) {
+            if (total === 0) {
+                summaryEl.textContent = 'Nenhum grupo disponível na origem selecionada.';
+            } else if (selecionados === 0) {
+                summaryEl.textContent = 'Selecione ao menos 1 grupo de ideias para transferir.';
+            } else {
+                summaryEl.textContent = `${selecionados} grupo(s) selecionado(s) (+${pesoSelecionado} itens) ➔ ${nomeDestino}.`;
+            }
+        }
+
+        if (btnConfirmar) {
+            btnConfirmar.disabled = (selecionados === 0 || !topicoDestino);
+        }
+
+        if (btnLabelEl) {
+            btnLabelEl.textContent = selecionados > 0
+                ? `Transferir (${selecionados}) para ${nomeDestino}`
+                : 'Transferir Selecionados';
+        }
+    }
+
+    function _inicializarEventosModalTransito() {
+        const modal = document.getElementById('modal-transitar-volumes');
+        if (!modal) return;
+
+        _vincularChecklistVolumeModal(
+            'modal-transitar-volumes',
+            'btn-transitar-expand-list',
+            'transitar-ideas-list',
+            _atualizarResumoECapacidadeTransito,
+            (action, event) => {
+                if (action === 'swap-route') {
+                    event.preventDefault();
+                    const selectOrigem = document.getElementById('select-transitar-origem');
+                    const selectDestino = document.getElementById('select-transitar-destino');
+                    if (!selectOrigem || !selectDestino || !selectDestino.value) return;
+
+                    const antigaOrigemId = selectOrigem.value;
+                    const antigoDestinoId = selectDestino.value;
+                    const topicoRef = topicos.find(t => t.id === antigaOrigemId);
+                    const familia = obterFamiliaVolumes(topicoRef);
+
+                    _popularSelectsRotaTransito(familia, antigoDestinoId, antigaOrigemId);
+                    _renderizarListaIdeiasOrigemTransito();
+                }
+            }
+        );
+
+        if (modal.dataset.transitarSelectsBound !== 'true') {
+            modal.addEventListener('change', (event) => {
+                if (event.target.id === 'select-transitar-origem') {
+                    const selectDestino = document.getElementById('select-transitar-destino');
+                    const destinoAnterior = selectDestino ? selectDestino.value : null;
+                    const topicoRef = topicos.find(t => t.id === event.target.value);
+                    const familia = obterFamiliaVolumes(topicoRef);
+                    _popularSelectsRotaTransito(familia, event.target.value, destinoAnterior);
+                    _renderizarListaIdeiasOrigemTransito();
+                } else if (event.target.id === 'select-transitar-destino') {
+                    event.target.title = event.target.selectedOptions[0]?.textContent || '';
+                    _atualizarResumoECapacidadeTransito();
+                }
+            });
+            modal.dataset.transitarSelectsBound = 'true';
+        }
+    }
+
+    function abrirModalTransitarVolumes() {
+        if (!activeTabId) return;
+        const topicoAtual = topicos.find(t => t.id === activeTabId);
+        if (!topicoAtual) return;
+
+        const mapaPorId = new Map(topicos.map(t => [t.id, t]));
+        const { eloQuebrado } = _obterRaizCadeiaVolume(topicoAtual, mapaPorId);
+        const familia = obterFamiliaVolumes(topicoAtual);
+
+        if (familia.length < 2) {
+            if (typeof exibirToast === 'function') {
+                const msg = eloQuebrado
+                    ? 'O vínculo deste volume foi interrompido pela exclusão de uma aba anterior.'
+                    : 'Este tópico possui apenas 1 volume. Use a Tesoura para dividir em volumes primeiro.';
+                exibirToast(msg, 'aviso');
+            }
+            return;
+        }
+
+        _transitarTriggerEl = document.activeElement;
+        _inicializarEventosModalTransito();
+        _popularSelectsRotaTransito(familia, topicoAtual.id);
+        _renderizarListaIdeiasOrigemTransito();
+
+        if (window.RenderCycle) RenderCycle.bloquearScrollBody(true);
+        const backdrop = document.getElementById('transitar-volumes-backdrop');
+        if (backdrop) backdrop.classList.add('is-active');
+
+        requestAnimationFrame(() => {
+            const selectOrigem = document.getElementById('select-transitar-origem');
+            if (selectOrigem) selectOrigem.focus({ preventScroll: true });
+        });
+    }
+
+    function fecharModalTransitarVolumes() {
+        const backdrop = document.getElementById('transitar-volumes-backdrop');
+        if (backdrop) backdrop.classList.remove('is-active');
+        _alternarExpansaoModalVolume('modal-transitar-volumes', 'btn-transitar-expand-list', 'transitar-ideas-list', false);
+        _ultimoIndiceClicadoCorte = null;
+        if (window.RenderCycle) RenderCycle.bloquearScrollBody(false);
+
+        if (_transitarTriggerEl && typeof _transitarTriggerEl.focus === 'function') {
+            try { _transitarTriggerEl.focus({ preventScroll: true }); } catch (e) {}
+        }
+        _transitarTriggerEl = null;
+    }
+
+    /**
+     * Protege contra colisão de grupoId (Pilhas de Ideias) em TODO o lote transferido:
+     * varre subAnotacoes dos cartões mestres, itensCorrelacionados e novasDiretrizes.
+     */
+    function _protegerColisaoGrupoIdNoLote(topicoDestino, cartoesTransferidos, listaNovasDiretrizes) {
+        const gruposExistentesNoDestino = new Map();
+        _percorrerTodosOsNos(topicoDestino, (no) => {
+            if (no && no.grupoId && !gruposExistentesNoDestino.has(no.grupoId)) {
+                gruposExistentesNoDestino.set(no.grupoId, no.grupoTitulo || '');
+            }
+        });
+
+        const mapaRemapGrupoId = new Map();
+        const higienizarNo = (no) => {
+            if (!no || !no.grupoId) return;
+            if (gruposExistentesNoDestino.has(no.grupoId)) {
+                const tituloDestino = gruposExistentesNoDestino.get(no.grupoId);
+                const tituloOrigem = no.grupoTitulo || '';
+                if (tituloDestino !== tituloOrigem) {
+                    if (!mapaRemapGrupoId.has(no.grupoId)) {
+                        mapaRemapGrupoId.set(no.grupoId, 'grupo-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6));
+                    }
+                    no.grupoId = mapaRemapGrupoId.get(no.grupoId);
+                }
+            }
+        };
+
+        cartoesTransferidos.forEach(card => {
+            if (Array.isArray(card.subAnotacoes)) card.subAnotacoes.forEach(higienizarNo);
+            if (Array.isArray(card.itensCorrelacionados)) {
+                card.itensCorrelacionados.forEach(ic => {
+                    if (Array.isArray(ic.subAnotacoes)) ic.subAnotacoes.forEach(higienizarNo);
+                });
+            }
+        });
+
+        if (Array.isArray(listaNovasDiretrizes)) {
+            listaNovasDiretrizes.forEach(higienizarNo);
+        }
+    }
+
+    /**
+     * Insere os cartões transferidos no destino preservando:
+     * 1. Chave de tese idêntica à de renderizarFichario (an.tese || "Tese Não Nomeada").
+     * 2. Ordem relativa exata dos cartões (sem inversão no modo 'inicio').
+     * 3. Agrupamento contíguo para teses existentes e para teses novas intercaladas (A, B, A -> A, A, B).
+     * 4. Fronteiras estritas de checkpoint (checkpoint_entrada no topo, checkpoint_saida no rodapé).
+     */
+    function _inserirLoteCienteDeTese(arrDestino, cartoesTransferidos, modoPosicao) {
+        const gruposTeseNomeada = new Map();
+        const cartoesSemTese = [];
+
+        cartoesTransferidos.forEach(card => {
+            const chaveTeseCrua = card.tese || "Tese Não Nomeada";
+            const isTesePreenchida = Boolean(card.tese && card.tese.trim() !== '');
+
+            if (isTesePreenchida) {
+                if (!gruposTeseNomeada.has(chaveTeseCrua)) {
+                    gruposTeseNomeada.set(chaveTeseCrua, []);
+                }
+                gruposTeseNomeada.get(chaveTeseCrua).push(card);
+            } else {
+                cartoesSemTese.push(card);
+            }
+        });
+
+        const filaNovosBlocos = [];
+
+        gruposTeseNomeada.forEach((loteDaTese, chaveTeseCrua) => {
+            let primeiroIdxTese = -1;
+            let ultimoIdxTese = -1;
+
+            for (let i = 0; i < arrDestino.length; i++) {
+                const item = arrDestino[i];
+                if (!_ehCheckpoint(item) && (item.tese || "Tese Não Nomeada") === chaveTeseCrua) {
+                    if (primeiroIdxTese === -1) primeiroIdxTese = i;
+                    ultimoIdxTese = i;
+                }
+            }
+
+            if (ultimoIdxTese !== -1) {
+                const targetIdx = (modoPosicao === 'inicio') ? primeiroIdxTese : (ultimoIdxTese + 1);
+                arrDestino.splice(targetIdx, 0, ...loteDaTese);
+            } else {
+                filaNovosBlocos.push(...loteDaTese);
+            }
+        });
+
+        const loteRestante = [...filaNovosBlocos, ...cartoesSemTese];
+        if (loteRestante.length > 0) {
+            const idxEntrada = arrDestino.findIndex(a => a && a.tipo === 'checkpoint_entrada');
+            const idxSaida = arrDestino.findIndex(a => a && a.tipo === 'checkpoint_saida');
+            const minIdx = idxEntrada !== -1 ? idxEntrada + 1 : 0;
+            const maxIdx = idxSaida !== -1 ? idxSaida : arrDestino.length;
+
+            const insertPos = (modoPosicao === 'inicio') ? minIdx : maxIdx;
+            arrDestino.splice(insertPos, 0, ...loteRestante);
+        }
+    }
+
+    /**
+     * Executa a transferência bidirecional com snapshot isolado e navegação limpa sem duplo scroll.
+     */
+    function executarTransitoVolumes() {
+        const selectOrigem = document.getElementById('select-transitar-origem');
+        const selectDestino = document.getElementById('select-transitar-destino');
+        if (!selectOrigem || !selectDestino || !selectOrigem.value || !selectDestino.value) return;
+
+        const topicoOrigem = topicos.find(t => t.id === selectOrigem.value);
+        const topicoDestino = topicos.find(t => t.id === selectDestino.value);
+        if (!topicoOrigem || !topicoDestino || topicoOrigem.id === topicoDestino.id) return;
+
+        const familiaOrigem = obterFamiliaVolumes(topicoOrigem);
+        if (!familiaOrigem.some(v => v.id === topicoDestino.id)) {
+            if (typeof exibirToast === 'function') exibirToast('Operação bloqueada: os volumes selecionados não pertencem ao mesmo tópico.', 'erro');
+            return;
+        }
+
+        const indicesSelecionados = new Set(
+            Array.from(document.querySelectorAll('#transitar-ideas-list .safecut-idea-checkbox:checked'))
+                .map(chk => parseInt(chk.value, 10))
+                .filter(n => !isNaN(n))
+        );
+
+        if (indicesSelecionados.size === 0) {
+            if (typeof exibirToast === 'function') exibirToast('Selecione ao menos um grupo de ideias.', 'aviso');
+            return;
+        }
+
+        let pesoTransferido = 0;
+        (topicoOrigem.anotacoes || []).forEach((an, idx) => {
+            if (!_ehCheckpoint(an) && indicesSelecionados.has(idx)) {
+                pesoTransferido += _calcularPesoGrupoIdeia(an);
+            }
+        });
+        const pesoProjetadoDestino = _calcularPesoEstruturalTopico(topicoDestino) + pesoTransferido;
+        const numVolOrigem = toRoman(_obterNumeroVolume(topicoOrigem));
+        const numVolDestino = toRoman(_obterNumeroVolume(topicoDestino));
+
+        if (pesoProjetadoDestino >= LIMITE_CAPACIDADE_VOLUME) {
+            const msgCapacidade = `⚠️ ALERTA DE CAPACIDADE NO DESTINO\n\n` +
+                `O Volume ${numVolDestino} passará a ter ${pesoProjetadoDestino} itens estruturais (acima do limite recomendado de ${LIMITE_CAPACIDADE_VOLUME} itens por volume).\n\n` +
+                `Deseja confirmar a transferência mesmo assim?`;
+            if (!confirm(msgCapacidade)) return;
+        }
+
+        const modoPosicao = document.querySelector('input[name="transitar_posicao"]:checked')?.value || 'final';
+        const makeUUID = () => (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+            ? ('id-' + crypto.randomUUID())
+            : ('id-' + Math.random().toString(36).substring(2, 11) + '-' + Date.now().toString(36));
+
+        let nextOrigemAnotacoes = [];
+        let nextDestinoAnotacoes;
+        let nextOrigemDiretrizes;
+        let nextDestinoDiretrizes;
+        let cartoesTransferidos = [];
+        let diretrizesMescladas = 0;
+
+        try {
+            // Snapshot isolado estruturalmente (protegido contra mutações posteriores sem duplicar strings Base64)
+            const snapshotOrigemAnotacoes = _clonarAnotacoesParaSnapshot(topicoOrigem.anotacoes || []);
+            const snapshotDestinoAnotacoes = _clonarAnotacoesParaSnapshot(topicoDestino.anotacoes || []);
+            const snapshotOrigemDiretrizes = structuredClone(topicoOrigem.diretrizesPorTese || {});
+            const snapshotDestinoDiretrizes = structuredClone(topicoDestino.diretrizesPorTese || {});
+
+            const trabalhoOrigem = _clonarAnotacoesParaSnapshot(topicoOrigem.anotacoes || []);
+            nextDestinoAnotacoes = _clonarAnotacoesParaSnapshot(topicoDestino.anotacoes || []);
+            nextOrigemDiretrizes = structuredClone(snapshotOrigemDiretrizes);
+            nextDestinoDiretrizes = structuredClone(snapshotDestinoDiretrizes);
+
+            trabalhoOrigem.forEach((an, idx) => {
+                if (!_ehCheckpoint(an) && indicesSelecionados.has(idx)) {
+                    if (!an.uuid) an.uuid = makeUUID();
+                    cartoesTransferidos.push(an);
+                } else {
+                    nextOrigemAnotacoes.push(an);
+                }
+            });
+
+            if (cartoesTransferidos.length === 0) return;
+
+            const assinaturaDiretriz = (d) => `${d.intencao || 'premissa'}|${(d.texto || '').trim()}`;
+            const tesesMovidas = new Set(cartoesTransferidos.map(a => a.tese || "Tese Não Nomeada"));
+            const tesesFicaramOrigem = new Set(
+                nextOrigemAnotacoes.filter(a => !_ehCheckpoint(a)).map(a => a.tese || "Tese Não Nomeada")
+            );
+
+            const todasNovasDiretrizes = [];
+
+            tesesMovidas.forEach(chaveTese => {
+                const listaDirOrigem = nextOrigemDiretrizes[chaveTese];
+                if (!Array.isArray(listaDirOrigem) || listaDirOrigem.length === 0) return;
+
+                if (!Array.isArray(nextDestinoDiretrizes[chaveTese])) {
+                    nextDestinoDiretrizes[chaveTese] = [];
+                }
+
+                const assinaturasExistentesDestino = new Set(
+                    nextDestinoDiretrizes[chaveTese].map(assinaturaDiretriz)
+                );
+
+                const novasDiretrizesDaTese = [];
+                listaDirOrigem.forEach(dirOrig => {
+                    const sig = assinaturaDiretriz(dirOrig);
+                    if (!assinaturasExistentesDestino.has(sig)) {
+                        assinaturasExistentesDestino.add(sig);
+                        const cloneDir = structuredClone(dirOrig);
+                        novasDiretrizesDaTese.push(cloneDir);
+                        todasNovasDiretrizes.push(cloneDir);
+                        diretrizesMescladas++;
+                    }
+                });
+
+                if (novasDiretrizesDaTese.length > 0) {
+                    nextDestinoDiretrizes[chaveTese].push(...novasDiretrizesDaTese);
+                }
+
+                if (!tesesFicaramOrigem.has(chaveTese)) {
+                    delete nextOrigemDiretrizes[chaveTese];
+                }
+            });
+
+            // Higieniza grupoId em todo o lote (sub-nós dos cartões, correlacionados e novas diretrizes)
+            _protegerColisaoGrupoIdNoLote(topicoDestino, cartoesTransferidos, todasNovasDiretrizes);
+
+            _inserirLoteCienteDeTese(nextDestinoAnotacoes, cartoesTransferidos, modoPosicao);
+
+            _ultimoSnapshotTransito = {
+                origemId: topicoOrigem.id,
+                destinoId: topicoDestino.id,
+                anotacoesOrigem: snapshotOrigemAnotacoes,
+                anotacoesDestino: snapshotDestinoAnotacoes,
+                diretrizesOrigem: snapshotOrigemDiretrizes,
+                diretrizesDestino: snapshotDestinoDiretrizes
+            };
+
+            // Commit Atômico Síncrono
+            topicoOrigem.anotacoes = nextOrigemAnotacoes;
+            topicoOrigem.diretrizesPorTese = nextOrigemDiretrizes;
+            topicoDestino.anotacoes = nextDestinoAnotacoes;
+            topicoDestino.diretrizesPorTese = nextDestinoDiretrizes;
+        } catch (err) {
+            console.error('[TopicsManager] Transação abortada ao transitar volumes:', err);
+            if (typeof exibirToast === 'function') {
+                exibirToast('Erro ao processar transferência. Nenhuma alteração foi aplicada.', 'erro');
+            }
+            return;
+        }
+
+        const primeiroUuidTransferido = cartoesTransferidos[0]?.uuid;
+        fecharModalTransitarVolumes();
+
+        // Muda activeTabId sem acionar suprimirProximaRestauracao() quando há card alvo,
+        // evitando que restaurarScroll() dispare um scrollTo(0, 'smooth') concorrente.
+        activeTabId = topicoDestino.id;
+        if (!primeiroUuidTransferido) {
+            suprimirProximaRestauracao();
+        }
+
+        if (typeof renderizarTopicos === 'function') {
+            renderizarTopicos();
+        } else {
+            renderizarFichario(topicos);
+        }
+
+        if (primeiroUuidTransferido) {
+            // Aguarda os 2 frames do ciclo posicionarNosDeIdeia + desenharConexoes antes de medir e rolar
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                    const wrapperAlvo = document.getElementById(`timeline-wrapper-${primeiroUuidTransferido}`);
+                    const scrollContainer = document.getElementById('history-container');
+                    if (wrapperAlvo && scrollContainer) {
+                        const offset = (wrapperAlvo.getBoundingClientRect().top - scrollContainer.getBoundingClientRect().top) + scrollContainer.scrollTop - 24;
+                        scrollContainer.scrollTo({ top: offset, behavior: 'smooth' });
+
+                        const cardAlvo = wrapperAlvo.querySelector('.main-card-wrapper > .annotation-card');
+                        if (cardAlvo) {
+                            cardAlvo.classList.remove('card-flash-focus');
+                            void cardAlvo.offsetWidth;
+                            cardAlvo.classList.add('card-flash-focus');
+                        }
+                    }
+                });
+            });
+        }
+
+        if (typeof window.sincronizarHighlightsGerais === 'function') window.sincronizarHighlightsGerais();
+        if (typeof salvarBackupAutomatico === 'function') salvarBackupAutomatico();
+
+        if (typeof exibirToast === 'function') {
+            const infoDir = diretrizesMescladas > 0 ? ` (${diretrizesMescladas} diretriz(es) mesclada(s))` : '';
+            exibirToast(`${cartoesTransferidos.length} grupo(s) movido(s) do Vol. ${numVolOrigem} para o Vol. ${numVolDestino}!${infoDir}`, 'sucesso');
+        }
+    }
+
+    /**
+     * Reverte a última transferência entre volumes realizada na sessão.
+     */
+    function desfazerUltimoTransito() {
+        if (!_ultimoSnapshotTransito) return;
+        const topicoOrigem = topicos.find(t => t.id === _ultimoSnapshotTransito.origemId);
+        const topicoDestino = topicos.find(t => t.id === _ultimoSnapshotTransito.destinoId);
+
+        if (!topicoOrigem || !topicoDestino) {
+            _ultimoSnapshotTransito = null;
+            if (typeof exibirToast === 'function') exibirToast('Não foi possível desfazer: um dos volumes foi excluído.', 'aviso');
+            return;
+        }
+
+        topicoOrigem.anotacoes = _ultimoSnapshotTransito.anotacoesOrigem;
+        topicoOrigem.diretrizesPorTese = _ultimoSnapshotTransito.diretrizesOrigem;
+        topicoDestino.anotacoes = _ultimoSnapshotTransito.anotacoesDestino;
+        topicoDestino.diretrizesPorTese = _ultimoSnapshotTransito.diretrizesDestino;
+
+        const idVoltar = topicoOrigem.id;
+        _ultimoSnapshotTransito = null;
+
+        fecharModalTransitarVolumes();
+        activeTabId = idVoltar;
+        suprimirProximaRestauracao();
+
+        if (typeof renderizarTopicos === 'function') {
+            renderizarTopicos();
+        } else {
+            renderizarFichario(topicos);
+        }
+
+        if (typeof window.sincronizarHighlightsGerais === 'function') window.sincronizarHighlightsGerais();
+        if (typeof salvarBackupAutomatico === 'function') salvarBackupAutomatico();
+        if (typeof exibirToast === 'function') exibirToast('Última transferência entre volumes desfeita com sucesso!', 'sucesso');
+    }
+
     // ==========================================
     // FIM: LÓGICA DA TESOURA E CHECKPOINT
     // ==========================================
@@ -3348,7 +4096,13 @@ window.TopicsManager = (function () {
         acionarDivisaoTopico,
         fecharModalPreDivisao,
         baixarBackupPreCorte,
-        executarDivisaoTopico
+        executarDivisaoTopico,
+        obterFamiliaVolumes,
+        atualizarEstadoFerramentasVolume,
+        abrirModalTransitarVolumes,
+        fecharModalTransitarVolumes,
+        executarTransitoVolumes,
+        desfazerUltimoTransito
     };
 
 })();
