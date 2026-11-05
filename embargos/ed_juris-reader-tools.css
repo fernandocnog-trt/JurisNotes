@@ -2314,7 +2314,7 @@ body.fab-layout-vertical .scroll-fab-container {
 }
 
 .hidden-note-topic-chip.juris-tooltip::after {
-    /* Anula a caixa azul-marinho herdada do ed_juris-core.css e mantém apenas a setinha */
+    /* Anula a caixa azul-marinho herdada do juris-core.css e mantém apenas a setinha */
     content: '' !important;
     width: 0 !important;
     height: 0 !important;
@@ -2329,4 +2329,181 @@ body.fab-layout-vertical .scroll-fab-container {
     bottom: calc(100% + 2px) !important;
     top: auto !important;
     left: 50% !important;
+}
+
+/* ================================================
+   MODAL E BOTÃO: TRANSITAR GRUPOS ENTRE VOLUMES (⇄)
+   ================================================ */
+.modal-transitar-volumes {
+    --safecut-accent: #1a3a5c;
+    --safecut-accent-dark: #25527f;
+    --safecut-bg-soft: #f0f4f8;
+    --safecut-border: #cbd5e1;
+    --transitar-topic-color: var(--trt-blue);
+    width: min(680px, 94vw);
+    max-width: 680px;
+}
+
+.transitar-volumes-header {
+    color: var(--trt-blue);
+    border-bottom: 2px solid var(--trt-light-bg);
+}
+
+.transitar-body-intro {
+    margin: 10px 20px;
+    font-size: 0.85rem;
+}
+
+/* No modo expandido, oculta as barras superiores para dar foco total à lista */
+.modal-transitar-volumes.is-list-expanded .transitar-body-intro,
+.modal-transitar-volumes.is-list-expanded .transitar-route-bar,
+.modal-transitar-volumes.is-list-expanded .transitar-insert-mode-bar {
+    display: none;
+}
+
+.transitar-route-bar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    align-items: end;
+    gap: 10px;
+    margin: 4px 20px 10px 20px;
+    padding: 12px 14px;
+    background: #f8fafc;
+    border: 1px solid var(--border-color);
+    border-left: 4px solid var(--transitar-topic-color);
+    border-radius: 8px;
+}
+
+@media (max-width: 560px) {
+    .transitar-route-bar {
+        grid-template-columns: 1fr;
+        align-items: stretch;
+    }
+    .btn-swap-volumes {
+        align-self: center;
+        transform: rotate(90deg);
+    }
+}
+
+.transitar-route-col {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.transitar-select-colorido {
+    font-weight: 700;
+    color: var(--trt-blue);
+    background-color: #ffffff;
+}
+
+.btn-swap-volumes {
+    width: 38px;
+    height: 36px;
+    border-radius: 8px;
+    border: 1px solid #cbd5e1;
+    background: #ffffff;
+    color: var(--trt-blue);
+    font-size: 1.15rem;
+    font-weight: 800;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+    flex-shrink: 0;
+}
+
+.btn-swap-volumes:hover {
+    background: #e2e8f0;
+    border-color: var(--trt-blue-mid);
+    transform: scale(1.06);
+}
+
+.btn-swap-volumes:active {
+    transform: scale(0.95);
+}
+
+.btn-swap-volumes:focus-visible {
+    outline: 2px solid var(--trt-blue);
+    outline-offset: 2px;
+}
+
+.transitar-insert-mode-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin: 0 20px 10px 20px;
+    padding: 8px 12px;
+    background: #ffffff;
+    border: 1px dashed #cbd5e1;
+    border-radius: 6px;
+}
+
+.transitar-pos-options {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.transitar-radio-group {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: #334155;
+}
+
+.transitar-radio-group label {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+}
+
+/* Medidor Preventivo de Capacidade do Destino */
+.transitar-capacity-badge {
+    font-size: 0.75rem;
+    font-weight: 800;
+    padding: 4px 10px;
+    border-radius: 12px;
+    background: #e8f5e9;
+    color: #2e7d32;
+    border: 1px solid #c8e6c9;
+    white-space: nowrap;
+}
+
+.transitar-capacity-badge.is-warning {
+    background: #fff8e1;
+    color: #ef6c00;
+    border-color: #ffe082;
+}
+
+.transitar-capacity-badge.is-danger {
+    background: #ffebee;
+    color: #c62828;
+    border-color: #ffcdd2;
+}
+
+#modal-transitar-volumes .btn-confirmar-transitar {
+    background: var(--trt-blue);
+    color: #ffffff;
+    border: none;
+    font-weight: 700;
+}
+
+#modal-transitar-volumes .btn-confirmar-transitar:hover:not(:disabled) {
+    background: var(--trt-blue-mid);
+    transform: translateY(-1px);
+}
+
+#modal-transitar-volumes .btn-confirmar-transitar:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    transform: none;
 }

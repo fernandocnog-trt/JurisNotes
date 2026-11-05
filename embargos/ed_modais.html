@@ -886,13 +886,97 @@ Crie um sumário hierárquico enxuto com as Grandes Categorias e Subcategorias q
 
     <div id="safecut-warning" class="safe-cut-warning-box">
         <p class="warning-title"><svg class="safecut-icon-small" aria-hidden="true"><use href="#icon-info-circle"></use></svg>Rede de Segurança</p>
-        <p class="warning-text">O arquivo <code>_PRE_CORTE.json</code> salvará o estado exato de agora. Recomendamos baixar este backup para que você possa restaurar o trabalho a qualquer momento, caso mude de ideia.</p>
+        <p class="warning-text">O arquivo <code>_PRE_CORTE.json</code> salvará o estado exato de agora. Recomendamos baixar este backup para que você possa restaurar o trabalho a qualquer momento.</p>
     </div>
     <div class="wizard-actions safe-cut-actions">
         <button type="button" class="chip-btn chip-cancelar" onclick="TopicsManager.fecharModalPreDivisao()">Cancelar</button>
         <div class="safe-cut-btn-group">
             <button type="button" class="chip-btn btn-safe-backup" onclick="TopicsManager.baixarBackupPreCorte()" title="Gera um arquivo de segurança" autofocus><svg class="safecut-icon" aria-hidden="true"><use href="#icon-download"></use></svg>Baixar Cópia de Segurança</button>
             <button type="button" id="btn-executar-tesoura" class="chip-btn chip-re btn-confirmar-corte-guiado" onclick="TopicsManager.executarDivisaoTopico()"><svg class="safecut-icon" aria-hidden="true"><use href="#icon-scissors"></use></svg><span id="btn-executar-tesoura-label">Dividir em Volumes</span></button>
+        </div>
+    </div>
+</div>
+
+<!-- MODAL: TRANSITAR GRUPOS DE IDEIAS ENTRE VOLUMES -->
+<div id="transitar-volumes-backdrop" class="safe-cut-backdrop" onclick="TopicsManager.fecharModalTransitarVolumes()"></div>
+<div id="modal-transitar-volumes" class="safe-cut-modal modal-transitar-volumes fechavel-por-esc" role="dialog" aria-modal="true" aria-labelledby="transitar-volumes-title" aria-describedby="transitar-volumes-desc">
+    <div class="wizard-header safe-cut-header transitar-volumes-header">
+        <svg class="safecut-icon" aria-hidden="true"><use href="#icon-transfer-volumes"></use></svg>
+        <span id="transitar-volumes-title">Transitar Grupos de Ideias entre Volumes</span>
+    </div>
+
+    <p id="transitar-volumes-desc" class="safe-cut-body-text transitar-body-intro">
+        Transfira grupos de ideias entre os volumes deste tópico. Cartões com tese nomeada são agrupados automaticamente junto à mesma tese no destino.
+    </p>
+
+    <!-- Barra de Rota Interativa (Origem ⇄ Destino) -->
+    <div class="transitar-route-bar">
+        <div class="transitar-route-col">
+            <label for="select-transitar-origem" class="popup-label">Retirar de (Origem):</label>
+            <select id="select-transitar-origem" class="topic-select transitar-select-colorido"></select>
+        </div>
+
+        <button type="button" id="btn-inverter-rota-volumes" class="btn-swap-volumes" data-safecut-action="swap-route" aria-label="Inverter volumes de origem e destino" title="Inverter Origem ⇄ Destino">
+            ⇄
+        </button>
+
+        <div class="transitar-route-col">
+            <label for="select-transitar-destino" class="popup-label">Enviar para (Destino):</label>
+            <select id="select-transitar-destino" class="topic-select"></select>
+        </div>
+    </div>
+
+    <!-- Barra de Posição para Novas Teses e Medidor de Capacidade do Destino -->
+    <div class="transitar-insert-mode-bar">
+        <div class="transitar-pos-options">
+            <span class="popup-label" style="margin: 0;">Posição no destino (para teses novas/sem tese):</span>
+            <div class="transitar-radio-group" role="radiogroup" aria-label="Posição de inserção no volume de destino">
+                <label><input type="radio" name="transitar_posicao" value="final" checked> Final do volume</label>
+                <label><input type="radio" name="transitar_posicao" value="inicio"> Início do volume</label>
+            </div>
+        </div>
+        <div id="transitar-capacity-meter" class="transitar-capacity-badge" aria-live="polite">
+            Carga no destino: 0 / 30 itens
+        </div>
+    </div>
+
+    <!-- Lista de Seleção em Lote (Reutiliza a infraestrutura safe-cut-*) -->
+    <div id="transitar-transfer-section" class="safe-cut-transfer-section">
+        <div class="safe-cut-transfer-header">
+            <span class="safe-cut-transfer-label">📦 Grupos de Ideias na Origem:</span>
+            <div class="safe-cut-transfer-quick-actions">
+                <button type="button" class="btn-safecut-link" data-safecut-action="select-all" title="Selecionar todos os grupos">Marcar todos</button>
+                <span aria-hidden="true" style="color:#cbd5e1;">|</span>
+                <button type="button" class="btn-safecut-link" data-safecut-action="clear-all" title="Desmarcar todos os grupos">Limpar</button>
+                <span aria-hidden="true" style="color:#cbd5e1;">|</span>
+                <button type="button" id="btn-transitar-expand-list" class="btn-safecut-expand" data-safecut-action="toggle-expand" aria-pressed="false" title="Expandir ou restaurar área da lista">
+                    ⤢ Expandir
+                </button>
+            </div>
+        </div>
+        <p class="safe-cut-transfer-hint">
+            Use <strong>Shift + Clique</strong> para selecionar um intervalo ou clique em <strong>"⤵ Daqui até o fim"</strong>:
+        </p>
+
+        <div id="transitar-ideas-list" class="safe-cut-ideas-list" role="group" aria-label="Grupos de ideias disponíveis no volume de origem"></div>
+
+        <div class="safe-cut-transfer-footer">
+            <span class="safe-cut-resize-tip">↕ Arraste o canto inferior direito da lista para ajustar a altura</span>
+            <div id="transitar-transfer-summary" class="safe-cut-transfer-summary" aria-live="polite">
+                Nenhum grupo selecionado.
+            </div>
+        </div>
+    </div>
+
+    <div class="wizard-actions safe-cut-actions">
+        <button type="button" class="chip-btn chip-cancelar" onclick="TopicsManager.fecharModalTransitarVolumes()">✕ Cancelar</button>
+        <div class="safe-cut-btn-group">
+            <button type="button" id="btn-desfazer-transito" class="chip-btn btn-safe-backup" onclick="TopicsManager.desfazerUltimoTransito()" style="display: none;" title="Reverter a última transferência entre volumes realizada nesta sessão">
+                ↶ Desfazer Última
+            </button>
+            <button type="button" id="btn-confirmar-transitar-volumes" class="chip-btn chip-autora btn-confirmar-transitar" onclick="TopicsManager.executarTransitoVolumes()" disabled>
+                ⇄ <span id="btn-confirmar-transitar-label">Transferir Selecionados</span>
+            </button>
         </div>
     </div>
 </div>
