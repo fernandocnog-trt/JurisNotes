@@ -2582,7 +2582,7 @@ window.TopicsManager = (function () {
         // 2. Varre Teses e Provas
         let ultimaTese = null;
         topico.anotacoes.forEach(an => {
-            const teseAtual = an.tese || "Provas sem agrupamento de tese";
+            const teseAtual = (an.tese && an.tese.trim() !== '') ? an.tese : "Tese Não Nomeada";
             
             // Subnós de Tese (Corrigindo o ponto cego original)
             if (teseAtual !== ultimaTese) {
