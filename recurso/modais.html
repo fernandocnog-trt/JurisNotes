@@ -879,8 +879,27 @@
             <div><p class="popup-label" style="color: #e65100;">Inteiro Teor do Recurso:</p><textarea id="ctx-teor-recurso" class="popup-textarea" style="display: block; min-height: 100px; border-color: #ffcc80;" placeholder="Cole o recurso aqui..." oninput="window.salvarRascunhoContextoDebounced()"></textarea></div>
         </div>
         <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 14px;">
-            <div><p class="popup-label">2. Metadados do PJe:</p><textarea id="ctx-metadados" class="popup-textarea textarea-readonly" style="display: block; min-height: 120px;" readonly></textarea></div>
-            <div><p class="popup-label">3. Matriz do Juris Notes:</p><textarea id="ctx-diretrizes" class="popup-textarea textarea-readonly" style="display: block; min-height: 120px;" readonly></textarea></div>
+            <div style="display: flex; flex-direction: column; gap: 8px;">
+                <div>
+                    <p class="popup-label">2. Metadados do PJe:</p>
+                    <textarea id="ctx-metadados" class="popup-textarea textarea-readonly" style="display: block; min-height: 96px;" readonly></textarea>
+                </div>
+                
+                <!-- Controle Persistente da Hierarquia Epistemológica e Auditoria Crítica -->
+                <div class="epistemic-guardrail-box">
+                    <label class="epistemic-guardrail-label" title="Quando ativo, a IA obedece 100% aos Nós de Ideia na minuta, mas gera uma seção isolada ao final apontando eventual prescrição, erro material grosseiro ou contradição frontal com prova dos autos.">
+                        <input type="checkbox" id="chk-auditoria-critica-ia" checked onchange="window.alternarAuditoriaCriticaIA(this.checked)">
+                        <span>⚖️ Auditoria Crítica Pós-Minuta (Erro Grosseiro / Prescrição)</span>
+                    </label>
+                    <div id="epistemic-stats-badge" class="epistemic-stats-badge">
+                        🛡️ Cartões = Contexto | Nós de Ideia = Verdade Absoluta
+                    </div>
+                </div>
+            </div>
+            <div>
+                <p class="popup-label">3. Matriz do Juris Notes (Contexto × Diretrizes Vinculantes):</p>
+                <textarea id="ctx-diretrizes" class="popup-textarea textarea-readonly" style="display: block; min-height: 175px;" readonly></textarea>
+            </div>
         </div>
         <div>
             <p class="popup-label">4. Rascunho da IA (Opcional):</p>
