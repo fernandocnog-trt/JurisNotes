@@ -568,19 +568,6 @@
 .sub-badge.intencao-fundamentacao { background-color: #00695c; border: 2px solid #b2dfdb; color: #fff; }
 .sub-badge.intencao-refutacao { background-color: #8B4513; border: 2px solid #DEB887; color: #fff; }
 .sub-badge.intencao-preliminar { background-color: #5d4037; border: 2px solid #d7ccc8; color: #fff; }
-.sub-annotation-item.is-nota-interna { opacity: 0.65; }
-
-.sub-text-content {
-    line-height: 1.6em;
-    max-height: calc(1.6em * 10);
-    overflow: hidden;
-    transition: max-height 0.35s cubic-bezier(0.4, 0, 0.2, 1);
-    display: block;
-}
-.sub-text-content.expanded { max-height: 800px; overflow-y: auto; padding-right: 6px; margin-right: -6px; }
-.sub-text-content.expanded::-webkit-scrollbar { width: 6px; }
-.sub-text-content.expanded::-webkit-scrollbar-track { background: transparent; }
-.sub-text-content.expanded::-webkit-scrollbar-thumb { background: #d0cabc; border-radius: 4px; }
 
 /* --- COMPORTAMENTO DA ÁREA DE TEXTO (NÓ DE IDEIAS) --- */
 .sub-text-content { 
@@ -1247,7 +1234,9 @@ body[data-context="ed"] .topics-content-area {
 /* Status: Pendente (Traço - Indica falta de revisão) */
 .btn-revisao-nota.pendente {
     color: #a0aec0;
-    /* ==========================================
+}
+
+/* ==========================================
    ESTILOS: RECOMENDAÇÃO DE IA NO ACERVO
    ========================================== */
 .banner-ia-filter { display: flex; align-items: center; justify-content: space-between; background: #fff8e1; border: 1px solid #ffe082; padding: 10px 14px; border-radius: 6px; margin-bottom: 12px; }
@@ -1350,7 +1339,6 @@ body[data-context="ed"] .topics-content-area {
 #acervo-list-view,
 #acervo-focus-view {
     transition: opacity 0.25s ease, transform 0.25s ease;
-    will-change: opacity, transform;
 }
 
 #acervo-focus-view {
@@ -1393,8 +1381,8 @@ body[data-context="ed"] .topics-content-area {
     overflow: hidden; /* Evita que o modal ganhe scroll externo */
 }
 
-/* 3. Oculta de forma inteligente tudo que NÃO for a caixa de leitura (ex: botões e rodapé) */
-#modal-acervo-inserir.is-fullscreen #acervo-focus-view > div:not(#box-preview-container) {
+/* 3. Oculta explicitamente a caixa de seleção de destino na tela cheia, preservando o cabeçalho */
+#modal-acervo-inserir.is-fullscreen #acervo-focus-view #box-destino-dinamico-acervo {
     display: none !important;
 }
 
@@ -1414,6 +1402,16 @@ body[data-context="ed"] .topics-content-area {
     overflow-y: auto;
 }
 
+/* Propriedades estruturais exclusivas preservadas do bloco base */
+.outline-section { margin-bottom: 24px; }
+.outline-title { border-bottom: 2px solid var(--border-color); padding-bottom: 8px; margin-bottom: 16px; }
+.outline-h2 { font-size: 1.15rem; color: var(--trt-blue-mid); margin-top: 24px; margin-bottom: 12px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+.outline-meta-tag { background: #e8ecef; color: #455a64; font-size: 0.7rem; padding: 3px 8px; border-radius: 12px; font-weight: bold; text-transform: uppercase; border: 1px solid #cfd8dc; }
+.outline-card { box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+.outline-sub-item { position: relative; }
+.outline-sub-item::before { content: ''; position: absolute; left: 0; top: 18px; width: 8px; height: 2px; background: #cbd5e1; }
+.outline-intent-badge { font-weight: 800; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px; margin-right: 6px; }
+
 /* ================================================
    VISÃO ESTRUTURADA (OUTLINE MODE - ED) - REFINADO v3.2.0
    Dimensões espelhando o Dossiê Recursal (#balanca-painel)
@@ -1423,17 +1421,15 @@ body[data-context="ed"] .topics-content-area {
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    background: #ffffff;
+    background: white;
     border: 1px solid var(--border-color);
     border-radius: 12px;
     box-shadow: 0 12px 48px rgba(0, 0, 0, 0.28);
     z-index: var(--z-outline-modal);
-
     width: 92vw;
     max-width: 1300px;
     height: 88vh;
     max-height: 88vh;
-
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -1510,148 +1506,15 @@ body[data-context="ed"] .topics-content-area {
 .outline-audio-box { background: #fff8e1; border: 1px solid #ffe082; padding: 10px; border-radius: 6px; margin-top: 8px; font-size: 0.88rem; }
 .outline-content-text p { margin-bottom: 0.5em; }
 .outline-content-text b, .outline-content-text strong { color: var(--trt-blue); }
-    position: fixed;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    background: white;
-    border: 1px solid var(--border-color);
-    border-radius: 12px;
-    box-shadow: 0 12px 48px rgba(0, 0, 0, 0.28);
-    z-index: var(--z-outline-modal);
-    width: 90vw;
-    max-width: 900px;
-    max-height: 85vh;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-}
-
-.outline-section { margin-bottom: 24px; }
-.outline-title { font-size: 1.4rem; color: var(--trt-blue); border-bottom: 2px solid var(--border-color); padding-bottom: 8px; margin-bottom: 16px; font-weight: 800; }
-.outline-h2 { font-size: 1.15rem; color: var(--trt-blue-mid); margin-top: 24px; margin-bottom: 12px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
-.outline-meta-tag { background: #e8ecef; color: #455a64; font-size: 0.7rem; padding: 3px 8px; border-radius: 12px; font-weight: bold; text-transform: uppercase; border: 1px solid #cfd8dc; }
-
-.outline-card { 
-    background: #fdfdfd; 
-    border-left: 4px solid var(--trt-blue); 
-    padding: 12px 16px; 
-    margin-bottom: 12px; 
-    border-radius: 0 6px 6px 0; 
-    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-}
-.outline-card.correlacionado { 
-    margin-left: 20px; 
-    border-left: 4px solid #90caf9; 
-    background: #f4f7f9;
-}
-
-.outline-img-preview { max-width: 100%; max-height: 250px; border-radius: 6px; border: 1px solid var(--border-color); margin-top: 8px; }
-.outline-audio-box { background: #fff8e1; border: 1px solid #ffe082; padding: 10px; border-radius: 6px; margin-top: 8px; font-size: 0.9rem; }
-
-.outline-sub-item { 
-    margin-left: 32px; 
-    padding: 8px 12px; 
-    border-left: 2px dashed #cbd5e1; 
-    margin-bottom: 8px; 
-    font-size: 0.95rem;
-    position: relative;
-}
-.outline-sub-item::before { content: ''; position: absolute; left: 0; top: 18px; width: 8px; height: 2px; background: #cbd5e1; }
-.outline-intent-badge { font-weight: 800; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px; margin-right: 6px; }
-
-.outline-content-text p { margin-bottom: 0.5em; }
-.outline-content-text b, .outline-content-text strong { color: var(--trt-blue); }
-
-/* ================================================
-   VISÃO ESTRUTURADA (OUTLINE MODE - ED) - REFINADO v3.1.0
-   ================================================ */
-.outline-view-popup {
-    position: fixed;
-    top: 50%; left: 50%;
-    transform: translate(-50%, -50%);
-    background: #ffffff;
-    border: 1px solid var(--border-color);
-    border-radius: 12px;
-    box-shadow: 0 12px 48px rgba(0, 0, 0, 0.28);
-    z-index: var(--z-outline-modal);
-    width: 90vw; max-width: 900px; max-height: 85vh;
-    display: flex; flex-direction: column; overflow: hidden;
-}
-
-/* Bloco de Seção com Destaque e Elevação Suave */
-.outline-section-block {
-    background: #ffffff; border: 1px solid var(--border-color);
-    border-radius: 8px; padding: 16px 20px; margin-bottom: 20px;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.03); position: relative;
-    transition: border-color 0.2s ease;
-}
-.outline-section-block:hover { border-color: #cbd5e1; }
-
-/* Cabeçalho do Bloco (Barra de Ação Fora da Área do Texto) */
-.outline-h2-bar {
-    display: flex; justify-content: space-between; align-items: center;
-    border-bottom: 2px solid #f1f5f9; padding-bottom: 8px; margin-bottom: 12px;
-}
-.outline-h2-title {
-    font-size: 1.05rem; font-weight: 700; color: var(--trt-blue);
-    display: flex; align-items: center; gap: 8px;
-}
-
-/* Botão de Cópia da Seção (Classe .no-copy isola do parser) */
-.btn-copy-section {
-    background: #f8fafc; border: 1px solid var(--border-color); color: #64748b;
-    border-radius: 4px; padding: 4px 10px; font-size: 0.72rem; font-weight: 600;
-    cursor: pointer; display: inline-flex; align-items: center; gap: 4px;
-    transition: all 0.15s ease;
-}
-.btn-copy-section:hover { background: #e2e8f0; color: var(--trt-blue); }
-
-/* Badges Coloridas de Intenção de IA (Alinhadas ao Fichário) */
-.outline-intent-chip {
-    display: inline-flex; align-items: center; gap: 4px;
-    padding: 2px 8px; border-radius: 12px; font-size: 0.68rem; font-weight: 800;
-    text-transform: uppercase; letter-spacing: 0.5px; margin-right: 6px; vertical-align: middle;
-}
-.outline-intent-chip.intent-comando { background-color: #ffebee; color: #c62828; border: 1px solid #ffcdd2; }
-.outline-intent-chip.intent-texto { background-color: #e3f2fd; color: #1565c0; border: 1px solid #bbdefb; }
-.outline-intent-chip.intent-premissa { background-color: #f3e5f5; color: #7b1fa2; border: 1px solid #e1bee7; }
-.outline-intent-chip.intent-fundamentacao { background-color: #e0f2f1; color: #00695c; border: 1px solid #b2dfdb; }
-.outline-intent-chip.intent-refutacao { background-color: #efebe9; color: #8B4513; border: 1px solid #d7ccc8; }
-.outline-intent-chip.intent-preliminar { background-color: #efebe9; color: #5d4037; border: 1px solid #d7ccc8; }
-.outline-intent-chip.intent-veredito { background-color: #fff3e0; color: #e65100; border: 1px solid #ffe082; }
-
-/* Destaque de Cards de Prova e Sub-nós */
-.outline-title { font-size: 1.3rem; color: var(--trt-blue); font-weight: 800; }
-
-.outline-card {
-    background: #f8fafc; border-left: 4px solid var(--trt-blue);
-    padding: 12px 16px; margin-top: 10px; margin-bottom: 10px;
-    border-radius: 0 8px 8px 0; border-top: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0; border-bottom: 1px solid #e2e8f0;
-}
-.outline-card.correlacionado {
-    margin-left: 24px; border-left: 4px solid #90caf9; background: #f1f5f9;
-}
-
-.outline-sub-item {
-    margin-left: 28px; padding: 8px 12px; border-left: 2px dashed #cbd5e1;
-    margin-bottom: 6px; font-size: 0.92rem; line-height: 1.6;
-    background: #ffffff; border-radius: 0 6px 6px 0;
-}
-
-.outline-img-preview { max-width: 100%; max-height: 250px; border-radius: 6px; border: 1px solid var(--border-color); margin-top: 8px; }
-.outline-audio-box { background: #fff8e1; border: 1px solid #ffe082; padding: 10px; border-radius: 6px; margin-top: 8px; font-size: 0.88rem; }
-.outline-content-text p { margin-bottom: 0.5em; }
-.outline-content-text b, .outline-content-text strong { color: var(--trt-blue); }
 
 /* ================================================
    10. EMPILHAMENTO DE NÓS DE IDEIAS (PILHAS ED)
    ================================================ */
 .sub-annotation-stack {
-    will-change: transform;
+    position: relative;
     cursor: default;
     background-color: #ffffff;
-    position: relative; 
+    isolation: isolate;
 }
 
 .sub-annotation-stack::before,
