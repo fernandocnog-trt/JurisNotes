@@ -885,6 +885,11 @@ function trocarAba(aba) {
     document.getElementById('tab-leitura').classList.toggle('active',   aba === 'leitura');
     document.getElementById('tab-historico').classList.toggle('active', aba === 'historico');
 
+    // O mapa pode ter sido re-renderizado com a aba oculta: realinha as conexões ao exibi-la
+    if (aba === 'historico' && window.TopicsManager && typeof TopicsManager.redesenharMapa === 'function') {
+        requestAnimationFrame(() => TopicsManager.redesenharMapa());
+    }
+
     const isAnotacoes = (aba === 'historico' && topicos.length > 0);
     const isLeitura   = (aba === 'leitura');
     
