@@ -12,7 +12,8 @@
     padding: 20px 24px; 
     display: none; 
     contain: layout paint; 
-    transform: translateZ(0); 
+    /* PERF: translateZ(0) removido. O contêiner já é rolável (camada própria);
+       a promoção forçada só ampliava a textura mantida na GPU. */
 }
 .topics-tab-bar { 
     display: flex; 
@@ -24,7 +25,6 @@
     position: relative;
     z-index: 10;
     contain: layout paint;
-    transform: translateZ(0); 
 }
 .topics-tab-bar::-webkit-scrollbar { 
     display: none; /* Esconde no Chrome/Edge/Safari */
@@ -145,14 +145,58 @@
    ================================================ */
 .timeline-container { position: relative; padding: 24px 15px 10px; display: flex; flex-direction: column; }
 #connections-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; contain: strict; /* SVG isolado sem impacto no fluxo de caixas HTML */ }
-.timeline-item-master { --juris-gutter: 56px; position: relative; z-index: 2; display: flex; gap: var(--juris-gutter); width: 100%; margin-bottom: 112px; align-items: stretch; overflow: visible; }
-.timeline-item-master.align-left { flex-direction: row; }
-.timeline-item-master.align-right { flex-direction: row-reverse; }
+/* GRID DE ORIGENS: uma linha por cartão (principal + correlacionados).
+   --linhas é emitido pelo JS no HTML. A altura de cada linha é o maior entre
+   o cartão e o grupo de nós dele: o navegador resolve, sem JS de posicionamento. */
+.timeline-item-master {
+    --juris-gutter: 56px;
+    --linhas: 1;
+    position: relative;
+    z-index: 2;
+    display: grid;
+    grid-template-columns: minmax(0, 60fr) minmax(0, 40fr);
+    grid-template-rows: repeat(var(--linhas), auto);
+    column-gap: var(--juris-gutter);
+    width: 100%;
+    margin-bottom: 112px;
+    overflow: visible;
+}
+.timeline-item-master.align-right { grid-template-columns: minmax(0, 40fr) minmax(0, 60fr); }
+.timeline-item-master.is-checkpoint { display: flex; } /* banner centralizado: sem colunas */
 
-.main-card-wrapper { position: relative; width: calc(60% - (var(--juris-gutter) / 2)); flex-shrink: 0; overflow: visible; }
-.sub-annotations-wrapper { display: flex; flex-direction: column; width: calc(40% - (var(--juris-gutter) / 2)); position: relative; overflow: visible; }
+/* Os dois lados herdam as linhas do pai (subgrid) */
+.main-card-wrapper,
+.sub-annotations-wrapper {
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: subgrid;
+    grid-row: 1 / -1;
+    min-width: 0;
+    overflow: visible;
+}
+.main-card-wrapper { grid-column: 1; }
+.sub-annotations-wrapper { grid-column: 2; }
+.timeline-item-master.align-right > .main-card-wrapper { grid-column: 2; }
+.timeline-item-master.align-right > .sub-annotations-wrapper { grid-column: 1; }
 
-.annotation-number-area { position: absolute; left: -15px; top: -15px; display: flex; flex-direction: column; align-items: center; z-index: 3; }
+/* Cartão e grupo de nós centralizados na linha que compartilham */
+.main-card-wrapper > .annotation-card,
+.main-card-wrapper > .correlated-item-wrapper { align-self: center; }
+
+.sub-group {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;               /* espaçamento vertical entre nós do mesmo grupo */
+    align-self: center;
+    min-width: 0;
+    padding-block: 10px;     /* 10 + 10 = 20px entre grupos de linhas vizinhas */
+}
+/* Compensa os 32px do conector acima do cartão correlacionado,
+   para o grupo centralizar no cartão e não no conjunto conector + cartão */
+.sub-group--correlata { padding-top: 42px; }
+
+.annotation-number-area { position: absolute; left: -19px; top: -16px; /* agora dentro do cartão: compensa a borda (4px / 1px) */ display: flex; flex-direction: column; align-items: center; z-index: 3; }
 .timeline-number { width: 42px; height: 42px; background-color: #fff9c4; border: 2px solid var(--notes-marker-border); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 1.1rem; font-weight: 800; color: #424242; box-shadow: var(--shadow-sm); flex-shrink: 0; cursor: pointer; transition: transform 0.15s ease, background-color 0.2s, box-shadow 0.2s, border-color 0.3s ease; }
 .timeline-number:hover { transform: scale(1.15); background-color: #ffe082; box-shadow: var(--shadow-md); }
 .timeline-number:active { transform: scale(0.95); }
@@ -437,8 +481,9 @@
     position: absolute;
     left: 0;
     right: 0;
-    top: calc(4px - var(--slot-pad, 0px) - var(--slot-pad-prev, 0px));
-    bottom: 4px;                           /* respiro de 4px em cada cartão */
+    top: 4px;
+    bottom: 4px;
+    display: none;                         /* as hastes agora são desenhadas no SVG (desenharConexoes) */
 }
 
 .correlated-link__line {
@@ -511,7 +556,8 @@
    ================================================ */
 .sub-annotation-stack {
     border-color: var(--trt-blue-mid) !important;
-    will-change: transform;
+    /* PERF: will-change removido (criava uma camada de GPU permanente por pilha) */
+    isolation: isolate; /* mantém o contexto de empilhamento dos ::before/::after (z-index: -1) */
     cursor: default;
     background-color: #ffffff;
     position: relative; /* Necessário para os pseudo-elementos */
@@ -700,9 +746,11 @@
     left: -10px;
     width: 28px;
     height: 28px;
-    background: rgba(26, 58, 92, 0.85); /* Glassmorphism Elegante */
-    backdrop-filter: blur(6px);
-    -webkit-backdrop-filter: blur(6px);
+    /* PERF: backdrop-filter removido. Havia um por nó de ideia, e cada um obriga o
+       navegador a criar uma superfície de GPU própria; com dezenas de nós a memória
+       de vídeo se esgota e a aba Anotações passa a piscar/ficar em branco.
+       A cor sólida abaixo equivale ao azul translúcido sobre o fundo do cartão. */
+    background: #2f4c6b;
     color: #ffffff;
     border-radius: 50%;
     align-items: center;
@@ -1086,8 +1134,7 @@
 .main-card-wrapper,
 .thesis-summary-panel,
 .topic-preamble-panel {
-    transition: top 0.3s cubic-bezier(0.25, 0.8, 0.25, 1), 
-                opacity 0.3s ease, 
+    transition: opacity 0.3s ease, 
                 filter 0.3s ease;
 }
 
@@ -2234,22 +2281,6 @@ BOTÃO DE PLAY DO CARD DE ÁUDIO — REFINAMENTO
 .btn-copy-chave-quick:active {
     transform: scale(0.95);
 }
-
-/* ================================================
-   SLOTS ELÁSTICOS POR ORIGEM
-   --slot-pad é gravado pelo JS (posicionarNosDeIdeia) em cada origem:
-   metade do que os nós excedem a altura do cartão.
-   ================================================ */
-
-/* Cartão principal: folga acima (no wrapper) e abaixo (no cartão) */
-.main-card-wrapper { --slot-pad: 0px; margin-top: var(--slot-pad); }
-.main-card-wrapper > .annotation-card { margin-bottom: var(--slot-pad); }
-
-/* Correlacionados: padding (e não margin) para evitar colapso de margens entre irmãos */
-.correlated-item-wrapper { --slot-pad: 0px; --slot-pad-prev: 0px; padding-block: var(--slot-pad); }
-
-/* Durante o arraste, preserva a folga em vez do padding-top: 4px original */
-.correlated-item-wrapper.drag-over { padding-top: var(--slot-pad, 0px); }
 
 /* ================================================
    13. CHECKPOINT & TESOURA IA (UX HUMANIZADA)
