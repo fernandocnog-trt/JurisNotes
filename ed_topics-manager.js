@@ -1,0 +1,4068 @@
+/* ================================================
+   topics-manager.js  —  v2.0
+   Gerenciador do Fichário de Tópicos e Anotações
+   ================================================ */
+window.TopicsManager = (function () {
+    'use strict';
+
+    const romanoCache = ["I","II","III","IV","V","VI","VII","VIII","IX","X","XI","XII","XIII","XIV","XV","XVI","XVII","XVIII","XIX","XX"];
+    function obterRomano(idx) { return romanoCache[idx] || String(idx + 1); }
+
+    // NOVA CAMADA DE CONFIGURAÇÃO: Dicionário Centralizado de Interface (ED)
+    const ED_UI_LABELS = {
+        alegacao: {
+            titulo: "Vício Alegado (Escopo)",
+            placeholder: "Clique para delimitar qual a omissão, contradição ou erro material apontado..."
+        },
+        origem: {
+            titulo: "Decisão Embargada (Alvo)",
+            placeholder: "Clique para redigir ou colar o trecho da decisão sob ataque..."
+        },
+        veredito: {
+            titulo: "Veredito / Conclusão",
+            placeholder: "Clique para definir se há o vício e o efeito modificativo (se houver)..."
+        }
+    };
+
+    let _activeTopicoCor = '#ffffff';
+
+    const _topicosComGlobaisAbertas = new Set();
+    let _preambuloLadoALado = false;
+
+    function togglePreambuloTopico(event) {
+        if (event) event.stopPropagation();
+        if (!activeTabId) return;
+
+        _preambuloLadoALado = !_preambuloLadoALado;
+
+        const panel = document.querySelector('.topic-preamble-panel');
+        const btn = document.getElementById('btn-toggle-preambulo');
+
+        if (panel) panel.classList.toggle('is-side-by-side', _preambuloLadoALado);
+        if (btn) {
+            btn.setAttribute('aria-pressed', _preambuloLadoALado ? 'true' : 'false');
+            btn.innerHTML = _preambuloLadoALado ? '☰ Um Abaixo do Outro' : '◫ Lado a Lado';
+        }
+
+        // Recalcula as conexões SVG do mapa mental após a mudança de disposição
+        requestAnimationFrame(() => {
+            const container = document.getElementById('timeline-container');
+            if (container && container.offsetParent !== null) {
+                posicionarNosDeIdeia(container);
+                desenharConexoes();
+            }
+        });
+    }
+
+    /* --- INÍCIO DO BLOCO DE FUNÇÕES AUXILIARES --- */
+    function _ehCheckpoint(anotacao) {
+        return !!(anotacao && anotacao.tipo && anotacao.tipo.startsWith('checkpoint'));
+    }
+
+    function _mapNumerosVisuais(anotacoes) {
+        const mapa = new Map();
+        let contador = 1;
+        anotacoes.forEach((an, idx) => {
+            if (!_ehCheckpoint(an)) {
+                mapa.set(idx, contador++);
+            }
+        });
+        return mapa;
+    }
+    /* --- FIM DO BLOCO DE FUNÇÕES AUXILIARES --- */
+
+    /* ================================================
+       SCROLL GUARD v2 (Context-Aware Viewport Manager)
+       ================================================
+       NOTA DE HONESTIDADE TÉCNICA: A memória baseada em pixels (yOffset) é uma
+       aproximação conhecida. Ela é 100% precisa para edições in-place (mudança de
+       cor, intenção, revisão) onde o delta de altura cai no/abaixo do viewport.
+       Para mutações estruturais que alteram conteúdo ACIMA da dobra (ex: desativar
+       Diretrizes Globais, SmartMove), o pixel pode sofrer desalinhamento. A 
+       mitigação total (Âncora DOM + Delta) está no backlog (Phase 2).
+    */
+    const _scrollGuard = {
+        yOffset: 0,
+        suprimido: false,
+        podeRestaurar: false
+    };
+    let _ultimaAbaRenderizada = null;
+
+    function suprimirProximaRestauracao() {
+        _scrollGuard.suprimido = true;
+    }
+
+    function capturarScroll() {
+        if (_scrollGuard.suprimido) return;
+        const historyContainer = document.getElementById('history-container');
+        if (historyContainer && activeTabId) {
+            _scrollGuard.yOffset = historyContainer.scrollTop;
+            _scrollGuard.podeRestaurar = (activeTabId === _ultimaAbaRenderizada);
+        }
+    }
+
+    function restaurarScroll() {
+        const historyContainer = document.getElementById('history-container');
+        
+        if (_scrollGuard.suprimido) {
+            if (historyContainer) historyContainer.scrollTo({ top: 0, behavior: 'smooth' });
+            _scrollGuard.suprimido = false;
+            _scrollGuard.podeRestaurar = false;
+            _ultimaAbaRenderizada = activeTabId;
+            return;
+        }
+
+        if (_scrollGuard.podeRestaurar && historyContainer) {
+            historyContainer.scrollTo({
+                top: _scrollGuard.yOffset,
+                behavior: 'instant' 
+            });
+        }
+        
+        _ultimaAbaRenderizada = activeTabId;
+        _scrollGuard.podeRestaurar = false;
+    }
+
+    function _reassertScroll() {
+        if (_scrollGuard.suprimido) return;
+        const historyContainer = document.getElementById('history-container');
+        if (!historyContainer || !_scrollGuard.podeRestaurar) return;
+        
+        if (Math.abs(historyContainer.scrollTop - _scrollGuard.yOffset) > 4) {
+            historyContainer.scrollTo({ top: _scrollGuard.yOffset, behavior: 'instant' });
+        }
+        _scrollGuard.podeRestaurar = false;
+    }
+
+    function _sincronizarBtnGlobais(temDados, aberto) {
+        const btn = document.getElementById('btn-toggle-globais');
+        if (!btn) return;
+        
+        const isAtivo = temDados || aberto;
+        btn.classList.toggle('is-active', isAtivo);
+        btn.setAttribute('aria-pressed', isAtivo ? 'true' : 'false');
+        
+        if (temDados) {
+            btn.title = "Diretrizes Globais estão em uso (Trancado)";
+        } else if (aberto) {
+            btn.title = "Ocultar Diretrizes Globais (Vazio)";
+        } else {
+            btn.title = "Ativar Card de Diretrizes Globais";
+        }
+    }
+
+    function toggleDiretrizesGlobais() {
+        const activeId = activeTabId;
+        if (!activeId) return;
+        const topico = topicos.find(t => t.id === activeId);
+        if (!topico) return;
+
+        const temDiretrizes = topico.diretrizesGlobais && topico.diretrizesGlobais.length > 0;
+        
+        if (temDiretrizes) {
+            if(window.exibirToast) exibirToast('Não é possível ocultar: existem diretrizes cadastradas. Remova-as primeiro.', 'aviso');
+            return;
+        }
+
+        const ativando = !_topicosComGlobaisAbertas.has(activeId);
+        
+        if (ativando) {
+            _topicosComGlobaisAbertas.add(activeId);
+        } else {
+            _topicosComGlobaisAbertas.delete(activeId);
+        }
+        
+        renderizarFichario(topicos); 
+
+        if (ativando) {
+            requestAnimationFrame(() => {
+                const globalCard = document.querySelector('.nivel-global .annotation-card');
+                if (globalCard) {
+                    const scrollContainer = document.getElementById('history-container');
+                    const offset = (globalCard.getBoundingClientRect().top - scrollContainer.getBoundingClientRect().top) + scrollContainer.scrollTop - 40;
+                    scrollContainer.scrollTo({ top: offset, behavior: 'smooth' });
+                    
+                    globalCard.classList.remove('card-flash-focus');
+                    void globalCard.offsetWidth;
+                    globalCard.classList.add('card-flash-focus');
+                }
+            });
+        }
+    }
+    
+    function resetVisibilidadeGlobais() {
+        _topicosComGlobaisAbertas.clear();
+        _ultimoSnapshotTransito = null; // Libera memória do snapshot ao encerrar/resetar sessão
+    }
+
+    // Observer Otimizado (Debounce de ~16ms para agrupar Recalculate Styles)
+    let _layoutDebounceTimer = null;
+    const resizeObserver = new ResizeObserver(() => {
+        clearTimeout(_layoutDebounceTimer);
+        _layoutDebounceTimer = setTimeout(() => {
+            requestAnimationFrame(() => {
+                const container = document.getElementById('timeline-container');
+                if (container) {
+                    if (typeof posicionarNosDeIdeia === 'function') posicionarNosDeIdeia(container);
+                    if (typeof desenharConexoes === 'function') requestAnimationFrame(() => desenharConexoes());
+                }
+            });
+        }, 16); 
+    });
+
+    // Funções Privadas do Modo de Leitura Centralizado
+    let _textoLeituraAtualMarkdown = "";
+    let _textoLeituraAtualHTML = "";
+
+    function abrirModoLeitura(btn) {
+        const textoOriginal = btn.dataset.rawText || '';
+        const tituloOriginal = btn.dataset.rawTitle || 'Anotação';
+
+        const modal = document.getElementById('reading-mode-modal');
+        const backdrop = document.getElementById('reading-mode-backdrop');
+        const tituloEl = document.getElementById('reading-mode-title-text');
+        const conteudoEl = document.getElementById('reading-mode-content');
+        if (!modal || !backdrop || !tituloEl || !conteudoEl) return;
+
+        _textoLeituraAtualMarkdown = textoOriginal;
+        _textoLeituraAtualHTML = renderizarMarkdownSeguro(escaparHTML(textoOriginal));
+
+        tituloEl.textContent = tituloOriginal;
+        conteudoEl.innerHTML = _textoLeituraAtualHTML.replace(/\n/g, '<br>');
+
+        backdrop.style.display = 'block';
+        modal.style.display = 'flex';
+    }
+
+    function fecharModoLeitura() {
+        const modal = document.getElementById('reading-mode-modal');
+        const backdrop = document.getElementById('reading-mode-backdrop');
+        if (modal) modal.style.display = 'none';
+        if (backdrop) backdrop.style.display = 'none';
+    }
+
+    document.addEventListener('keydown', (e) => {
+        const modal = document.getElementById('reading-mode-modal');
+        if (e.key === 'Escape' && modal && modal.style.display === 'flex') {
+            fecharModoLeitura();
+        }
+    });
+
+    async function copiarTextoModoLeitura() {
+        const paragrafosHtml = _textoLeituraAtualHTML
+            .split('\n')
+            .filter(linha => linha.trim() !== '')
+            .map(linha => `<p>${linha}</p>`)
+            .join('');
+
+        try {
+            const clipboardItem = new ClipboardItem({
+                'text/plain': new Blob([_textoLeituraAtualMarkdown], { type: 'text/plain' }),
+                'text/html': new Blob([paragrafosHtml], { type: 'text/html' })
+            });
+            await navigator.clipboard.write([clipboardItem]);
+            exibirToast('Texto copiado com formatação inteligente!', 'sucesso');
+        } catch (err) {
+            console.warn('Fallback de cópia acionado:', err);
+            try {
+                await navigator.clipboard.writeText(_textoLeituraAtualMarkdown);
+                exibirToast('Texto copiado (Modo Básico).', 'info');
+            } catch (err2) {
+                exibirToast('Não foi possível copiar automaticamente.', 'erro');
+            }
+        }
+    }
+
+    function obterCorContraste(hex) {
+        if (!hex || !hex.startsWith('#')) return '#ffffff';
+        let cleanHex = hex.replace('#', '');
+        if (cleanHex.length === 3) cleanHex = cleanHex.split('').map(c => c + c).join('');
+        const r = parseInt(cleanHex.substr(0, 2), 16);
+        const g = parseInt(cleanHex.substr(2, 2), 16);
+        const b = parseInt(cleanHex.substr(4, 2), 16);
+        const yiq = ((r * 299) + (g * 587) + (b * 114)) / 1000;
+        return (yiq >= 128) ? '#1a1a1a' : '#ffffff';
+    }
+
+    /**
+     * Sanitizador de HTML — previne XSS ao interpolar dados do usuário
+     * em template literals. Escapa os 5 metacaracteres fundamentais do HTML.
+     * @param {string} str - String bruta (input do usuário ou dado de backup).
+     * @returns {string} String segura para inserção em innerHTML.
+     */
+    function escaparHTML(str) {
+        if (str == null) return '';
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    /**
+     * Conector visual entre cartões correlacionados: duas hastes finas em sentidos opostos.
+     * Toda a geometria é CSS (.correlated-link); aqui só se emite o markup.
+     * @param {string} titulo - Tooltip exibido ao passar o mouse (texto livre, é escapado).
+     */
+    function _htmlConectorCorrelacao(titulo) {
+        return `<div class="correlated-link correlated-drag-handle" title="${escaparHTML(titulo)}" aria-hidden="true">
+            <div class="correlated-link__lines">
+                <span class="correlated-link__line correlated-link__line--up"></span>
+                <span class="correlated-link__line correlated-link__line--down"></span>
+            </div>
+        </div>`;
+    }
+
+    function renderizarMarkdownSeguro(strEscapada) {
+        if (!strEscapada) return '';
+        
+        let processado = window.JurisUtils.limparEscapeMarkdown(strEscapada);
+
+        // 1. Negrito (**texto**) - Processado primeiro para evitar conflito com Itálico
+        processado = processado.replace(/\*\*([\s\S]*?)\*\*/g, '<b>$1</b>');
+
+        // 2. Itálico (*texto*)
+        processado = processado.replace(/\*([\s\S]*?)\*/g, '<i>$1</i>');
+
+        // 3. Sublinhado (O motor de escape converteu '<' para '&lt;', então buscamos a versão segura)
+        processado = processado.replace(/&lt;u&gt;([\s\S]*?)&lt;\/u&gt;/g, '<u>$1</u>');
+
+        // 4. Tamanhos de Fonte
+        processado = processado.replace(/\[\[size:1\]\]([\s\S]*?)\[\[\/size\]\]/g,
+            '<span class="txt-largo-1" style="font-size:1.15em;">$1</span>');
+        processado = processado.replace(/\[\[size:2\]\]([\s\S]*?)\[\[\/size\]\]/g,
+            '<span class="txt-largo-2" style="font-size:1.3em;">$1</span>');
+
+        return processado;
+    }
+
+    function escurecerCor(hex, fator = 0.65) {
+        const num = parseInt(hex.replace('#', ''), 16);
+        const r = Math.min(255, Math.floor(((num >> 16) & 0xFF) * fator));
+        const g = Math.min(255, Math.floor(((num >> 8) & 0xFF) * fator));
+        const b = Math.min(255, Math.floor((num & 0xFF) * fator));
+        return `rgb(${r},${g},${b})`;
+    }
+
+    /**
+     * Converte cor Hexadecimal para RGBA com segurança.
+     * @param {string} hex - Cor em formato hexadecimal (ex: #FF0000)
+     * @param {number} alpha - Opacidade (0.0 a 1.0)
+     * @returns {string} String CSS válida (rgba ou o fallback original)
+     */
+    function hexToRgba(hex, alpha = 0.2) {
+        if (!hex || !hex.startsWith('#')) return hex;
+        
+        let c = hex.substring(1).split('');
+        if (c.length === 3) c = [c[0], c[0], c[1], c[1], c[2], c[2]];
+        
+        if (c.length !== 6) return hex;
+        
+        const num = parseInt(c.join(''), 16);
+        return `rgba(${(num >> 16) & 255}, ${(num >> 8) & 255}, ${num & 255}, ${alpha})`;
+    }
+
+    // Paleta Neon / Vibrante para as abas de tópicos e linhas de conexão
+    const CORES_TOPICOS = [
+        '#00FFFF', // Ciano Neon
+        '#FF00FF', // Magenta Neon
+        '#39FF14', // Verde Neon
+        '#FF3131', // Vermelho Neon
+        '#FFFF00', // Amarelo Elétrico
+        '#BC13FE', // Roxo Neon
+        '#FF1493', // Rosa Choque (Deep Pink)
+        '#00FF66', // Verde Primavera (Spring Green)
+        '#FF6600', // Laranja Neon
+        '#CCFF00', // Limão Elétrico (Electric Lime)
+        '#08E8DE', // Teal Brilhante
+        '#FF007F', // Rosa Brilhante (Rose Bright)
+        '#8A2BE2', // Violeta Azulado
+        '#00BFFF', // Azul Céu Profundo
+        '#FFD700'  // Ouro Brilhante
+    ];
+
+    /**
+     * Converte um índice numérico (base-0) em identificador alfabético.
+     * Suporta overflow: 0→A, 25→Z, 26→AA, 27→AB, etc.
+     * @param {number} idx - Índice da sub-anotação.
+     * @returns {string} Identificador de 1 ou 2 letras.
+     */
+    function gerarLetra(idx) {
+        const ABC = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+        if (idx < 26) return ABC[idx];
+        return ABC[Math.floor(idx / 26) - 1] + ABC[idx % 26];
+    }
+
+    function obterIconeIntencao(intencao) {
+        switch(intencao) {
+            case 'comando': return `<svg class="intencao-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="4"></circle></svg>`;
+            case 'texto': return `<svg class="intencao-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>`;
+            case 'jurisprudencia': return `<svg class="intencao-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path><path d="M12 10l-2-2m0 0l-2 2m2-2v6"></path></svg>`;
+            case 'degravacao': return `<svg class="intencao-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line></svg>`;
+            case 'nota': return `<svg class="intencao-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>`;
+            case 'fundamentacao': return `<svg class="intencao-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path></svg>`;
+            case 'refutacao': return `<svg class="intencao-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path><line x1="9" y1="9" x2="15" y2="15"></line><line x1="15" y1="9" x2="9" y2="15"></line></svg>`;
+            case 'preliminar': return `<svg class="intencao-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>`;
+            case 'veredito': return `<svg class="intencao-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"></path></svg>`;
+            case 'premissa':
+            default: return `<svg class="intencao-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path></svg>`;
+        }
+    }
+
+    function _gerarBtnRevisaoHtml(topicoId, parentIndex, viewSource, localIndex, intencao, isRevisada) {
+        if (intencao !== 'nota') return '';
+        
+        const safeViewSource = String(viewSource).replace(/'/g, "\\'");
+        const safeParentIdx = parentIndex === null ? 'null' : parentIndex;
+        
+        const svgPendente = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="5" y1="12" x2="19" y2="12"></line></svg>`;
+        const svgRevisada = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>`;
+        
+        return `<button class="btn-revisao-nota ${isRevisada ? 'revisada' : 'pendente'}" 
+                title="${isRevisada ? 'Nota revisada. Clique para desmarcar.' : 'Nota pendente. Clique para marcar como revisada.'}" 
+                onclick="toggleRevisaoNotaOculta('${topicoId}', ${safeParentIdx}, '${safeViewSource}', ${localIndex}, event)">
+                ${isRevisada ? svgRevisada : svgPendente}
+                </button>`;
+    }
+
+    // --- FÁBRICA DE COMPONENTES: PILHA (GRUPO DE IDEIAS) ED ---
+    function _obterTextosDaPilha(topico, grupoId) {
+        if (!topico) return "";
+        let textos = [];
+        
+        const extrair = (arr) => {
+            if (!arr) return;
+            arr.forEach(s => {
+                if (s.grupoId === grupoId && s.texto && s.texto.trim() !== '') {
+                    textos.push(s.texto.trim());
+                }
+            });
+        };
+
+        topico.anotacoes.forEach(an => {
+            extrair(an.subAnotacoes);
+            if (an.itensCorrelacionados) an.itensCorrelacionados.forEach(ic => extrair(ic.subAnotacoes));
+        });
+        extrair(topico.diretrizesGlobais);
+        // Usa diretrizesPorVicio (específico do ED)
+        if (topico.diretrizesPorVicio) Object.values(topico.diretrizesPorVicio).forEach(arr => extrair(arr));
+
+        return textos.join(' - ');
+    }
+
+    function _gerarHtmlPilha(sub, renderContext, activeTabId) {
+        if (!renderContext.romanMap.has(sub.grupoId)) {
+            renderContext.romanMap.set(sub.grupoId, obterRomano(renderContext.romanCounter++));
+        }
+        const numRomano = renderContext.romanMap.get(sub.grupoId);
+        
+        // Motor Computed:
+        const topico = topicos.find(t => t.id === activeTabId);
+        const teorAutomatico = _obterTextosDaPilha(topico, sub.grupoId);
+        
+        const tituloPilha = sub.grupoTitulo || "📚 Grupo de Ideias";
+        const descPilha = sub.grupoDescricao || (teorAutomatico !== "" ? teorAutomatico : "Nós vazios.");
+        const source = String(sub.viewSource ?? '') || 'main';
+
+        return `
+        <div class="sub-annotation-item sub-stack-wrapper" data-source="${escaparHTML(source)}">
+            <div class="sub-annotation-card sub-annotation-stack tema-dossie-ed">
+                <div class="stack-roman-badge" title="Desagrupar Pilha" onclick="TopicsManager.desagruparPilha('${activeTabId}', '${sub.grupoId}')">
+                    ${numRomano}
+                </div>
+                
+                <div class="pilha-editavel" title="Clique para editar metadados" onclick="TopicsManager.abrirModalPilha('${activeTabId}', '${sub.grupoId}')">
+                    ${escaparHTML(tituloPilha)}
+                </div>
+                
+                <div class="pilha-editavel pilha-editavel-desc" title="Clique para editar metadados" onclick="TopicsManager.abrirModalPilha('${activeTabId}', '${sub.grupoId}')">
+                    ${renderizarMarkdownSeguro(escaparHTML(descPilha)).replace(/\n/g, '<br>')}
+                </div>
+                
+                <div class="btn-read-mode-trigger sub-read-badge" title="Modo Leitura do Grupo" onclick="TopicsManager.abrirModoLeituraPilha('${activeTabId}', '${sub.grupoId}', '${numRomano}')">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path>
+                        <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path>
+                    </svg>
+                </div>
+            </div>
+        </div>`;
+    }
+
+    let activeTabId = null;
+
+    /**
+     * Retorna uma cor da paleta com suporte a módulo (infinitos tópicos).
+     */
+    function obterCor(index) {
+        return CORES_TOPICOS[index % CORES_TOPICOS.length];
+    }
+
+    // Conjunto de classes CSS de polo com estilização semântica em ed_juris-core.css.
+    // IMPORTANTE: Manter sincronizado caso novas classes .tag-* sejam criadas no CSS.
+    const POLO_CLASSES_CONHECIDAS = new Set([
+        'tag-parte-autora',
+        'tag-parte-re',
+        'tag-sentenca',
+        'tag-sentenca-de-ed',
+        'tag-laudo-pericial',
+        'tag-juizo',
+        'tag-perito',
+        'tag-parte-exequente',
+        'tag-parte-executada',
+        'tag-auxiliar-justica'
+    ]);
+
+    /**
+     * Converte a string do polo em uma classe CSS válida (protegida contra null/undefined).
+     */
+    function poloParaClasse(polo) {
+        if (!polo) return 'tag-custom';
+        const slug = String(polo)
+            .toLowerCase()
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .replace(/[^a-z0-9]+/g, '-')
+            .replace(/^-|-$/g, '');
+        return slug ? `tag-${slug}` : 'tag-custom';
+    }
+
+    /**
+     * Resolve a classe CSS da etiqueta de polo/teor e indica se é uma entrada manual customizada.
+     */
+    function obterInfoClassePolo(polo) {
+        const candidata = poloParaClasse(polo);
+        const isConhecida = POLO_CLASSES_CONHECIDAS.has(candidata);
+        return {
+            classeCss: isConhecida ? candidata : 'tag-custom',
+            isCustom: !isConhecida
+        };
+    }
+
+    /**
+     * Fábrica Unificada de Tags de Cabeçalho (Documento + Parte/Teor).
+     * @param {string|null} documento - Nome do documento ou papel principal.
+     * @param {string|null} polo - Nome da parte, teor manual ou orador.
+     * @param {Object} [opts] - Opções ({ prefixoDoc: string, poloSemanticoRef: string }).
+     */
+    function _gerarGrupoTagsHeader(documento, polo, opts = {}) {
+        const prefixoDoc = opts.prefixoDoc || '';
+        const docLimpo = documento ? String(documento).trim() : String(polo ?? '').trim();
+        const poloLimpo = (documento && polo) ? String(polo).trim() : '';
+
+        const docSeguro = escaparHTML(docLimpo);
+        const poloSeguro = escaparHTML(poloLimpo);
+        const temSegundaTag = Boolean(poloSeguro && poloSeguro !== docSeguro);
+
+        // Em cartões de áudio com tag única de orador, preserva a cor semântica de poloTag
+        let classePrimeiraTag = 'doc-tag';
+        if (!documento && opts.poloSemanticoRef) {
+            classePrimeiraTag = obterInfoClassePolo(opts.poloSemanticoRef).classeCss;
+        }
+
+        const wrapperPrimeiraMod = temSegundaTag ? 'polo-tag-wrapper--doc' : 'polo-tag-wrapper--solo';
+        const docLabelCompleto = escaparHTML(`${prefixoDoc}${docLimpo}`);
+
+        let html = `
+            <span class="polo-tag-wrapper ${wrapperPrimeiraMod}">
+                <span class="polo-tag ${classePrimeiraTag}" data-full-text="${docLabelCompleto}">${prefixoDoc}${docSeguro}</span>
+            </span>`;
+
+        if (temSegundaTag) {
+            const refCorPolo = opts.poloSemanticoRef || poloLimpo;
+            const { classeCss, isCustom } = obterInfoClassePolo(refCorPolo);
+            const wrapperSegundaMod = isCustom ? 'polo-tag-wrapper--custom' : 'polo-tag-wrapper--semantic';
+
+            html += `
+            <span class="polo-tag-wrapper ${wrapperSegundaMod}">
+                <span class="polo-tag ${classeCss}" data-full-text="${poloSeguro}">${poloSeguro}</span>
+            </span>`;
+        }
+
+        return `<div class="card-tags-group">${html}</div>`;
+    }
+
+    /**
+     * Sincroniza tabindex="0" e .is-tag-truncated apenas nas tags efetivamente cortadas (scrollWidth > clientWidth).
+     */
+    function _sincronizarAcessibilidadeTagsTruncadas(rootEl = document) {
+        if (!rootEl) return;
+        const tags = rootEl.querySelectorAll('.polo-tag[data-full-text]');
+        const leituras = [];
+
+        // Fase 1: Leitura geométrica em lote
+        tags.forEach(tag => {
+            if (tag.offsetParent === null) return;
+            const truncada = (tag.scrollWidth - tag.clientWidth) > 1;
+            leituras.push({ tag, truncada });
+        });
+
+        // Fase 2: Escrita no DOM em lote
+        leituras.forEach(({ tag, truncada }) => {
+            tag.classList.toggle('is-tag-truncated', truncada);
+            if (truncada) {
+                if (tag.getAttribute('tabindex') !== '0') tag.setAttribute('tabindex', '0');
+            } else {
+                if (tag.hasAttribute('tabindex')) tag.removeAttribute('tabindex');
+            }
+        });
+    }
+
+    /**
+     * Controlador Singleton do Tooltip Flutuante de Tags e Observador de Largura.
+     */
+    const _TagTooltipController = (function() {
+        let _tooltipEl = null;
+        let _activeTarget = null;
+        let _bound = false;
+        let _lastPointerType = 'mouse';
+        let _isPointerFocusing = false;
+        let _widthRaf = null;
+        let _lastContainerWidth = 0;
+
+        const _tagWidthObserver = new ResizeObserver((entries) => {
+            for (const entry of entries) {
+                if (!entry.target || entry.target.offsetParent === null) continue;
+                const width = Math.round(entry.contentRect.width);
+                if (width > 0 && Math.abs(width - _lastContainerWidth) >= 2) {
+                    _lastContainerWidth = width;
+                    ocultar();
+                    if (_widthRaf) cancelAnimationFrame(_widthRaf);
+                    _widthRaf = requestAnimationFrame(() => {
+                        _sincronizarAcessibilidadeTagsTruncadas(entry.target);
+                    });
+                }
+            }
+        });
+
+        function _getOrCreateTooltip() {
+            if (_tooltipEl && document.body.contains(_tooltipEl)) return _tooltipEl;
+            _tooltipEl = document.getElementById('juris-tag-tooltip');
+            if (!_tooltipEl) {
+                _tooltipEl = document.createElement('div');
+                _tooltipEl.id = 'juris-tag-tooltip';
+                _tooltipEl.className = 'juris-tag-tooltip';
+                _tooltipEl.setAttribute('role', 'tooltip');
+                _tooltipEl.setAttribute('aria-hidden', 'true');
+                document.body.appendChild(_tooltipEl);
+            }
+            return _tooltipEl;
+        }
+
+        function mostrar(tagEl) {
+            if (!tagEl) return;
+            const estaTruncada = (tagEl.scrollWidth - tagEl.clientWidth) > 1;
+            if (!estaTruncada) {
+                ocultar();
+                return;
+            }
+
+            const textoIntegral = tagEl.getAttribute('data-full-text');
+            if (!textoIntegral) return;
+
+            const tooltip = _getOrCreateTooltip();
+            if (_activeTarget && _activeTarget !== tagEl) {
+                _activeTarget.removeAttribute('aria-describedby');
+            }
+            _activeTarget = tagEl;
+            tagEl.setAttribute('aria-describedby', 'juris-tag-tooltip');
+
+            // Reseta left/top antes de medir para evitar quebra precoce por posição residual
+            tooltip.style.left = '0px';
+            tooltip.style.top = '0px';
+            tooltip.textContent = textoIntegral;
+            tooltip.classList.add('is-visible');
+            tooltip.setAttribute('aria-hidden', 'false');
+
+            const tagRect = tagEl.getBoundingClientRect();
+            const tipRect = tooltip.getBoundingClientRect();
+            const MARGEM_VIEWPORT = 12;
+            const GAP_VERTICAL = 8;
+
+            let left = tagRect.left + (tagRect.width / 2) - (tipRect.width / 2);
+            left = Math.max(MARGEM_VIEWPORT, Math.min(left, window.innerWidth - tipRect.width - MARGEM_VIEWPORT));
+
+            let top = tagRect.top - tipRect.height - GAP_VERTICAL;
+            if (top < MARGEM_VIEWPORT) {
+                top = tagRect.bottom + GAP_VERTICAL;
+            }
+
+            tooltip.style.left = `${Math.round(left)}px`;
+            tooltip.style.top = `${Math.round(top)}px`;
+        }
+
+        function ocultar() {
+            if (_activeTarget) {
+                _activeTarget.removeAttribute('aria-describedby');
+                _activeTarget = null;
+            }
+            if (!_tooltipEl) return;
+            _tooltipEl.classList.remove('is-visible');
+            _tooltipEl.setAttribute('aria-hidden', 'true');
+        }
+
+        function inicializarDelegacao() {
+            const historyContainer = document.getElementById('history-container');
+            if (!historyContainer) return;
+
+            _tagWidthObserver.observe(historyContainer);
+
+            if (_bound) return;
+
+            // Rastreia a origem do ponteiro antes de focusin/click e fecha ao tocar fora
+            document.addEventListener('pointerdown', (e) => {
+                _lastPointerType = e.pointerType || 'mouse';
+                _isPointerFocusing = true;
+                requestAnimationFrame(() => { _isPointerFocusing = false; });
+
+                if (_activeTarget && !e.target.closest('.polo-tag[data-full-text]')) {
+                    ocultar();
+                }
+            }, { capture: true, passive: true });
+
+            // Hover exclusivo para mouse físico
+            historyContainer.addEventListener('pointerover', (e) => {
+                if (e.pointerType !== 'mouse') return;
+                const tag = e.target.closest('.polo-tag[data-full-text]');
+                if (tag) mostrar(tag);
+            });
+
+            historyContainer.addEventListener('pointerout', (e) => {
+                if (e.pointerType !== 'mouse') return;
+                const tag = e.target.closest('.polo-tag[data-full-text]');
+                if (tag && (!e.relatedTarget || !tag.contains(e.relatedTarget))) {
+                    ocultar();
+                }
+            });
+
+            // Foco exclusivo para navegação por teclado (Tab) — ignora foco gerado por clique/toque
+            historyContainer.addEventListener('focusin', (e) => {
+                if (_isPointerFocusing) return;
+                const tag = e.target.closest('.polo-tag[data-full-text]');
+                if (tag && tag.matches(':focus-visible')) {
+                    mostrar(tag);
+                }
+            });
+
+            historyContainer.addEventListener('focusout', (e) => {
+                const tag = e.target.closest('.polo-tag[data-full-text]');
+                if (tag) ocultar();
+            });
+
+            // Alternância no clique exclusivamente para toque/caneta (mouse já usa hover)
+            historyContainer.addEventListener('click', (e) => {
+                if (_lastPointerType === 'mouse') return;
+                const tag = e.target.closest('.polo-tag[data-full-text]');
+                if (tag && (tag.scrollWidth - tag.clientWidth) > 1) {
+                    if (_activeTarget === tag) ocultar();
+                    else mostrar(tag);
+                } else if (_activeTarget) {
+                    ocultar();
+                }
+            });
+
+            // Fecha em qualquer rolagem da página ou de sub-containers internos
+            document.addEventListener('scroll', ocultar, { capture: true, passive: true });
+
+            _bound = true;
+        }
+
+        return { inicializarDelegacao, ocultar };
+    })();
+
+    /**
+     * Motor unificado para construção de cards de áudio.
+     * Desacopla o parseamento do JSON do loop principal de renderização.
+     */
+    function _gerarHtmlCardAudio(anotacao) {
+        let htmlConteudo = '';
+        let htmlComentario = '';
+        
+        try {
+            const dadosAudio = JSON.parse(anotacao.conteudo);
+            
+            // Fallback unificado para nomenclatura segura
+            const nomePapel = dadosAudio.role || dadosAudio.oradorStr || 'Orador não idt.';
+            const tagVisual = ((dadosAudio.role === 'Testemunha' || dadosAudio.role === 'Advogado') && dadosAudio.poloTag)
+                ? _gerarGrupoTagsHeader(dadosAudio.role, dadosAudio.poloTag, { poloSemanticoRef: dadosAudio.poloTag })
+                : _gerarGrupoTagsHeader(null, nomePapel, { poloSemanticoRef: dadosAudio.poloTag });
+
+            // Garante extração segura de tempos matemáticos (fallback para 0)
+            const inicioNum = dadosAudio.inicio || 0;
+            const fimNum = dadosAudio.fim || 0;
+            
+            const safeFormatTime = (sec) => window.AudioManager?.formatTime ? window.AudioManager.formatTime(sec) : `${Math.floor(sec/60)}' ${Math.floor(sec%60)}''`;
+
+            // Renderiza o cabeçalho com o botão Clickable e Ícone de Play
+            const trechoValido = Number.isFinite(inicioNum) && Number.isFinite(fimNum) && fimNum > inicioNum;
+
+            if (!trechoValido) {
+                htmlConteudo = `<p class="card-texto" style="color:#c62828;">[Erro: intervalo do áudio inválido]</p>`;
+            } else {
+                const tituloMini = `Oitiva: ${nomePapel}`;
+                const tituloMiniAttr = escaparHTML(tituloMini).replace(/'/g, '&apos;');
+                
+                // Injeção condicional: só cria o atributo se houver transcrição
+                const degravacaoAttr = dadosAudio.transcricao ? `data-audio-degravacao="${escaparHTML(dadosAudio.transcricao).replace(/'/g, '&apos;')}"` : '';
+
+                htmlConteudo = `
+                    <div class="card-audio">
+                        <div class="audio-icon-box clickable-audio" 
+                             role="button" 
+                             tabindex="0" 
+                             title="Ouvir este trecho em player focado"
+                             aria-label="${tituloMiniAttr}"
+                             data-audio-inicio="${inicioNum}" 
+                             data-audio-fim="${fimNum}" 
+                             data-audio-titulo="${tituloMiniAttr}"
+                             ${degravacaoAttr}>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                            </svg>
+                        </div>
+                        <div class="audio-card-meta">
+                            <div class="audio-oitiva-row">
+                                <strong>Oitiva:</strong> ${tagVisual}
+                            </div>
+                            <span class="audio-time-badge">⏱️ ${safeFormatTime(inicioNum)} a ${safeFormatTime(fimNum)}</span>
+                        </div>
+                    </div>`;
+            }
+
+            // PRESERVAÇÃO CRÍTICA: Lógica de Comentários e Degravações
+            let comentarios = [];
+            let blocosLeitura = [];
+            const comentarioTexto = anotacao.comentario || dadosAudio.comentario || '';
+
+            if (comentarioTexto) {
+                comentarios.push(`<div class="audio-comentario-item"><strong>Contexto:</strong> ${escaparHTML(comentarioTexto)}</div>`);
+                blocosLeitura.push(`**Contexto:** ${comentarioTexto}`);
+            }
+
+            if (dadosAudio.transcricao) {
+                const btnCopiar = !anotacao.uuid ? '' : `
+                    <button class="btn-copy-degravacao" title="Copiar Degravação" onclick="window.copiarDegravacao('${anotacao.topicoIdOrigem || activeTabId}', '${anotacao.uuid || ''}')">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px;">
+                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                        </svg>
+                    </button>`;
+
+                comentarios.push(`
+                    <div class="audio-comentario-item audio-degravacao-row">
+                        <div class="audio-degravacao-text"><strong>Degravação:</strong> <em>"${escaparHTML(dadosAudio.transcricao)}"</em></div>
+                        ${btnCopiar}
+                    </div>
+                `);
+                const rotuloTempo = `${safeFormatTime(inicioNum)} a ${safeFormatTime(fimNum)}`;
+                blocosLeitura.push(`**Degravação (${rotuloTempo}):**\n"${dadosAudio.transcricao}"`);
+            }
+            
+            if (comentarios.length > 0) {
+                const rawTextAudio = escaparHTML(blocosLeitura.join('\n\n'));
+                const rawTitleAudio = escaparHTML(`Oitiva: ${nomePapel}`);
+                htmlComentario = `
+                    <div class="card-comentario juris-scroll-fade">
+                        <div class="juris-scroll-fade-body" 
+                             data-raw-text="${rawTextAudio}" 
+                             data-raw-title="${rawTitleAudio}" 
+                             ondblclick="TopicsManager.abrirModoLeitura(this)"
+                             title="Duplo clique para abrir em Modo Leitura">
+                            ${comentarios.join('')}
+                        </div>
+                    </div>`;
+            }
+        } catch (e) {
+            htmlConteudo = `<p class="card-texto" style="color:#c62828;">[Erro: metadados do áudio corrompidos]</p>`;
+        }
+        
+        return { htmlConteudo, htmlComentario };
+    }
+
+    /**
+     * Extrai a referência (meta-texto) do canto superior direito.
+     * Para documentos, retorna ID e Folha. Para áudios, retorna os marcadores de tempo.
+     */
+    function _obterMetaTexto(item) {
+        if (item.tipo === 'audio') {
+            try {
+                const dados = JSON.parse(item.conteudo);
+                const safeFormatTime = (sec) => window.AudioManager?.formatTime ? window.AudioManager.formatTime(sec) : `${Math.floor(sec/60)}' ${Math.floor(sec%60)}''`;
+                // Retorna exatamente o formato que o usuário quer copiar para a minuta
+                return `(⏱️ ${safeFormatTime(dados.inicio)} a ${safeFormatTime(dados.fim)})`;
+            } catch (e) {
+                return '(Oitiva)';
+            }
+        }
+        
+        // Tratamento padrão para documentos e imagens
+        const idFormt = item.pjeId ? `Id. ${item.pjeId} - ` : '';
+        return item.pagina ? `(${idFormt}fl. ${item.pagina})` : '';
+    }
+
+    /**
+     * Fábrica de Componente: Gera o HTML do meta-texto (ID/Folha) com interatividade.
+     * @param {boolean} isModalLeitura - Se true, encadeia o fechamento síncrono do modal antes de saltar para o PDF.
+     */
+    function _gerarMetaInterativo(topicoId, parentIndex, originalCIdx, metaTexto, isModalLeitura = false) {
+        const acaoFechamento = isModalLeitura ? 'TopicsManager.fecharModoLeitura(); ' : '';
+        return `<span class="card-meta" style="cursor:pointer; font-size:0.85rem; color:var(--trt-blue); font-weight:700; text-decoration: underline dashed; text-underline-offset: 3px;" title="Clique: Copiar | Shift+Clique: Editar folha | Ctrl+Clique: Ir ao PDF" onclick="${acaoFechamento}handleMetaClick(event, '${topicoId}', ${parentIndex}, true, ${originalCIdx})">${metaTexto}</span>`;
+    }
+
+    // Função estática gerarSVGConector removida (substituída pelo motor dinâmico desenharConexoes)
+
+    /**
+     * FÁBRICA UNIFICADA DE SUB-NÓS (Nós de Ideia e Diretrizes)
+     * Centraliza a renderização eliminando duplicação de templates e garantindo SSOT.
+     */
+    function _gerarTemplateSubNo(sub, idx, ctx) {
+        const intencao = sub.intencao || 'premissa';
+        const isHasIntent = true; 
+        const subIconSVG = obterIconeIntencao(intencao);
+        
+        const badgeClass = isHasIntent ? `sub-badge has-intent intencao-${intencao}` : 'sub-badge';
+        const label = isHasIntent ? `${subIconSVG} ${ctx.prefixoBadge}${ctx.usarLetra ? gerarLetra(idx) : (idx + 1)}` : `${ctx.prefixoBadge}${ctx.usarLetra ? gerarLetra(idx) : (idx + 1)}`;
+        
+        const textoFormatado = renderizarMarkdownSeguro(escaparHTML(sub.texto));
+        const isRevisada = sub.revisada === true;
+        const itemWrapperClass = intencao === 'nota' ? `sub-annotation-item is-nota-interna ${isRevisada ? 'is-revisada' : 'is-pendente'}` : 'sub-annotation-item';
+        
+        // Normaliza para String não-vazia e escapa aspas simples para uso seguro em handlers inline
+        const viewSourceNorm = String(ctx.viewSource ?? '') || 'main';
+        const safeViewSourceJS = viewSourceNorm.replace(/'/g, "\\'");
+
+        const clickSubMenu = ctx.parentIndex === null 
+            ? `abrirMenuSubAnotacao('${ctx.topicoId}', null, '${safeViewSourceJS}', ${sub.localIndex}, event)`
+            : `abrirMenuSubAnotacao('${ctx.topicoId}', ${ctx.parentIndex}, '${safeViewSourceJS}', ${sub.localIndex}, event)`;
+
+        const classBorda = ctx.bordaClass ? ` ${ctx.bordaClass}` : '';
+        const classFase = ctx.bordaFaseClass ? ` ${ctx.bordaFaseClass}` : '';
+        const styleAttr = ctx.bordaStyle ? ` style="${ctx.bordaStyle}"` : '';
+
+        return `
+            <div class="${itemWrapperClass}" data-source="${escaparHTML(viewSourceNorm)}">
+                <div class="sub-annotation-card${classFase}${classBorda}"${styleAttr}>
+                    <div class="${badgeClass}"
+                         title="Opções deste nó/diretriz"
+                         onclick="${clickSubMenu}">
+                        ${label}
+                    </div>
+                    <div class="sub-text-content">${textoFormatado}</div>
+                    
+                    <button class="btn-leitura-flutuante" aria-label="Abrir modo leitura" data-raw-text="${escaparHTML(sub.texto)}" data-raw-title="${escaparHTML(ctx.tituloLeitura)}" onclick="TopicsManager.abrirModoLeitura(this)" title="Abrir no Modo Leitura (Tela Cheia)">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path>
+                            <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path>
+                        </svg>
+                    </button>
+                    
+                    <button class="btn-copiar-zen" aria-label="Copiar texto bruto" onclick="navigator.clipboard.writeText('${escaparHTML(sub.texto).replace(/'/g, "\\'")}')" title="Copiar texto bruto para a área de transferência">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                        Copiar Trecho
+                    </button>
+                    
+                    ${_gerarBtnRevisaoHtml(ctx.topicoId, ctx.parentIndex, viewSourceNorm, sub.localIndex, intencao, isRevisada)}
+                </div>
+            </div>`;
+    }
+
+    // Componente isolado (Clean Code) - Automação de Handoff (Nível 3)
+    function _gerarHtmlCheckpoint(anotacao, index) {
+        const isSaida = anotacao.tipo === 'checkpoint_saida';
+        const volumeNum = isSaida ? anotacao.metaHandoff.versao : (anotacao.metaHandoff.versao + 1);
+        const romano = toRoman(volumeNum);
+        const chkId = escaparHTML(anotacao.metaHandoff.chkId || '');
+
+        // ATRIBUTO DE DADOS: Mantém o payload para leitura sistêmica, limpo do DOM visual
+        const payloadSafe = escaparHTML(anotacao.conteudo);
+
+        if (isSaida) {
+            return `
+            <div class="timeline-item-master is-checkpoint align-left" id="timeline-wrapper-${anotacao.uuid || index}" data-chk-payload="${payloadSafe}" style="justify-content: center; margin-bottom: 24px;">
+                <div class="sub-annotation-card borda-checkpoint-minimalista checkpoint-card--saida" style="width: 80%; max-width: 600px; margin: 0 auto;">
+                    <h3 class="checkpoint-title" style="color: #2e7d32;">Fim do Volume</h3>
+                    <aside class="checkpoint-hint-box" aria-label="Lembrete de transição">
+                        <small class="checkpoint-hint-text">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="#2e7d32" stroke-width="2" style="width:14px; height:14px; margin-right:4px; vertical-align:text-bottom;"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+                            <strong style="color: #2e7d32;">Volume Fechado:</strong> A continuação deste assunto foi transferida para a nova aba criada acima.
+                        </small>
+                    </aside>
+                </div>
+            </div>`;
+        }
+
+        // Layout de Entrada (Volume 2+)
+        return `
+        <div class="timeline-item-master is-checkpoint align-left" id="timeline-wrapper-${anotacao.uuid || index}" data-chk-payload="${payloadSafe}" style="justify-content: center; margin-bottom: 24px;">
+            <div class="sub-annotation-card borda-checkpoint-minimalista checkpoint-card--entrada" style="width: 80%; max-width: 600px; margin: 0 auto;">
+                <div class="checkpoint-badge-link">🔗 Vinculado ao Volume Anterior</div>
+                <h3 class="checkpoint-title" style="color: #f57c00; font-size: 1rem;">Volume ${romano}: Como prosseguir?</h3>
+                
+                <div class="checkpoint-instructions">
+                    <p><strong>Passo 1:</strong> Continue analisando os autos e marcando as novas provas normalmente aqui nesta tela.</p>
+                    <p><strong>Passo 2:</strong> Ao terminar as marcações, abra o Gerador de Contexto. A ordem para a IA continuar de onde parou será enviada automaticamente.</p>
+                </div>
+            </div>
+        </div>`;
+    }
+
+    /**
+     * Fábrica de cards no formato de fluxograma alternado.
+     * Retorna: card + bloco de sub-anotações (se houver) + conector SVG.
+     * Os três fragmentos são irmãos diretos no .timeline-container,
+     * garantindo que align-self funcione corretamente nas sub-anotações.
+     */
+    function criarCard(anotacao, index, arr, renderContext) {
+        // INTERCEPTAÇÃO ESTRUTURAL: Renderiza o Checkpoint modularizado
+        if (anotacao.tipo && anotacao.tipo.startsWith('checkpoint')) {
+            return _gerarHtmlCheckpoint(anotacao, index);
+        }
+
+        const total    = arr.length;
+        const numero   = renderContext.numeroVisual++;
+        const tagClass = poloParaClasse(anotacao.polo);
+        const metaTexto = _obterMetaTexto(anotacao);
+
+        let htmlConteudo = '';
+        let htmlComentario = '';
+
+        if (anotacao.tipo === 'texto') {
+            htmlConteudo = `
+            <div style="position: relative;">
+                <p class="card-texto">"${renderizarMarkdownSeguro(escaparHTML(anotacao.conteudo))}"</p>
+            </div>`;
+            if (anotacao.comentario) htmlComentario = `<div class="card-comentario"><strong>Observação:</strong> ${escaparHTML(anotacao.comentario)}</div>`;
+        } else if (anotacao.tipo === 'imagem') {
+            htmlConteudo = `
+            <div class="image-resize-wrapper" title="Arraste o canto inferior direito para redimensionar">
+                <img class="card-imagem" src="${anotacao.conteudo}" alt="Recorte">
+            </div>`;
+            if (anotacao.comentario) htmlComentario = `<div class="card-comentario"><strong>Descrição:</strong> ${escaparHTML(anotacao.comentario)}</div>`;
+        } else if (anotacao.tipo === 'audio') {
+            const audioData = _gerarHtmlCardAudio(anotacao);
+            htmlConteudo = audioData.htmlConteudo;
+            htmlComentario = audioData.htmlComentario;
+        }
+
+        const isLeft     = (numero - 1) % 2 === 0;
+        const alignClass = isLeft ? 'align-left' : 'align-right';
+        const isLast     = index === total - 1;
+        
+        const faseDoCard = typeof identificarFaseMetodologica === 'function' ? identificarFaseMetodologica(anotacao.documento) : 4;
+        const bgZoneClass = `fase-${faseDoCard}`;
+
+        let bgPoloClass = '';
+        if (anotacao.polo === 'Parte Autora') bgPoloClass = 'polo-autora';
+        else if (anotacao.polo === 'Parte Ré') bgPoloClass = 'polo-re';
+        
+        const corTextoBadge = obterCorContraste(_activeTopicoCor);
+
+        function gerarBarraAcoes(isCorrelacionado, cIdx) {
+            // Utiliza o escopo léxico para obter o item real de forma segura
+            const itemReal = isCorrelacionado && cIdx != null ? anotacao.itensCorrelacionados[cIdx] : anotacao;
+            const ctxCidx = isCorrelacionado && cIdx != null ? `, cIdx: ${cIdx}` : '';
+            const tipoDoItem = itemReal.tipo;
+            
+            const acaoEditar = isCorrelacionado ? 'editarItemCorrelacionado()' : 'editarAnotacao()';
+            const paramMove = isCorrelacionado ? `'${activeTabId}', ${index}, ${cIdx}` : `'${activeTabId}', ${index}, null`;
+            
+            const btnEditar = (tipoDoItem === 'texto' || tipoDoItem === 'audio') ? `<button title="Editar" onclick="_menuAnotacaoCtx={topicoId:'${activeTabId}', index:${index}${ctxCidx}}; ${acaoEditar}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg></button>` : '';
+            
+            let rawText = '';
+            let rawTitle = '';
+            let habilitaModoLeitura = false;
+
+            if (tipoDoItem === 'texto') {
+                rawText = escaparHTML(itemReal.conteudo || '');
+                rawTitle = escaparHTML(itemReal.documento || itemReal.polo || (isCorrelacionado ? 'Agrupamento' : 'Anotação'));
+                habilitaModoLeitura = true;
+            } else if (tipoDoItem === 'audio') {
+                const dadosAudio = _obterDadosAudioSeguros(itemReal);
+                if (dadosAudio && !dadosAudio.isCorrompido && (dadosAudio.transcricao || dadosAudio.comentario)) {
+                    const partes = [];
+                    if (dadosAudio.comentario) partes.push(`**Contexto:** ${dadosAudio.comentario}`);
+                    if (dadosAudio.transcricao) partes.push(`**Degravação (${dadosAudio.rotuloTempo}):**\n"${dadosAudio.transcricao}"`);
+                    rawText = escaparHTML(partes.join('\n\n'));
+                    rawTitle = escaparHTML(`Oitiva: ${dadosAudio.orador}`);
+                    habilitaModoLeitura = true;
+                }
+            }
+
+            const btnLeitura = habilitaModoLeitura ? `
+                <button class="btn-read-mode-trigger card-action-read" title="Modo Leitura" onclick="TopicsManager.abrirModoLeitura(this)" data-raw-text="${rawText}" data-raw-title="${rawTitle}">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path></svg>
+                </button>` : '';
+
+            // NOVO: Lógica de Elegibilidade para Pilha
+            const isElegivelParaPilha = isCorrelacionado && cIdx != null && !anotacao.itensCorrelacionados[cIdx].pilhaProcId;
+            const btnAgrupar = isElegivelParaPilha 
+                ? `<button title="Criar Pilha Processual" onclick="TopicsManager.abrirModalPilhaProcessual('${activeTabId}', ${index}, ${cIdx})">🗂️</button>` 
+                : '';
+
+            const paramCitacao = isCorrelacionado && cIdx != null ? `'${activeTabId}', ${index}, ${cIdx}` : `'${activeTabId}', ${index}, null`;
+            
+            const btnCitacaoExpressa = (tipoDoItem === 'texto') 
+                ? `<button class="btn-citacao-expressa" title="Adicionar Citação Expressa" onclick="window.adicionarCitacaoExpressa(${paramCitacao})">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                   </button>` 
+                : '';
+
+            const btnDegravacaoExpressa = (tipoDoItem === 'audio') 
+                ? `<button class="btn-degravacao-expressa" title="Adicionar Degravação Expressa" onclick="window.adicionarDegravacaoExpressa(${paramCitacao})">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                   </button>` 
+                : '';
+
+            return `
+            <div class="card-actions-bar">
+                ${btnAgrupar}
+                ${btnLeitura}
+                ${btnEditar}
+                ${btnCitacaoExpressa}
+                ${btnDegravacaoExpressa}
+                <button title="Adicionar Nó de Ideia" onclick="_menuAnotacaoCtx={topicoId:'${activeTabId}', index:${index}${ctxCidx}}; acionarNovoNoIdeia()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg></button>
+                <button title="Mover / Reordenar" onclick="abrirModalSmartMove(${paramMove})"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="8 17 12 21 16 17"></polyline><line x1="12" y1="12" x2="12" y2="21"></line><polyline points="8 7 12 3 16 7"></polyline><line x1="12" y1="12" x2="12" y2="3"></line></svg></button>
+                <button class="delete-btn" title="Excluir" onclick="${isCorrelacionado ? `excluirItemCorrelacionado('${activeTabId}', ${index}, ${cIdx})` : `_menuAnotacaoCtx={topicoId:'${activeTabId}', index:${index}}; excluirAnotacao()`}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg></button>
+            </div>`;
+        }
+
+        // Card Principal (Removido o código morto redundante do wrapper interno)
+
+        // Nós de Ideia (Sub-anotações - Flattening Architecture)
+        let htmlSubAnotacoes = '';
+        let flatSubAnotacoes = [];
+        
+        // 1. Achata os nós do Mestre
+        if (anotacao.subAnotacoes) {
+            flatSubAnotacoes.push(...anotacao.subAnotacoes.map((s, idx) => ({ ...s, viewSource: 'main', localIndex: idx })));
+        }
+        
+        // 2. Achata os nós dos Filhos (Correlacionados)
+        if (anotacao.itensCorrelacionados) {
+            // Reutiliza ou recria o Map para O(1)
+            const pilhaAnchorMapSub = new Map();
+            anotacao.itensCorrelacionados.forEach((ic, i) => {
+                if (ic.pilhaProcId && !pilhaAnchorMapSub.has(ic.pilhaProcId)) {
+                    pilhaAnchorMapSub.set(ic.pilhaProcId, i);
+                }
+            });
+
+            anotacao.itensCorrelacionados.forEach((item, fIdx) => {
+                if (item.subAnotacoes) {
+                    const anchorCidx = item.pilhaProcId ? pilhaAnchorMapSub.get(item.pilhaProcId) : fIdx;
+                    flatSubAnotacoes.push(...item.subAnotacoes.map((s, idx) => ({
+                        ...s,
+                        viewSource: String(anchorCidx),
+                        localIndex: idx
+                    })));
+                }
+            });
+        }
+
+        if (flatSubAnotacoes.length > 0) {
+            const subCardsHTMLArray = [];
+            const gruposProcessadosNesteCard = new Set();
+            
+            flatSubAnotacoes.forEach((sub, sIdx) => {
+                // 1. NÓS SOLTOS (Utiliza o template unificado do ED)
+                if (!sub.grupoId) {
+                    let faseSub = faseDoCard;
+                    if (sub.viewSource !== 'main' && anotacao.itensCorrelacionados) {
+                        const cIdx = parseInt(sub.viewSource, 10);
+                        if (!isNaN(cIdx) && anotacao.itensCorrelacionados[cIdx]) {
+                             faseSub = typeof identificarFaseMetodologica === 'function' ? identificarFaseMetodologica(anotacao.itensCorrelacionados[cIdx].documento) : 4;
+                        }
+                    }
+                    
+                    subCardsHTMLArray.push(_gerarTemplateSubNo(sub, sIdx, {
+                        topicoId: activeTabId,
+                        parentIndex: index,
+                        viewSource: sub.viewSource,
+                        bordaFaseClass: `borda-fase-${faseSub}`,
+                        prefixoBadge: `${numero}.`,
+                        usarLetra: true,
+                        tituloLeitura: 'Nó de Ideia'
+                    }));
+                }
+                // 2. NÓS AGRUPADOS (A PILHA)
+                else {
+                    if (!gruposProcessadosNesteCard.has(sub.grupoId)) {
+                        gruposProcessadosNesteCard.add(sub.grupoId);
+                        subCardsHTMLArray.push(_gerarHtmlPilha(sub, renderContext, activeTabId));
+                    }
+                }
+            });
+
+            htmlSubAnotacoes = `<div class="sub-annotations-wrapper">${subCardsHTMLArray.join('')}</div>`;
+        }
+
+        // NOVO: Processar itens agrupados
+        let htmlCorrelacionados = '';
+        if (anotacao.itensCorrelacionados && anotacao.itensCorrelacionados.length > 0) {
+            const processadosPilha = new Set();
+            
+            // OTIMIZAÇÃO O(1): Mapeia as âncoras das pilhas antes do loop principal
+            const pilhaAnchorMap = new Map();
+            anotacao.itensCorrelacionados.forEach((ic, i) => {
+                if (ic.pilhaProcId && !pilhaAnchorMap.has(ic.pilhaProcId)) {
+                    pilhaAnchorMap.set(ic.pilhaProcId, i);
+                }
+            });
+
+            htmlCorrelacionados = anotacao.itensCorrelacionados.map((item, cIdx) => {
+                const itemTag = poloParaClasse(item.polo);
+                const itemMeta = _obterMetaTexto(item);
+                const docSeguro = item.documento ? escaparHTML(item.documento) : escaparHTML(item.polo);
+                const poloSeguro = (item.documento && item.polo && item.polo !== item.documento) ? escaparHTML(item.polo) : '';
+                
+                // --- FLUXO A: PILHA PROCESSUAL ---
+                if (item.pilhaProcId) {
+                    if (processadosPilha.has(item.pilhaProcId)) return ''; 
+                    processadosPilha.add(item.pilhaProcId);
+                    const anchorCidx = pilhaAnchorMap.get(item.pilhaProcId);
+                    
+                    // OTIMIZAÇÃO O(N): Mapeamento nativo preservando o índice original
+                    const itensDestaPilhaObj = anotacao.itensCorrelacionados
+                        .map((ic, originalCIdx) => ({ ic, originalCIdx }))
+                        .filter(obj => obj.ic.pilhaProcId === item.pilhaProcId);
+                    
+                    const faseClass = `fase-${typeof identificarFaseMetodologica === 'function' ? identificarFaseMetodologica(item.documento) : 4}`;
+                    
+                    let htmlTextosInternos = itensDestaPilhaObj.map(obj => {
+                        const metaText = _obterMetaTexto(obj.ic);
+                        return `
+                        <div style="margin-bottom:8px;">
+                            <span class="card-meta" style="cursor:pointer; font-size:0.75rem; color:var(--trt-blue); font-weight:700;" title="Clique: Copiar | Shift+Clique: Editar folha | Ctrl+Clique: Ir ao PDF" onclick="handleMetaClick(event, '${activeTabId}', ${index}, true, ${obj.originalCIdx})">${metaText}</span>
+                            <p style="font-size:0.85rem; margin-top:4px;">"${renderizarMarkdownSeguro(escaparHTML(obj.ic.conteudo))}"</p>
+                        </div>`;
+                    }).join('<hr class="stack-text-divider">');
+                    
+                    return `
+                    <div class="correlated-item-wrapper" data-cidx="${anchorCidx}"
+                         draggable="true"
+                         ondragstart="DnDManager.dragStart(event, '${activeTabId}', ${index}, ${anchorCidx})"
+                         ondragover="DnDManager.dragOver(event)"
+                         ondrop="DnDManager.drop(event, '${activeTabId}', ${index}, ${anchorCidx})"
+                         ondragenter="DnDManager.dragEnter(event)"
+                         ondragleave="DnDManager.dragLeave(event)"
+                         ondragend="DnDManager.dragEnd(event)">
+                         
+                        ${_htmlConectorCorrelacao('Arraste a pasta inteira para reordenar')}
+                        
+                        <div class="annotation-card correlated-card pilha-processual-card ${faseClass}">
+                            <div class="card-header card-header--tags">
+                                ${_gerarGrupoTagsHeader(item.documento, item.polo, { prefixoDoc: '🗂️ ' })}
+                            </div>
+                            <div class="scrollable-stack-text">${htmlTextosInternos}</div>
+                            
+                            <!-- BOTÃO ATUALIZADO: Dispara o novo motor de leitura estruturada -->
+                            <div class="btn-read-mode-trigger pilha-read-badge" title="Ler Pastinha Completa" onclick="TopicsManager.abrirModoLeituraPilhaProcessual('${activeTabId}', ${index}, '${item.pilhaProcId}')">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path></svg>
+                            </div>
+                            <div class="card-actions-bar">
+                                <button title="Adicionar Nó de Ideia" onclick="_menuAnotacaoCtx={topicoId:'${activeTabId}', index:${index}, cIdx:${anchorCidx}}; acionarNovoNoIdeia()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg></button>
+                                <button class="delete-btn" title="Desagrupar" onclick="TopicsManager.desagruparPilhaProcessual('${activeTabId}', ${index}, '${item.pilhaProcId}')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 22L2 22 2 14M22 2L14 2 14 10" stroke-linecap="round" stroke-linejoin="round"/><line x1="22" y1="2" x2="10" y2="14" stroke-linecap="round" stroke-linejoin="round"/><line x1="2" y1="22" x2="14" y2="10" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+                            </div>
+                        </div>
+                    </div>`;
+                }
+
+                // --- FLUXO B: RENDERIZAR CARD NORMAL ---
+                let cConteudo = '';
+                let cComent = '';
+                if (item.tipo === 'texto') {
+                    cConteudo = `
+                    <div style="position: relative;">
+                        <p class="card-texto">"${renderizarMarkdownSeguro(escaparHTML(item.conteudo))}"</p>
+                    </div>`;
+                    if (item.comentario) cComent = `<div class="card-comentario"><strong>Observação:</strong> ${escaparHTML(item.comentario)}</div>`;
+                } else if (item.tipo === 'imagem') {
+                    cConteudo = `<div class="image-resize-wrapper" title="Arraste para redimensionar"><img class="card-imagem" src="${item.conteudo}" alt="Agrupamento"></div>`;
+                    if (item.comentario) cComent = `<div class="card-comentario"><strong>Descrição:</strong> ${escaparHTML(item.comentario)}</div>`;
+                } else if (item.tipo === 'audio') {
+                    const audioData = _gerarHtmlCardAudio(item);
+                    cConteudo = audioData.htmlConteudo;
+                    cComent = audioData.htmlComentario;
+                }
+                
+                return `
+                <div class="correlated-item-wrapper" data-cidx="${cIdx}"
+                     draggable="true"
+                     ondragstart="DnDManager.dragStart(event, '${activeTabId}', ${index}, ${cIdx})"
+                     ondragover="DnDManager.dragOver(event)"
+                     ondrop="DnDManager.drop(event, '${activeTabId}', ${index}, ${cIdx})"
+                     ondragenter="DnDManager.dragEnter(event)"
+                     ondragleave="DnDManager.dragLeave(event)"
+                     ondragend="DnDManager.dragEnd(event)">
+                    ${_htmlConectorCorrelacao('Arraste para reordenar')}
+                    <div class="annotation-card correlated-card fase-${typeof identificarFaseMetodologica === 'function' ? identificarFaseMetodologica(item.documento) : 4}">
+                        <div class="card-header card-header--tags">
+                            ${_gerarGrupoTagsHeader(item.documento, item.polo)}
+                            <span class="card-meta" style="cursor:pointer;" title="Clique: Copiar | Shift+Clique: Editar folha | Ctrl+Clique: Ir ao PDF" onclick="handleMetaClick(event, '${activeTabId}', ${index}, true, ${cIdx})">${itemMeta}</span>
+                        </div>
+                        ${cConteudo}
+                        ${cComent}
+                        ${gerarBarraAcoes(true, cIdx)}
+                    </div>
+                </div>`;
+            }).join('');
+        }
+
+        // Wrapper Master Flex atualizado para envelopar a hierarquia inteira
+        const wrapperMaster = `
+            <div class="timeline-item-master ${alignClass}" id="timeline-wrapper-${anotacao.uuid || index}">
+                <div class="main-card-wrapper" data-uuid="${anotacao.uuid || index}" data-cidx="main"
+                     ondragover="DnDManager.dragOver(event)"
+                     ondrop="DnDManager.drop(event, '${activeTabId}', ${index}, 'main')"
+                     ondragenter="DnDManager.dragEnter(event)"
+                     ondragleave="DnDManager.dragLeave(event)">
+                    <div class="annotation-number-area">
+                        <div class="timeline-number master-drag-handle" 
+                             draggable="true"
+                             ondragstart="DnDManager.dragStart(event, '${activeTabId}', ${index}, 'main')"
+                             ondragend="DnDManager.dragEnd(event)"
+                             style="background-color: ${_activeTopicoCor}; color: ${corTextoBadge}; cursor: grab;" 
+                             title="Arraste para trocar o Card Mestre, ou Clique para Nomear Tese"
+                             onclick="abrirModalTese('${activeTabId}', ${index})">
+                            ${numero}
+                        </div>
+                    </div>
+                    <div class="annotation-card ${bgZoneClass} ${bgPoloClass}">
+                        <div class="card-header card-header--tags">
+                            ${_gerarGrupoTagsHeader(anotacao.documento, anotacao.polo)}
+                            <span class="card-meta" style="cursor:pointer;" title="Clique: Copiar | Shift+Clique: Editar folha | Ctrl+Clique: Ir ao PDF" onclick="handleMetaClick(event, '${activeTabId}', ${index}, false)">${metaTexto}</span>
+                        </div>
+                        ${htmlConteudo}
+                        ${htmlComentario}
+                        ${gerarBarraAcoes(false, null)}
+                    </div>
+                    ${htmlCorrelacionados}
+                </div>
+                ${htmlSubAnotacoes}
+            </div>`;
+
+        return wrapperMaster; // Sem o conector anexado aqui
+    }
+
+    /**
+     * Renderiza o bloco de diretrizes visuais para a IA (Global ou Por Vício)
+     * Adicionado: chaveVicioCrua para preservar o ponteiro do estado
+     */
+    function renderizarNivelHierarquico(tipo, titulo, subanotacoes, topicoId, tesesConsolidadas = [], indexGlobal = 0, renderContext, chaveVicioCrua = '') {
+        const listaSegura = subanotacoes || [];
+        const isGlobal = tipo === 'global';
+        
+        // Defesa contra valores nulos/corrompidos
+        const chaveCruaSegura = chaveVicioCrua || 'vicio_desconhecido';
+        const tituloSeguroUI = titulo || 'Vício Não Identificado';
+        
+        // A Tese (Vício) é renderizada imediatamente antes da sua primeira prova (numero = numeroVisual),
+        // portanto herda exatamente o lado dessa prova, igual à regra de criarCard.
+        const isLeft = ((renderContext.numeroVisual - 1) % 2 === 0);
+        
+        const alignClass = isLeft ? 'align-left' : 'align-right';
+
+        const iconSvg = isGlobal 
+            ? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>`
+            : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="6"></circle></svg>`;
+        
+        let styleIconBox = '';
+        let styleCard = '';
+        let styleTitle = '';
+        let styleSubBorda = '';
+        let classSubBorda = isGlobal ? 'borda-global' : '';
+        
+        // CORREÇÃO DA COR BRANCA FANTASMA
+        let corBase = _activeTopicoCor;
+        if (corBase.toLowerCase() === '#ffffff' && !isGlobal) {
+            corBase = '#1a3a5c'; // Azul Sóbrio Padrão do ED para garantir leitura
+        }
+        
+        const corTextoTese = obterCorContraste(corBase);
+
+        if (!isGlobal) {
+            const rgbaTeseFundo = hexToRgba(corBase, 0.08); // Fundo super suave
+            const rgbaTeseBorda = hexToRgba(corBase, 0.4);
+            const corTituloTese = escurecerCor(corBase, 0.6);
+
+            styleIconBox = `background-color: ${corBase}; color: ${corTextoTese};`;
+            styleCard = `border-left: 4px solid ${corBase}; background-color: #ffffff; background-image: linear-gradient(${rgbaTeseFundo}, ${rgbaTeseFundo});`;
+            styleTitle = `color: ${corTituloTese};`;
+            styleSubBorda = `border-left: 5px solid ${corBase}; border-color: ${rgbaTeseBorda};`;
+        }
+        
+        const tituloContexto = isGlobal ? 'Diretriz Global' : `Diretriz do Vício: ${tituloSeguroUI}`;
+        
+        // RENDERIZAÇÃO SEGURA DOS NÓS COM SHALLOW COPY E PILHAS
+        const gruposProcessadosNesteCard = new Set();
+        const subCardsHTMLArray = [];
+        
+        // CORREÇÃO ARQUITETURAL 1: viewSource agora usa a chave crua para que edição e exclusão funcionem
+        const viewSourceAtual = isGlobal ? 'global' : `vicio:${chaveCruaSegura}`;
+        
+        listaSegura.forEach((sub, idx) => {
+            const subRender = { ...sub, viewSource: viewSourceAtual, localIndex: idx };
+            
+            if (!subRender.grupoId) {
+                subCardsHTMLArray.push(_gerarTemplateSubNo(subRender, idx, {
+                    topicoId: topicoId,
+                    parentIndex: null,
+                    viewSource: viewSourceAtual,
+                    bordaClass: classSubBorda,
+                    bordaStyle: styleSubBorda,
+                    prefixoBadge: isGlobal ? 'G.' : 'V.',
+                    usarLetra: false,
+                    tituloLeitura: tituloContexto
+                }));
+            } else {
+                if (!gruposProcessadosNesteCard.has(subRender.grupoId)) {
+                    gruposProcessadosNesteCard.add(subRender.grupoId);
+                    subCardsHTMLArray.push(_gerarHtmlPilha(subRender, renderContext, topicoId));
+                }
+            }
+        });
+        const subCardsHTML = subCardsHTMLArray.join('');
+
+        const hierarquiaTitulo = isGlobal ? 'Diretrizes Globais (Auditoria)' : `Vício Alegado: ${escaparHTML(tituloSeguroUI)}`;
+        const wrapperClass = isGlobal ? 'nivel-global' : 'nivel-vicio';
+        
+        const teseSlug = (tesesConsolidadas[0] || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').substring(0, 20);
+        const vicioSlug = isGlobal ? '' : chaveCruaSegura.replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+        const wrapperId = isGlobal 
+            ? `timeline-wrapper-globais-${topicoId}` 
+            : `timeline-wrapper-vicio-${vicioSlug}-${teseSlug}-${indexGlobal}`;
+
+        let htmlTesesMapeadas = '';
+        if (!isGlobal && tesesConsolidadas.length > 0) {
+            const tesesSeguras = tesesConsolidadas.map(t => escaparHTML(t)).join(' <span style="color:#ccc;">|</span> ');
+            htmlTesesMapeadas = `
+                <div style="font-size: 0.8rem; color: #555; margin-top: 4px; font-weight: normal; line-height: 1.4;">
+                    <strong style="color: var(--trt-blue-mid);">Teses Mapeadas:</strong> ${tesesSeguras}
+                </div>`;
+        }
+
+        // CORREÇÃO ARQUITETURAL 2: Sanitização JS-Safe para atributos inline (previne quebra de sintaxe)
+        const chaveParaGravarJS = isGlobal ? '' : String(chaveCruaSegura).replace(/'/g, "\\'");
+
+        return `
+            <div class="timeline-item-master ${alignClass} nivel-hierarquico ${wrapperClass}" id="${wrapperId}">
+                <div class="main-card-wrapper">
+                    <div class="annotation-number-area">
+                        <div class="timeline-icon-box" title="${hierarquiaTitulo}" style="${styleIconBox}">
+                            ${iconSvg}
+                        </div>
+                    </div>
+                    <div class="annotation-card" style="${styleCard}">
+                        <div class="card-header" style="justify-content: space-between; margin-bottom: 0; align-items: flex-start;">
+                            <div>
+                                <div class="hierarquia-titulo" style="${styleTitle}">${hierarquiaTitulo}</div>
+                                ${htmlTesesMapeadas}
+                            </div>
+                            <div class="card-actions-bar" style="margin-top: 0; padding-top: 0; border-top: none;">
+                                <!-- Botão atualizado injetando chaveParaGravarJS -->
+                                <button title="Adicionar Diretriz" onclick="adicionarDiretrizEstrutural('${isGlobal ? 'global' : 'vicio'}', '${topicoId}', '${chaveParaGravarJS}', event)">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="sub-annotations-wrapper">${subCardsHTML}</div>
+            </div>`;
+    }
+
+    /**
+     * Split Read/Write para evitar Layout Thrashing
+     */
+    function aplicarTruncamentoDinamicoSeguro() {
+        requestAnimationFrame(() => {
+            const textNodes = Array.from(document.querySelectorAll('.sub-text-content, .card-texto, .juris-scroll-fade-body'));
+            const measurements = textNodes.map(node => {
+                const isScrollFadeBody = node.classList.contains('juris-scroll-fade-body');
+                return {
+                    el: node,
+                    isScrollFadeBody,
+                    truncateTarget: isScrollFadeBody ? node.parentElement : node,
+                    parentCard: node.closest('.annotation-card, .sub-annotation-card'),
+                    btn: node.parentElement ? node.parentElement.querySelector('.btn-expand-text') : null,
+                    isOverflowing: (node.scrollHeight - node.clientHeight) > 2,
+                    noFim: isScrollFadeBody ? Math.ceil(node.scrollTop + node.clientHeight) >= node.scrollHeight - 4 : false
+                };
+            });
+
+            requestAnimationFrame(() => {
+                measurements.forEach(m => {
+                    if (m.isOverflowing) {
+                        if (m.btn) m.btn.style.display = 'inline-flex';
+                        if (m.truncateTarget) {
+                            m.truncateTarget.classList.add('is-truncated');
+                            if (m.isScrollFadeBody) {
+                                m.truncateTarget.classList.toggle('is-scrolled-end', m.noFim);
+                            }
+                        }
+                        if (m.parentCard) m.parentCard.classList.add('has-truncated-text');
+                    } else {
+                        if (m.btn) m.btn.style.display = 'none';
+                        if (m.truncateTarget) {
+                            m.truncateTarget.classList.remove('is-truncated', 'is-scrolled-end');
+                        }
+                        if (m.parentCard) m.parentCard.classList.remove('has-truncated-text');
+                    }
+                });
+            });
+        });
+    }
+
+    /**
+     * Atualiza o índice de marcadores flutuantes com base no tópico ativo.
+     * Função idempotente: zera o DOM e reconstrói de forma leve.
+     */
+    function _atualizarMarcadoresDeIdeia(topico) {
+        const listContainer = document.getElementById('idea-markers-list');
+        if (!listContainer) return;
+        
+        // 1. Limpeza de Estado
+        listContainer.innerHTML = '';
+        
+        // 2. Validação de Escopo (Se não há ideias, encerra silenciosamente)
+        if (!topico || !topico.anotacoes || topico.anotacoes.length === 0) return;
+
+        // 3. Renderização Dinâmica e Cálculos
+        const corTexto = obterCorContraste(_activeTopicoCor);
+        
+        const fragment = document.createDocumentFragment(); // Otimização de reflow
+        const mapaVisuais = _mapNumerosVisuais(topico.anotacoes);
+
+        topico.anotacoes.forEach((anotacao, index) => {
+            if (_ehCheckpoint(anotacao)) return; // Ignora checkpoints na barra lateral
+
+            const numVisual = mapaVisuais.get(index);
+            const btn = document.createElement('div');
+            btn.className = 'fab-idea-marker';
+            btn.style.backgroundColor = _activeTopicoCor;
+            btn.style.color = corTexto;
+            btn.textContent = numVisual;
+            
+            // UX Rica: Tooltip usa numVisual em vez de index + 1
+            const nomeTese = anotacao.tese ? ` - ${escaparHTML(anotacao.tese)}` : '';
+            btn.title = `Ir para a Ideia ${numVisual}${nomeTese}`;
+
+            // 4. Feitiçaria Matemática de Scroll (Alerta 1 resolvido)
+            btn.onclick = (e) => {
+                e.stopPropagation();
+                
+                const scrollContainer = document.getElementById('history-container');
+                const targetId = `timeline-wrapper-${anotacao.uuid || index}`; // Reconciliação via UUID
+                const targetElement = document.getElementById(targetId);
+                
+                if (targetElement && scrollContainer) {
+                    // Calcula a posição relativa entre o card alvo e o container que rola, 
+                    // somando com a rolagem atual para chegar no Offset absoluto correto.
+                    const containerRect = scrollContainer.getBoundingClientRect();
+                    const targetRect = targetElement.getBoundingClientRect();
+                    
+                    // -16px de margem de respiro para o card não colar no topo do teto
+                    const offset = (targetRect.top - containerRect.top) + scrollContainer.scrollTop - 16;
+                    
+                    scrollContainer.scrollTo({ top: offset, behavior: 'smooth' });
+                }
+            };
+            
+            fragment.appendChild(btn);
+        });
+        
+        // Injeção única no DOM
+        listContainer.appendChild(fragment);
+    }
+
+    /**
+     * Sincroniza módulos externos dependentes do contexto da aba ativa
+     * (Cronômetro de Eficiência, Status do Extrator de Peças e Ferramentas de Volume).
+     */
+    function _sincronizarModulosPerifericos() {
+        if (window.TimeTrackerManager && typeof window.TimeTrackerManager.sincronizarCor === 'function') {
+            window.TimeTrackerManager.sincronizarCor(activeTabId);
+        }
+        if (typeof window.atualizarStatusBotaoExtrator === 'function') {
+            window.atualizarStatusBotaoExtrator();
+        }
+        // Centraliza a atualização dos botões de volume nos 3 pontos de saída de renderizarFichario
+        atualizarEstadoFerramentasVolume();
+    }
+
+    /**
+     * Garante que a aba ativa esteja visível no scroll horizontal do cabeçalho
+     * sem provocar efeitos colaterais de scroll vertical na janela.
+     */
+    function _garantirAbaVisivelNoHeader(headerEl, abaAtivaNode, scrollAnterior, mudouAba) {
+        if (!headerEl) return;
+
+        // Restaura a base imediatamente para evitar salto visual após limpar innerHTML
+        headerEl.scrollLeft = scrollAnterior;
+
+        if (!mudouAba || !abaAtivaNode) return;
+
+        requestAnimationFrame(() => {
+            const headerRect = headerEl.getBoundingClientRect();
+            const tabRect = abaAtivaNode.getBoundingClientRect();
+            const MARGEM_RESPIRO = 16;
+
+            if (tabRect.left < headerRect.left) {
+                // Aba está oculta à esquerda (ex: novo tópico recém-criado)
+                const delta = tabRect.left - headerRect.left - MARGEM_RESPIRO;
+                headerEl.scrollTo({ left: Math.max(0, headerEl.scrollLeft + delta), behavior: 'smooth' });
+            } else if (tabRect.right > headerRect.right) {
+                // Aba está oculta à direita
+                const delta = tabRect.right - headerRect.right + MARGEM_RESPIRO;
+                headerEl.scrollTo({ left: headerEl.scrollLeft + delta, behavior: 'smooth' });
+            }
+        });
+    }
+
+    /**
+     * Re-renderiza o fichário inteiro.
+     */
+    function renderizarFichario(topicosArray) {
+        capturarScroll();
+
+        const headerEl  = document.getElementById('topics-tabs-header');
+        const contentEl = document.getElementById('topics-tab-content');
+
+        if (!headerEl || !contentEl) return;
+
+        if (topicosArray.length === 0) {
+            headerEl.innerHTML = '';
+            contentEl.innerHTML = `
+                <p class="empty-state">
+                    Nenhum tópico criado.<br>
+                    Use o botão <strong>+</strong> na barra lateral para criar um Tópico Recursal.
+                </p>`;
+            contentEl.style.borderTop       = 'none';
+            contentEl.style.backgroundColor = 'transparent';
+            _ultimaAbaRenderizada = null;
+            _atualizarMarcadoresDeIdeia(null);
+            atualizarContadorNotasOcultas();
+            _sincronizarModulosPerifericos();
+            restaurarScroll();
+            return;
+        }
+
+        contentEl.style.borderTop = '';
+        contentEl.style.backgroundColor = '';
+
+        if (!activeTabId || !topicosArray.some(t => t.id === activeTabId)) {
+            activeTabId = topicosArray[0].id;
+        }
+
+        // Detecta se houve transição de aba antes que restaurarScroll() atualize _ultimaAbaRenderizada
+        const mudouAba = (activeTabId !== _ultimaAbaRenderizada);
+        const scrollAnterior = headerEl.scrollLeft;
+        let abaAtivaNode = null;
+
+        headerEl.innerHTML = '';
+        [...topicosArray].reverse().forEach(topico => {
+            const isActive = topico.id === activeTabId;
+            const btn      = document.createElement('div');
+
+            btn.className        = `topic-tab-btn ${isActive ? 'active' : ''}`;
+            btn.textContent      = topico.nome;
+            btn.title            = topico.nome; 
+            
+            const corContraste = obterCorContraste(topico.cor);
+            btn.style.setProperty('--tab-bg', topico.cor);
+            btn.style.setProperty('--tab-color', corContraste);
+
+            btn.onclick = () => {
+                if (activeTabId === topico.id) return; // Evita re-renderização redundante na mesma aba
+                activeTabId = topico.id;
+                renderizarFichario(topicosArray);
+            };
+
+            headerEl.appendChild(btn);
+            
+            if (isActive) abaAtivaNode = btn;
+        });
+
+        const topicoAtivo = topicosArray.find(t => t.id === activeTabId);
+        if (!topicoAtivo) return;
+
+        _activeTopicoCor = topicoAtivo.cor;
+        contentEl.style.setProperty('--active-tab-color', escurecerCor(_activeTopicoCor, 0.85));
+        const corTextoTese = obterCorContraste(_activeTopicoCor);
+
+        // Posiciona o scroll horizontal da barra de abas de forma inteligente
+        _garantirAbaVisivelNoHeader(headerEl, abaAtivaNode, scrollAnterior, mudouAba);
+
+        const preambleHtml = `
+            <div class="topic-preamble-panel ${_preambuloLadoALado ? 'is-side-by-side' : ''}" lang="pt-BR">
+                <div class="preamble-panel-toolbar">
+                    <span class="preamble-panel-heading">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px; height:14px;"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="3" y1="9" x2="21" y2="9"></line><line x1="9" y1="21" x2="9" y2="9"></line></svg>
+                        Quadro Sinótico dos Embargos (Síntese do Vício)
+                    </span>
+                    <button type="button" id="btn-toggle-preambulo" class="btn-toggle-preambulo" aria-pressed="${_preambuloLadoALado}" onclick="TopicsManager.togglePreambuloTopico(event)" title="Alternar disposição dos cartões entre empilhados (vertical) e lado a lado (horizontal)">
+                        ${_preambuloLadoALado ? '☰ Um Abaixo do Outro' : '◫ Lado a Lado'}
+                    </button>
+                </div>
+                <div class="preamble-cards-grid">
+                    <div class="preamble-card preamble-alegacao ${!topicoAtivo.alegacoes ? 'is-empty' : ''}" onclick="abrirEdicaoPreambulo('${activeTabId}', 'alegacoes')">
+                        <div class="preamble-icon ai-trigger-btn" 
+                             title="✨ Inteligência Artificial: Buscar modelos compatíveis" 
+                             onclick="event.stopPropagation(); AIRecommendationManager.buscarModelosCompativeis('${activeTabId}', decodeURIComponent('${encodeURIComponent(topicoAtivo.alegacoes || '').replace(/'/g, "%27")}'))">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                                <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" class="ai-sparkle" style="display:none; transform-origin: 12px 12px;"></path>
+                            </svg>
+                        </div>
+                        <div class="preamble-content">
+                            <span class="preamble-title">${ED_UI_LABELS.alegacao.titulo}</span>
+                            ${topicoAtivo.alegacoes ? `<div class="preamble-body-text">${renderizarMarkdownSeguro(escaparHTML(topicoAtivo.alegacoes))}</div>` : `<span class="preamble-empty">${ED_UI_LABELS.alegacao.placeholder}</span>`}
+                        </div>
+                    </div>
+                    <div class="preamble-card preamble-origem ${!topicoAtivo.fundamentos ? 'is-empty' : ''}" onclick="abrirEdicaoPreambulo('${activeTabId}', 'fundamentos')">
+                        <div class="preamble-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18M3 7v14M21 7v14M6 21V7l6-4 6 4v14"></path></svg>
+                        </div>
+                        <div class="preamble-content">
+                            <span class="preamble-title">${ED_UI_LABELS.origem.titulo}</span>
+                            ${topicoAtivo.fundamentos ? `<div class="preamble-body-text">${renderizarMarkdownSeguro(escaparHTML(topicoAtivo.fundamentos))}</div>` : `<span class="preamble-empty">${ED_UI_LABELS.origem.placeholder}</span>`}
+                        </div>
+                    </div>
+                    <div class="preamble-card preamble-veredito ${!topicoAtivo.veredito ? 'is-empty' : ''}" onclick="abrirEdicaoPreambulo('${activeTabId}', 'veredito')">
+                        <div class="preamble-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"></path></svg>
+                        </div>
+                        <div class="preamble-content">
+                            <span class="preamble-title">${ED_UI_LABELS.veredito.titulo}</span>
+                            ${topicoAtivo.veredito ? `<div class="preamble-body-text">${renderizarMarkdownSeguro(escaparHTML(topicoAtivo.veredito))}</div>` : `<span class="preamble-empty">${ED_UI_LABELS.veredito.placeholder}</span>`}
+                        </div>
+                    </div>
+                </div>
+            </div>`;
+
+        let conteudoCentralHtml = '';
+
+        const temAnotacoes = topicoAtivo.anotacoes && topicoAtivo.anotacoes.length > 0;
+        const temGlobais = topicoAtivo.diretrizesGlobais && topicoAtivo.diretrizesGlobais.length > 0;
+        const forcadoAberto = _topicosComGlobaisAbertas.has(activeTabId);
+
+        if (!temAnotacoes && !temGlobais && !forcadoAberto) {
+            conteudoCentralHtml = `
+                <p class="empty-state" style="margin-top: 20px;">
+                    A Matriz Dialética está vazia. Adicione extrações das provas ou clique no Globo no cabeçalho para inserir Diretrizes Globais.
+                </p>`;
+            const novoHtml = preambleHtml + conteudoCentralHtml;
+            
+            if (typeof resizeObserver !== 'undefined') resizeObserver.disconnect();
+            if (typeof morphdom !== 'undefined') {
+                morphdom(contentEl, `<div id="topics-tab-content" class="topics-content-area" style="${contentEl.style.cssText}">${novoHtml}</div>`, {
+                    childrenOnly: true,
+                    getNodeKey: function(node) {
+                        if (node.id) return node.id;
+                    }
+                });
+            } else {
+                contentEl.innerHTML = novoHtml;
+            }
+            
+            // CORREÇÃO ARQUITETURAL: Limpa marcadores flutuantes e sincroniza periféricos em tópicos vazios
+            _sincronizarBtnGlobais(false, false);
+            _atualizarMarcadoresDeIdeia(topicoAtivo);
+            atualizarContadorNotasOcultas();
+            atualizarAlertaCapacidadeTopico(topicoAtivo);
+            _sincronizarModulosPerifericos();
+            restaurarScroll();
+            return;
+        }
+
+        let sumarioHtml = '';
+        const tesesValidas = topicoAtivo.anotacoes.filter(an => an.tese && an.tese.trim() !== '');
+        if (tesesValidas.length > 0) {
+            sumarioHtml = `
+            <div class="thesis-summary-panel">`;
+            const mapaVisuais = _mapNumerosVisuais(topicoAtivo.anotacoes);
+
+            topicoAtivo.anotacoes.forEach((an, idx) => {
+                if (an.tese && an.tese.trim() !== '') {
+                    const fasesPresentes = new Set();
+                    
+                    fasesPresentes.add(typeof identificarFaseMetodologica === 'function' ? identificarFaseMetodologica(an.documento) : 4);
+                    
+                    if (an.itensCorrelacionados?.length) {
+                        an.itensCorrelacionados.forEach(ic => fasesPresentes.add(typeof identificarFaseMetodologica === 'function' ? identificarFaseMetodologica(ic.documento) : 4));
+                    }
+
+                    if (an.itensCorrelacionados?.length) {
+                        an.itensCorrelacionados.forEach(ic => {
+                            if (ic.subAnotacoes && ic.subAnotacoes.length > 0) {
+                                fasesPresentes.add(typeof identificarFaseMetodologica === 'function' ? identificarFaseMetodologica(ic.documento) : 4);
+                            }
+                        });
+                    }
+
+                    const cores = [];
+                    if(fasesPresentes.has(1)) cores.push('var(--fase-1-bg)');
+                    if(fasesPresentes.has(2)) cores.push('var(--fase-2-bg)');
+                    if(fasesPresentes.has(3)) cores.push('var(--fase-3-bg)');
+                    if(fasesPresentes.has(4)) cores.push('var(--fase-4-bg)');
+                    
+                    let bgStyle = '';
+                    if(cores.length > 0) {
+                        const step = 100 / cores.length;
+                        const gradients = cores.map((cor, i) => `${cor} ${i * step}%, ${cor} ${(i + 1) * step}%`);
+                        bgStyle = `style="background: linear-gradient(to right, ${gradients.join(', ')}), #ffffff;"`; 
+                    }
+
+                    const tipoVicio = topicoAtivo.vicio || 'omissao'; 
+                    let isMature = false;
+
+                    if (tipoVicio === 'omissao') {
+                        isMature = fasesPresentes.has(1) && fasesPresentes.has(2) && fasesPresentes.has(3);
+                    } else if (tipoVicio === 'contradicao') {
+                        let contadorRoxo = (typeof identificarFaseMetodologica === 'function' && identificarFaseMetodologica(an.documento) === 3) ? 1 : 0;
+                        if (an.itensCorrelacionados) {
+                            contadorRoxo += an.itensCorrelacionados.filter(ic => typeof identificarFaseMetodologica === 'function' && identificarFaseMetodologica(ic.documento) === 3).length;
+                        }
+                        isMature = fasesPresentes.has(1) && fasesPresentes.has(3) && (contadorRoxo >= 2);
+                    } else if (tipoVicio === 'erro') {
+                        isMature = fasesPresentes.has(1) && fasesPresentes.has(3) && fasesPresentes.has(4);
+                    }
+
+                    const matureClass = isMature ? 'mature' : '';
+                    const numeroVisualCorreto = mapaVisuais.get(idx);
+                    
+                    const teseEscapada = an.tese ? escaparHTML(an.tese) : '';
+                    const textoPainelRenderizado = window.JurisUtils.obterBadgeTeseCompleto(an.vicio || tipoVicio, teseEscapada, true);
+
+                    sumarioHtml += `
+                        <div class="thesis-badge ${matureClass}" onclick="abrirModalTese('${activeTabId}', ${idx})">
+                            <div class="thesis-badge-inner" ${bgStyle}>
+                                <span class="num" style="background-color: ${_activeTopicoCor}; color: ${corTextoTese};">${numeroVisualCorreto}</span> 
+                                <span class="texto-tese">${textoPainelRenderizado}</span>
+                            </div>
+                        </div>`;
+                }
+            });
+            sumarioHtml += '</div>';
+        }
+        
+        let htmlDiretrizes = '';
+        
+        const renderContext = {
+            romanCounter: 0,
+            romanMap: new Map(),
+            numeroVisual: 1
+        };
+
+        if (temGlobais || forcadoAberto) {
+            const diretrizesGlobaisSeguras = topicoAtivo.diretrizesGlobais || [];
+            htmlDiretrizes += renderizarNivelHierarquico('global', null, diretrizesGlobaisSeguras, activeTabId, [], 0, renderContext);
+        }
+
+        // 1. Criamos três "baldes" distintos para ancoragem magnética (ED View)
+        let checkpointTopoHTML = '';
+        let cardsHTML = '';
+        let checkpointRodapeHTML = '';
+        
+        let temCheckpoint = false;
+        let ultimaTeseRenderizada = null;
+
+        topicoAtivo.anotacoes.forEach((anotacao, index) => {
+            const chaveTeseCrua = anotacao.tese || "Provas não agrupadas";
+            const isTesePreenchida = (anotacao.tese && anotacao.tese.trim() !== '');
+            const vicioRaw = anotacao.vicio || topicoAtivo.vicio || 'omissao';
+            const vicioFormatado = window.JurisUtils.formatarVicioED(vicioRaw);
+
+            if (!_ehCheckpoint(anotacao) && chaveTeseCrua !== ultimaTeseRenderizada) {
+                const diretrizesDoVicio = (topicoAtivo.diretrizesPorVicio && topicoAtivo.diretrizesPorVicio[vicioRaw])
+                                          ? topicoAtivo.diretrizesPorVicio[vicioRaw]
+                                          : [];
+
+                if (isTesePreenchida || diretrizesDoVicio.length > 0) {
+                    const tituloExibicao = isTesePreenchida ? anotacao.tese.trim() : "Provas não agrupadas";
+                    // Fallback seguro caso JurisUtils falhe
+                    const vicioSeguroUI = vicioFormatado || 'Vício Não Identificado';
+
+                    cardsHTML += renderizarNivelHierarquico(
+                        'vicio',
+                        vicioSeguroUI,
+                        diretrizesDoVicio,
+                        activeTabId,
+                        [tituloExibicao],
+                        index,
+                        renderContext,
+                        vicioRaw // <-- CORREÇÃO ARQUITETURAL 3: Passagem da chave crua do estado global
+                    );
+                }
+                ultimaTeseRenderizada = chaveTeseCrua;
+            }
+            
+            const htmlGerado = criarCard(anotacao, index, topicoAtivo.anotacoes, renderContext);
+            
+            // 2. Roteamento Inteligente (Sanduíche Magnético)
+            if (_ehCheckpoint(anotacao)) {
+                temCheckpoint = true;
+                if (anotacao.tipo === 'checkpoint_entrada') {
+                    checkpointTopoHTML += htmlGerado; // Força no topo absoluto
+                } else {
+                    checkpointRodapeHTML += htmlGerado; // Força no rodapé absoluto
+                }
+            } else {
+                cardsHTML += htmlGerado; // Cards comuns ao centro
+            }
+        });
+
+        let fabHtml = '';
+        if (temCheckpoint) {
+            fabHtml = `
+            <button class="btn-jump-to-checkpoint" onclick="document.querySelector('.is-checkpoint').scrollIntoView({behavior: 'smooth', block: 'center'});" title="Ir para as instruções do volume">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M19 12l-7 7-7-7"/></svg>
+                Instruções do Volume
+            </button>`;
+        }
+
+        conteudoCentralHtml = sumarioHtml + `
+            <div class="timeline-container" id="timeline-container">
+                <svg id="connections-canvas"></svg>
+                ${htmlDiretrizes}
+                ${checkpointTopoHTML}
+                ${cardsHTML}
+                ${checkpointRodapeHTML}
+                ${fabHtml}
+            </div>`;
+
+        const novoHtml = preambleHtml + conteudoCentralHtml;
+            
+        if (typeof resizeObserver !== 'undefined') resizeObserver.disconnect();
+            
+        if (typeof morphdom !== 'undefined') {
+            morphdom(contentEl, `<div id="topics-tab-content" class="topics-content-area" style="${contentEl.style.cssText}">${novoHtml}</div>`, {
+                childrenOnly: true,
+                getNodeKey: function(node) {
+                    if (node.id) return node.id;
+                }
+            });
+        } else {
+            contentEl.innerHTML = novoHtml;
+        }
+            
+        requestAnimationFrame(() => {
+            if (typeof resizeObserver !== 'undefined') {
+                document.querySelectorAll(
+                    '.sub-text-content, .card-texto, .juris-scroll-fade-body, .image-resize-wrapper'
+                ).forEach(el => resizeObserver.observe(el));
+
+                const historyContainer = document.getElementById('history-container');
+                if (historyContainer) resizeObserver.observe(historyContainer);
+            }
+
+            aplicarTruncamentoDinamicoSeguro();
+
+            const container = document.getElementById('timeline-container');
+            if (container) {
+                posicionarNosDeIdeia(container);
+                restaurarScroll();
+                
+                requestAnimationFrame(() => {
+                    desenharConexoes();
+                    _reassertScroll();
+                });
+            } else {
+                restaurarScroll();
+            }
+            
+            _TagTooltipController.inicializarDelegacao();
+            _TagTooltipController.ocultar();
+            _sincronizarAcessibilidadeTagsTruncadas(contentEl);
+
+            _atualizarMarcadoresDeIdeia(topicoAtivo);
+            atualizarContadorNotasOcultas();
+        });
+        
+        _sincronizarBtnGlobais(temGlobais, forcadoAberto);
+        atualizarAlertaCapacidadeTopico(topicoAtivo);
+        _sincronizarModulosPerifericos();
+        
+        // ASSERT DE ENGENHARIA (Validação silenciosa pós-renderização)
+        requestAnimationFrame(() => {
+            const markers = document.querySelectorAll('.fab-idea-marker').length;
+            const masters = document.querySelectorAll('.timeline-item-master:not(.is-checkpoint):not(.nivel-global):not(.nivel-vicio)').length;
+            if (markers !== masters) {
+                console.warn('⚠️ ED Divergência arquitetural detectada: Marcadores (' + markers + ') vs Masters Renderizados (' + masters + ').');
+            }
+        });
+    }
+
+    /**
+     * Motor de Slots Elásticos.
+     * Cada origem (cartão principal ou correlacionado) reserva a altura que seus nós exigem,
+     * metade acima e metade abaixo. Os nós são então centralizados na origem.
+     * Idempotente: a medição usa offsetHeight do cartão, que as folgas não alteram.
+     * Passes: A (lê) → B (escreve folgas) → C (lê posições) → D (escreve tops).
+     */
+    function posicionarNosDeIdeia(container) {
+        const GAP_NOS = 20; // espaçamento vertical entre nós do mesmo grupo
+
+        // PASSE A: LEITURA
+        const planos = [];
+        container.querySelectorAll('.timeline-item-master').forEach(master => {
+            if (master.offsetParent === null) return; // aba oculta: não muta
+
+            const mainWrapper = master.querySelector(':scope > .main-card-wrapper');
+            const subWrapper = master.querySelector(':scope > .sub-annotations-wrapper');
+            if (!mainWrapper || !subWrapper) return;
+
+            const wrappers = [mainWrapper, ...mainWrapper.querySelectorAll(':scope > .correlated-item-wrapper')];
+            const origens = wrappers.map((wrapper, i) => ({
+                wrapper,
+                key: i === 0 ? 'main' : wrapper.dataset.cidx,
+                card: wrapper.querySelector(':scope > .annotation-card'),
+                itens: [],
+                total: 0,
+                pad: 0
+            }));
+
+            // Trava de segurança: cartão sem altura = view oculta ou desmontada
+            if (origens.some(o => !o.card || o.card.offsetHeight === 0)) return;
+
+            const porChave = new Map(origens.map(o => [o.key, o]));
+            const principal = origens[0];
+
+            subWrapper.querySelectorAll(':scope > .sub-annotation-item').forEach(el => {
+                const alvo = porChave.get(el.dataset.source || 'main') || principal; // órfãos ancoram no principal
+                alvo.itens.push({ el, h: el.offsetHeight });
+            });
+
+            origens.forEach(o => {
+                if (o.itens.length === 0) return;
+                o.total = o.itens.reduce((soma, it) => soma + it.h, 0) + GAP_NOS * (o.itens.length - 1);
+                o.pad = Math.ceil(Math.max(0, o.total - o.card.offsetHeight) / 2);
+            });
+
+            planos.push({ subWrapper, origens });
+        });
+
+        // PASSE B: ESCRITA DAS FOLGAS (sempre grava, inclusive 0px, para limpar resíduos)
+        planos.forEach(({ origens }) => {
+            origens.forEach((o, i) => {
+                const valor = `${o.pad}px`;
+                if (o.wrapper.style.getPropertyValue('--slot-pad') !== valor) {
+                    o.wrapper.style.setProperty('--slot-pad', valor);
+                }
+
+                // Folga da origem anterior: soma-se à própria para que o conector
+                // alcance o cartão de cima, por maior que seja o vão.
+                if (i > 0) {
+                    const valorPrev = `${origens[i - 1].pad}px`;
+                    if (o.wrapper.style.getPropertyValue('--slot-pad-prev') !== valorPrev) {
+                        o.wrapper.style.setProperty('--slot-pad-prev', valorPrev);
+                    }
+                }
+            });
+        });
+
+        // PASSE C: LEITURA (um único reflow)
+        const posicoes = [];
+        const alturas = [];
+        planos.forEach(({ subWrapper, origens }) => {
+            const topoBase = subWrapper.getBoundingClientRect().top;
+            let cursor = 0;
+
+            origens.forEach(o => {
+                if (o.itens.length === 0) return;
+                const centro = (o.card.getBoundingClientRect().top - topoBase) + (o.card.offsetHeight / 2);
+                // Defesa: nunca abaixo de 0 nem sobre o grupo anterior
+                let y = Math.max(cursor, centro - (o.total / 2));
+                o.itens.forEach(({ el, h }) => {
+                    posicoes.push({ el, y });
+                    y += h + GAP_NOS;
+                });
+                cursor = y;
+            });
+
+            alturas.push({ subWrapper, altura: Math.max(0, cursor - GAP_NOS) });
+        });
+
+        // PASSE D: ESCRITA
+        posicoes.forEach(({ el, y }) => {
+            el.style.position = 'absolute';
+            el.style.width = '100%';
+            el.style.top = `${y}px`;
+        });
+        alturas.forEach(({ subWrapper, altura }) => {
+            subWrapper.style.minHeight = altura > 0 ? `${altura}px` : '';
+        });
+    }
+
+    /**
+     * Resolve o cartão de origem de um nó pela chave data-source, sem montar seletor CSS
+     * com texto livre (títulos de Tese podem conter aspas).
+     * Chaves sem correspondência ('global', 'tese:…') ancoram no cartão principal.
+     */
+    function _obterCardOrigem(master, chave) {
+        const mainWrapper = master.querySelector(':scope > .main-card-wrapper');
+        if (!mainWrapper) return null;
+        const mainCard = mainWrapper.querySelector(':scope > .annotation-card');
+        if (!chave || chave === 'main') return mainCard;
+
+        for (const w of mainWrapper.querySelectorAll(':scope > .correlated-item-wrapper')) {
+            if (w.dataset.cidx === chave) return w.querySelector(':scope > .annotation-card') || mainCard;
+        }
+        return mainCard;
+    }
+
+    /**
+     * Motor Dinâmico de Conexões Sinuosas
+     * @param {boolean} isZenActive - Indica se o Modo Zen está ativo
+     */
+    function desenharConexoes(isZenActive = false) {
+        const container = document.getElementById('timeline-container');
+        const svg = document.getElementById('connections-canvas');
+        if (!container || !svg) return;
+
+        const containerRect = container.getBoundingClientRect();
+        
+        // --- LOOP 1: APENAS LEITURA (MEMÓRIA GEOMÉTRICA) ---
+        const spineGeometria = [];
+        const tracejadasGeometria = [];
+
+        const masterItemsForSpine = Array.from(container.querySelectorAll('.timeline-item-master:not(.nivel-global):not(.is-checkpoint)'));
+        for (let i = 0; i < masterItemsForSpine.length - 1; i++) {
+            const currentGroup = masterItemsForSpine[i];
+            const nextGroup = masterItemsForSpine[i + 1];
+
+            const currentCorrelated = currentGroup.querySelectorAll('.correlated-item-wrapper > .annotation-card');
+            let cardAtual = currentCorrelated.length > 0 ? currentCorrelated[currentCorrelated.length - 1] : currentGroup.querySelector('.main-card-wrapper > .annotation-card');
+            const cardProx = nextGroup.querySelector('.main-card-wrapper > .annotation-card');
+
+            if (!cardAtual || !cardProx) continue;
+
+            const rectAtual = cardAtual.getBoundingClientRect();
+            const rectProx = cardProx.getBoundingClientRect();
+
+            spineGeometria.push({
+                startX: (rectAtual.left + rectAtual.width / 2) - containerRect.left,
+                startY: rectAtual.bottom - containerRect.top,
+                endX: (rectProx.left + rectProx.width / 2) - containerRect.left,
+                endY: rectProx.top - containerRect.top
+            });
+        }
+
+        const FAN_STEP = 14;    // distância máxima entre pontos de saída no lado do cartão
+        const FAN_MARGIN = 20;  // respiro mantido nas bordas superior/inferior do cartão
+
+        container.querySelectorAll('.timeline-item-master').forEach(master => {
+            const subWrapper = master.querySelector(':scope > .sub-annotations-wrapper');
+            if (!subWrapper) return;
+
+            const subItems = subWrapper.querySelectorAll(':scope > .sub-annotation-item');
+            if (subItems.length === 0) return;
+
+            const isRightAligned = master.classList.contains('align-right');
+
+            // Agrupa os nós pelo cartão de origem
+            const porOrigem = new Map();
+            subItems.forEach(subItem => {
+                const sourceCard = _obterCardOrigem(master, subItem.dataset.source);
+                const subCard = subItem.querySelector('.sub-annotation-card');
+                if (!sourceCard || !subCard) return;
+                if (!porOrigem.has(sourceCard)) porOrigem.set(sourceCard, []);
+                porOrigem.get(sourceCard).push({ subItem, subRect: subCard.getBoundingClientRect() });
+            });
+
+            porOrigem.forEach((grupo, sourceCard) => {
+                // Ordem vertical dos nós = ordem dos pontos de saída (evita cruzamentos)
+                grupo.sort((a, b) => a.subRect.top - b.subRect.top);
+
+                const sourceRect = sourceCard.getBoundingClientRect();
+                const n = grupo.length;
+                const passo = n > 1
+                    ? Math.min(FAN_STEP, Math.max(0, sourceRect.height - 2 * FAN_MARGIN) / (n - 1))
+                    : 0;
+                const centroY = (sourceRect.top + sourceRect.height / 2) - containerRect.top;
+
+                grupo.forEach(({ subItem, subRect }, k) => {
+                    tracejadasGeometria.push({
+                        startX: isRightAligned ? sourceRect.left - containerRect.left : sourceRect.right - containerRect.left,
+                        endX: isRightAligned ? subRect.right - containerRect.left : subRect.left - containerRect.left,
+                        startY: centroY + (k - (n - 1) / 2) * passo,
+                        endY: (subRect.top + subRect.height / 2) - containerRect.top,
+                        isZenFocused: subItem.classList.contains('is-zen-focused')
+                    });
+                });
+            });
+        });
+
+        // --- LOOP 2: APENAS ESCRITA (CRIAÇÃO DA STRING HTML) ---
+        let svgContent = '';
+        const tick = 8;
+
+        spineGeometria.forEach(coord => {
+            const ctrlY = (coord.startY + coord.endY) / 2;
+            const pathD = `M ${coord.startX - tick},${coord.startY} L ${coord.startX + tick},${coord.startY} ` +
+                          `M ${coord.startX},${coord.startY} C ${coord.startX},${ctrlY} ${coord.endX},${ctrlY} ${coord.endX},${coord.endY} ` +
+                          `M ${coord.endX - tick},${coord.endY} L ${coord.endX + tick},${coord.endY}`;
+            svgContent += `<path class="spine-connection" d="${pathD}" />`;
+        });
+
+        tracejadasGeometria.forEach(coord => {
+            const ctrlX = (coord.startX + coord.endX) / 2;
+            let strokeColor = "#777", strokeOpacity = "1", strokeWidth = "1.5", dashArray = "5 4";
+
+            if (isZenActive) {
+                if (coord.isZenFocused) {
+                    strokeColor = _activeTopicoCor; strokeWidth = "2.5"; dashArray = "none";
+                } else { strokeOpacity = "0.15"; }
+            }
+            svgContent += `<path d="M ${coord.startX},${coord.startY} C ${ctrlX},${coord.startY} ${ctrlX},${coord.endY} ${coord.endX},${coord.endY}" stroke="${strokeColor}" stroke-width="${strokeWidth}" stroke-dasharray="${dashArray}" opacity="${strokeOpacity}" fill="none" stroke-linecap="round"/>`;
+        });
+
+        svg.innerHTML = svgContent;
+    }
+
+    // A função toggleTextExpansion foi removida. O sistema agora utiliza o Modo de Leitura Centralizado.
+
+    let notaOcultaIndexAtual = -1;
+
+    /**
+     * Iterador estrutural de todos os subnós de um tópico (Adaptado para o modelo de dados ED).
+     * Inspeciona: diretrizesGlobais, diretrizesPorVicio, anotacoes[].subAnotacoes e itensCorrelacionados[].subAnotacoes.
+     */
+    function _percorrerTodosOsNos(topico, callback) {
+        if (!topico || typeof callback !== 'function') return;
+
+        if (Array.isArray(topico.diretrizesGlobais)) {
+            topico.diretrizesGlobais.forEach(no => callback(no));
+        }
+        if (topico.diretrizesPorVicio && typeof topico.diretrizesPorVicio === 'object') {
+            Object.values(topico.diretrizesPorVicio).forEach(arr => {
+                if (Array.isArray(arr)) arr.forEach(no => callback(no));
+            });
+        }
+        if (Array.isArray(topico.anotacoes)) {
+            topico.anotacoes.forEach(an => {
+                if (Array.isArray(an.subAnotacoes)) {
+                    an.subAnotacoes.forEach(no => callback(no));
+                }
+                if (Array.isArray(an.itensCorrelacionados)) {
+                    an.itensCorrelacionados.forEach(ic => {
+                        if (Array.isArray(ic.subAnotacoes)) {
+                            ic.subAnotacoes.forEach(no => callback(no));
+                        }
+                    });
+                }
+            });
+        }
+    }
+
+    /**
+     * Varre todos os tópicos em memória (O(N)) usando _percorrerTodosOsNos
+     * e contabiliza todas as notas internas (intencao === 'nota') ainda não revisadas.
+     */
+    function _obterResumoNotasOcultasGlobal() {
+        const listaTopicos = (typeof topicos !== 'undefined' && Array.isArray(topicos)) ? topicos : [];
+        let totalGlobal = 0;
+        const porTopico = [];
+
+        listaTopicos.forEach(t => {
+            let pendentesNoTopico = 0;
+            _percorrerTodosOsNos(t, (no) => {
+                if (no && no.intencao === 'nota' && no.revisada !== true) {
+                    pendentesNoTopico++;
+                }
+            });
+
+            if (pendentesNoTopico > 0) {
+                totalGlobal += pendentesNoTopico;
+                porTopico.push({
+                    id: t.id,
+                    nome: t.nome,
+                    cor: t.cor || '#1a3a5c',
+                    quantidade: pendentesNoTopico
+                });
+            }
+        });
+
+        return { totalGlobal, porTopico };
+    }
+
+    /**
+     * Atualiza o contador global da lâmpada no cabeçalho.
+     */
+    function atualizarContadorNotasOcultas() {
+        const trackerContainer = document.getElementById('efficiency-tracker-container');
+        const lampTracker = document.getElementById('hidden-notes-tracker');
+        const badge = document.getElementById('hidden-notes-badge');
+        if (!trackerContainer || !lampTracker || !badge) return;
+
+        const { totalGlobal } = _obterResumoNotasOcultasGlobal();
+
+        if (totalGlobal > 0) {
+            trackerContainer.style.display = 'flex';
+            lampTracker.style.display = 'flex';
+            badge.textContent = totalGlobal > 99 ? '99+' : totalGlobal;
+        } else {
+            lampTracker.style.display = 'none';
+            const pill = document.getElementById('efficiency-tracker-pill');
+            if (pill && pill.style.display === 'none') {
+                trackerContainer.style.display = 'none';
+            }
+        }
+
+        // Reseta o cursor de navegação local sempre que a árvore é re-renderizada
+        notaOcultaIndexAtual = -1;
+    }
+
+    /**
+     * Abre o modal global de notas ocultas por tópico (ou rola diretamente se Shift estiver pressionado).
+     */
+    function abrirModalNotasOcultas(event) {
+        if (event) event.stopPropagation();
+
+        // Atalho Power User: Shift + Clique cicla diretamente nas notas ocultas da aba atual
+        if (event && event.shiftKey) {
+            if (document.body.dataset.activeTab !== 'historico' && typeof window.trocarAba === 'function') {
+                window.trocarAba('historico');
+            }
+            requestAnimationFrame(() => rolarParaProximaNotaOculta());
+            return;
+        }
+
+        const backdrop = document.getElementById('notas-ocultas-modal-backdrop');
+        const modal = document.getElementById('modal-notas-ocultas');
+        const container = document.getElementById('lista-topicos-notas-ocultas');
+        if (!backdrop || !modal || !container) return;
+
+        const { porTopico } = _obterResumoNotasOcultasGlobal();
+        container.innerHTML = '';
+
+        if (porTopico.length === 0) {
+            container.innerHTML = '<p class="popup-label" style="text-align:center; margin: 0;">Nenhuma nota oculta pendente.</p>';
+        } else {
+            const fragment = document.createDocumentFragment();
+
+            porTopico.forEach(item => {
+                const chip = document.createElement('button');
+                chip.type = 'button';
+                // Crítico: inclui 'juris-tooltip' para ativar os pseudo-elementos CSS de tooltip
+                chip.className = 'hidden-note-topic-chip juris-tooltip';
+                chip.setAttribute('role', 'listitem');
+                chip.style.backgroundColor = item.cor;
+                chip.style.color = obterCorContraste(item.cor);
+
+                const plural = item.quantidade === 1 ? 'nota oculta' : 'notas ocultas';
+                const tooltipLinear = `${item.nome} • ${item.quantidade} ${plural}`;
+                chip.setAttribute('data-tooltip', tooltipLinear);
+                chip.setAttribute('aria-label', tooltipLinear);
+
+                chip.innerHTML = `<span class="hidden-note-topic-count">${item.quantidade}</span>`;
+                chip.addEventListener('click', () => selecionarTopicoNotaOculta(item.id));
+
+                fragment.appendChild(chip);
+            });
+
+            container.appendChild(fragment);
+        }
+
+        if (window.RenderCycle) RenderCycle.bloquearScrollBody(true);
+        backdrop.style.display = 'block';
+        modal.style.display = 'flex';
+    }
+
+    function fecharModalNotasOcultas() {
+        const backdrop = document.getElementById('notas-ocultas-modal-backdrop');
+        const modal = document.getElementById('modal-notas-ocultas');
+        if (backdrop) backdrop.style.display = 'none';
+        if (modal) modal.style.display = 'none';
+        if (window.RenderCycle) RenderCycle.bloquearScrollBody(false);
+    }
+
+    /**
+     * Navega até o tópico selecionado no modal e rola até sua primeira nota oculta pendente.
+     */
+    function selecionarTopicoNotaOculta(topicoId) {
+        fecharModalNotasOcultas();
+
+        const estavaNaAbaLeitura = !document.getElementById('tab-historico').classList.contains('active');
+        if (estavaNaAbaLeitura && typeof window.trocarAba === 'function') {
+            window.trocarAba('historico');
+        }
+
+        const trocouTopico = (activeTabId !== topicoId);
+        if (trocouTopico) {
+            activeTabId = topicoId;
+            renderizarFichario(topicos);
+        } else if (estavaNaAbaLeitura) {
+            // Se já era o mesmo tópico mas o container estava oculto (display:none),
+            // garante que as coordenadas absolutas dos subnós estejam calculadas
+            const timelineEl = document.getElementById('timeline-container');
+            if (timelineEl) {
+                posicionarNosDeIdeia(timelineEl);
+                desenharConexoes();
+            }
+        }
+
+        // Aguarda o ciclo de posicionamento do DOM e reseta o cursor antes de rolar
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                notaOcultaIndexAtual = -1;
+                rolarParaProximaNotaOculta();
+            });
+        });
+    }
+
+    function sinalizarNotasOcultasPendentes() {
+        const { totalGlobal } = _obterResumoNotasOcultasGlobal();
+        if (totalGlobal > 0) {
+            if (typeof exibirToast === 'function') {
+                exibirToast(`Atenção: Existem ${totalGlobal} nota(s) oculta(s) pendente(s) de revisão no processo.`, 'aviso');
+            }
+            const lamp = document.getElementById('hidden-notes-tracker');
+            if (lamp) {
+                lamp.classList.remove('lamp-pulse-alert');
+                void lamp.offsetWidth;
+                lamp.classList.add('lamp-pulse-alert');
+                setTimeout(() => lamp.classList.remove('lamp-pulse-alert'), 2800);
+            }
+        }
+    }
+
+    function rolarParaProximaNotaOculta() {
+        const notas = document.querySelectorAll('.sub-annotation-item.is-nota-interna.is-pendente');
+        if (notas.length === 0) return;
+
+        notaOcultaIndexAtual++;
+        if (notaOcultaIndexAtual >= notas.length) notaOcultaIndexAtual = 0;
+
+        const notaAlvo = notas[notaOcultaIndexAtual];
+        const scrollContainer = document.getElementById('history-container');
+        
+        if (notaAlvo && scrollContainer) {
+            const containerRect = scrollContainer.getBoundingClientRect();
+            const alvoRect = notaAlvo.getBoundingClientRect();
+            
+            const offset = (alvoRect.top - containerRect.top) + scrollContainer.scrollTop - 30;
+            scrollContainer.scrollTo({ top: offset, behavior: 'smooth' });
+            
+            const cardInterno = notaAlvo.querySelector('.sub-annotation-card');
+            cardInterno.style.transition = 'box-shadow 0.2s, border-color 0.2s';
+            cardInterno.style.borderColor = '#D500B5';
+            cardInterno.style.boxShadow = '0 0 0 4px rgba(213, 0, 181, 0.3), 4px 4px 0px rgba(0, 0, 0, 0.15)';
+            
+            setTimeout(() => {
+                cardInterno.style.borderColor = '';
+                cardInterno.style.boxShadow = '';
+            }, 1200);
+        }
+    }
+
+    // Listener ergonômico para Scroll Horizontal com a roda do mouse
+    const _headerEl = document.getElementById('topics-tabs-header');
+    if (_headerEl) {
+        _headerEl.addEventListener('wheel', (evt) => {
+            if (evt.deltaY !== 0) {
+                evt.preventDefault();
+                _headerEl.scrollLeft += evt.deltaY * 2;
+            }
+        }, { passive: false });
+    }
+
+    document.addEventListener('scroll', (e) => {
+        const target = e.target;
+        if (target && target.classList && target.classList.contains('juris-scroll-fade-body')) {
+            const wrapper = target.parentElement;
+            if (wrapper && wrapper.classList.contains('is-truncated')) {
+                const chegouAoFim = Math.ceil(target.scrollTop + target.clientHeight) >= target.scrollHeight - 4;
+                wrapper.classList.toggle('is-scrolled-end', chegouAoFim);
+            }
+        }
+    }, { capture: true, passive: true });
+
+    function abrirModoLeituraPilha(topicoId, grupoId, numeroRomano) {
+        const topico = topicos.find(t => t.id === topicoId);
+        if (!topico) return;
+        
+        let htmlAgrupado = '';
+        let itemContador = 1;
+
+        const getIntencaoLabel = (intKey) => {
+            const mapa = {
+                'comando': { text: 'COMANDO', color: '#c62828', bg: '#ffebee' },
+                'texto': { text: 'TEXTO FIXO', color: '#1565c0', bg: '#e3f2fd' },
+                'premissa': { text: 'PREMISSA LÓGICA', color: '#7b1fa2', bg: '#f3e5f5' },
+                'fundamentacao': { text: 'LEI SECA', color: '#00695c', bg: '#e0f2f1' },
+                'refutacao': { text: 'REFUTAÇÃO / MÉRITO', color: '#8B4513', bg: '#efebe9' },
+                'preliminar': { text: 'PREJUDICIAL / FILTRO', color: '#5d4037', bg: '#efebe9' },
+                'veredito': { text: 'VEREDITO', color: '#e65100', bg: '#fff3e0' },
+                'nota': { text: 'NOTA INTERNA', color: '#616161', bg: '#f5f5f5' },
+                'jurisprudencia': { text: 'JURISPRUDÊNCIA', color: '#00838F', bg: '#E0F7FA' },
+                'degravacao': { text: 'DEGRAVAÇÃO (CURADA)', color: '#BF360C', bg: '#FBE9E7' }
+            };
+            return mapa[intKey] || { text: 'DIRETRIZ', color: '#475569', bg: '#f1f5f9' };
+        };
+
+        const processar = (subArr, origemHtml) => {
+            if (subArr) {
+                subArr.filter(s => s.grupoId === grupoId).forEach((no) => {
+                    const intencaoKey = no.intencao || 'premissa';
+                    const configInt = getIntencaoLabel(intencaoKey);
+                    const isRevisada = no.revisada ? ' <span title="Revisada" style="color:#48bb78; margin-left:4px;">✔</span>' : '';
+                    
+                    htmlAgrupado += `
+                    <div style="padding-bottom: 16px; border-bottom: 1px dashed #e2e8f0; margin-bottom: 16px;">
+                        <div style="display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:8px;">
+                            <span style="font-size:0.75rem; color:#64748b; font-weight:800; background:#f1f5f9; padding:2px 8px; border-radius:12px;">ITEM ${itemContador++}</span>
+                            <span style="font-size:0.7rem; font-weight:800; color:${configInt.color}; background:${configInt.bg}; padding:2px 8px; border-radius:12px; border: 1px solid ${configInt.color}40; display:flex; align-items:center;">${configInt.text}${isRevisada}</span>
+                            <span style="font-size:0.8rem; color:#475569; display:flex; align-items:center; gap:4px; margin-left: 4px;">${origemHtml}</span>
+                        </div>
+                        <div style="font-size: 1rem; color: #334155; line-height: 1.6;">
+                            ${renderizarMarkdownSeguro(escaparHTML(no.texto))}
+                        </div>
+                    </div>`;
+                });
+            }
+        };
+
+        // 1. Varre Diretrizes Globais
+        processar(topico.diretrizesGlobais, '🌐 <strong>Diretriz Global</strong>');
+
+        // 2. Varre Vícios e Provas
+        let ultimaTese = null;
+        topico.anotacoes.forEach(an => {
+            const teseAtual = an.tese || "Provas sem agrupamento";
+            const vicioRaw = an.vicio || topico.vicio || 'omissao';
+            
+            // Subnós de Vício (ED)
+            if (teseAtual !== ultimaTese) {
+                if (topico.diretrizesPorVicio && topico.diretrizesPorVicio[vicioRaw]) {
+                    const vicioFormatado = window.JurisUtils ? window.JurisUtils.formatarVicioED(vicioRaw) : vicioRaw;
+                    processar(topico.diretrizesPorVicio[vicioRaw], `⚖️ Diretriz do Vício: <strong>${escaparHTML(vicioFormatado)}</strong>`);
+                }
+                ultimaTese = teseAtual;
+            }
+
+            // Subnós da Prova Master
+            const docMaster = an.documento || an.polo || 'Elemento Probatório';
+            const flMaster = an.pagina ? `(fl. ${an.pagina})` : '';
+            processar(an.subAnotacoes, `📄 ${escaparHTML(docMaster)} <em>${escaparHTML(flMaster)}</em>`);
+
+            // Subnós das Provas Correlacionadas
+            if (an.itensCorrelacionados) {
+                an.itensCorrelacionados.forEach(ic => {
+                    const docCorr = ic.documento || ic.polo || 'Elemento Correlacionado';
+                    const flCorr = ic.pagina ? `(fl. ${ic.pagina})` : '';
+                    processar(ic.subAnotacoes, `📄 ${escaparHTML(docCorr)} <em>${escaparHTML(flCorr)}</em>`);
+                });
+            }
+        });
+
+        const modal = document.getElementById('reading-mode-modal');
+        document.getElementById('reading-mode-title-text').textContent = `Leitura da Pilha ${numeroRomano}`;
+        document.getElementById('reading-mode-content').innerHTML = htmlAgrupado || '<p style="color:#666; font-style:italic;">Nenhuma ideia encontrada para este grupo.</p>';
+        document.getElementById('reading-mode-backdrop').style.display = 'block';
+        modal.style.display = 'flex';
+    }
+
+    function abrirModoLeituraPilhaProcessual(topicoId, parentIndex, pilhaProcId) {
+        const topico = topicos.find(t => t.id === topicoId);
+        if (!topico) return;
+        const mestre = topico.anotacoes[parentIndex];
+        
+        // Otimização O(N) e Preservação do Índice Original
+        const itensDestaPilhaObj = mestre.itensCorrelacionados
+            .map((ic, originalCIdx) => ({ ic, originalCIdx }))
+            .filter(obj => obj.ic.pilhaProcId === pilhaProcId);
+        
+        if (itensDestaPilhaObj.length === 0) return;
+        const docSeguro = escaparHTML(itensDestaPilhaObj[0].ic.documento || itensDestaPilhaObj[0].ic.polo || 'Pastinha de Provas');
+        
+        let htmlAgrupado = '';
+        let markdownAcumulado = `### 🗂️ Leitura: ${docSeguro}\n\n`;
+        
+        // COMPATIBILIDADE CRÍTICA: O motor nativo \`copiarTextoModoLeitura\` quebra o HTML a cada '\\n' 
+        // e envolve em <p>. Usamos APENAS tags inline (<strong>, <i>, <br>) para evitar HTML inválido no Word/PJe.
+        let htmlAcumulado = `<strong>🗂️ Leitura: ${docSeguro}</strong>\n`;
+        
+        itensDestaPilhaObj.forEach((obj, i) => {
+            const ic = obj.ic;
+            const metaTexto = _obterMetaTexto(ic);
+            
+            // HTML de Tela: Componente interativo com UX de fechamento automático síncrono
+            const metaInterativoTela = _gerarMetaInterativo(topicoId, parentIndex, obj.originalCIdx, metaTexto, true);
+            
+            htmlAgrupado += `
+            <div style="padding-bottom: 16px; border-bottom: 1px dashed #e2e8f0; margin-bottom: 16px;">
+                <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+                    <span style="font-size:0.75rem; color:#64748b; font-weight:800; background:#f1f5f9; padding:2px 8px; border-radius:12px;">ITEM ${i + 1}</span>
+                    ${metaInterativoTela}
+                </div>
+                <div style="font-size: 1.05rem; color: #334155; line-height: 1.6; font-style: italic;">
+                    "${renderizarMarkdownSeguro(escaparHTML(ic.conteudo))}"
+                </div>
+            </div>`;
+            
+            // Sincronização de Estado (Copy-Safe)
+            markdownAcumulado += `**ITEM ${i + 1}** ${metaTexto}\n"${ic.conteudo}"\n\n`;
+            htmlAcumulado += `<strong>ITEM ${i + 1}</strong> ${metaTexto}<br><i>"${renderizarMarkdownSeguro(escaparHTML(ic.conteudo))}"</i>\n`;
+        });
+        
+        // Mutação das Variáveis Globais (Resolve o Stale State)
+        _textoLeituraAtualMarkdown = markdownAcumulado.trim();
+        _textoLeituraAtualHTML = htmlAcumulado;
+        
+        // Renderização Visual no Modal
+        const modal = document.getElementById('reading-mode-modal');
+        document.getElementById('reading-mode-title-text').innerHTML = `🗂️ Leitura: ${docSeguro}`;
+        document.getElementById('reading-mode-content').innerHTML = htmlAgrupado;
+        document.getElementById('reading-mode-backdrop').style.display = 'block';
+        modal.style.display = 'flex';
+    }
+
+    function desagruparPilha(topicoId, grupoId) {
+        if (!confirm('Deseja desagrupar esta pilha e restaurar os nós individualmente?')) return;
+        const topico = topicos.find(t => t.id === topicoId);
+        
+        const limparGrupo = (subArr) => {
+            if(subArr) subArr.forEach(s => { if (s.grupoId === grupoId) delete s.grupoId; });
+        };
+
+        topico.anotacoes.forEach(an => {
+            limparGrupo(an.subAnotacoes);
+            if (an.itensCorrelacionados) an.itensCorrelacionados.forEach(ic => limparGrupo(ic.subAnotacoes));
+        });
+
+        renderizarFichario(topicos); 
+        if(window.salvarBackupAutomatico) salvarBackupAutomatico();
+        if(window.exibirToast) exibirToast('Pilha desagrupada com sucesso.', 'sucesso');
+    }
+
+    let _contextoEdicaoPilha = null;
+
+    function abrirModalPilha(topicoId, grupoId) {
+        _contextoEdicaoPilha = { topicoId, grupoId };
+        const topico = topicos.find(t => t.id === topicoId);
+        if (!topico) return;
+
+        let titAtual = "📚 Grupo de Ideias";
+        let descManualSalva = ""; 
+
+        const extrair = (arr) => {
+            if (!arr) return;
+            const no = arr.find(s => s.grupoId === grupoId);
+            if (no) {
+                if (no.grupoTitulo) titAtual = no.grupoTitulo;
+                if (no.grupoDescricao) descManualSalva = no.grupoDescricao;
+            }
+        };
+
+        topico.anotacoes.forEach(an => { 
+            extrair(an.subAnotacoes); 
+            if (an.itensCorrelacionados) an.itensCorrelacionados.forEach(ic => extrair(ic.subAnotacoes)); 
+        });
+        extrair(topico.diretrizesGlobais);
+        if (topico.diretrizesPorVicio) Object.values(topico.diretrizesPorVicio).forEach(arr => extrair(arr));
+
+        const inputTitulo = document.getElementById('input-pilha-titulo');
+        const inputDesc = document.getElementById('input-pilha-descricao');
+        
+        inputTitulo.value = titAtual;
+        inputDesc.value = descManualSalva;
+        
+        if (descManualSalva === "") {
+            const previewAuto = _obterTextosDaPilha(topico, grupoId);
+            inputDesc.placeholder = previewAuto !== "" ? previewAuto : "Nós vazios. O texto gerado aparecerá aqui...";
+        } else {
+            inputDesc.placeholder = "Deixe vazio para o sistema extrair os textos automaticamente.";
+        }
+
+        document.getElementById('pilha-modal-backdrop').style.display = 'block';
+        document.getElementById('modal-editar-pilha').style.display = 'flex';
+    }
+
+    function fecharModalPilha() {
+        document.getElementById('pilha-modal-backdrop').style.display = 'none';
+        document.getElementById('modal-editar-pilha').style.display = 'none';
+        _contextoEdicaoPilha = null;
+    }
+
+    function salvarEdicaoPilha() {
+        if (!_contextoEdicaoPilha) return;
+        const topico = topicos.find(t => t.id === _contextoEdicaoPilha.topicoId);
+        if (!topico) return;
+        
+        const nTit = document.getElementById('input-pilha-titulo').value.trim();
+        const nDesc = document.getElementById('input-pilha-descricao').value.trim();
+
+        const atualizar = (arr) => {
+            if (!arr) return;
+            arr.forEach(s => {
+                if (s.grupoId === _contextoEdicaoPilha.grupoId) {
+                    s.grupoTitulo = nTit;
+                    
+                    if (nDesc === "") {
+                        delete s.grupoDescricao;
+                    } else {
+                        s.grupoDescricao = nDesc;
+                    }
+                }
+            });
+        };
+
+        topico.anotacoes.forEach(an => { 
+            atualizar(an.subAnotacoes); 
+            if (an.itensCorrelacionados) an.itensCorrelacionados.forEach(ic => atualizar(ic.subAnotacoes)); 
+        });
+        atualizar(topico.diretrizesGlobais);
+        if (topico.diretrizesPorVicio) Object.values(topico.diretrizesPorVicio).forEach(arr => atualizar(arr));
+
+        fecharModalPilha();
+        renderizarFichario(topicos);
+        if (window.salvarBackupAutomatico) salvarBackupAutomatico();
+    }
+
+    let _pilhaProcContext = null;
+
+    function abrirModalPilhaProcessual(topicoId, parentIndex, cIdxOrigem) {
+        const topico = topicos.find(t => t.id === topicoId);
+        const mestre = topico.anotacoes[parentIndex];
+        const itemReferencia = mestre.itensCorrelacionados[cIdxOrigem];
+
+        const elegiveis = mestre.itensCorrelacionados.map((item, idx) => ({ item, idx }))
+            .filter(obj => 
+                obj.item.documento === itemReferencia.documento && 
+                obj.item.polo === itemReferencia.polo &&
+                !obj.item.pilhaProcId 
+            );
+
+        if (elegiveis.length < 2 && !itemReferencia.pilhaProcId) {
+            if(typeof exibirToast === 'function') exibirToast('Não há outros cards elegíveis para agrupar com este.', 'aviso');
+            return;
+        }
+
+        _pilhaProcContext = { topicoId, parentIndex };
+        let html = '';
+
+        elegiveis.forEach(obj => {
+            const textoBruto = obj.item.conteudo.replace(/<[^>]*>?/gm, '').substring(0, 70) + '...';
+            const textoSeguro = escaparHTML(textoBruto); 
+
+            html += `
+            <label style="display:flex; align-items:flex-start; gap:10px; padding:10px; border:1px solid var(--border-color); border-radius:6px; cursor:pointer; background:#fafafa; transition: background 0.2s;">
+                <input type="checkbox" class="pilha-chk" value="${obj.idx}" ${obj.idx === cIdxOrigem ? 'checked disabled' : ''} style="margin-top:2px; transform: scale(1.1);">
+                <span style="font-size:0.85rem; color:var(--text-dark); line-height:1.4;">${textoSeguro}</span>
+            </label>`;
+        });
+
+        document.getElementById('lista-checklist-pilha').innerHTML = html;
+        document.getElementById('pilha-processual-backdrop').style.display = 'block';
+        document.getElementById('modal-pilha-processual').style.display = 'flex';
+    }
+
+    function fecharModalPilhaProcessual() {
+        document.getElementById('pilha-processual-backdrop').style.display = 'none';
+        document.getElementById('modal-pilha-processual').style.display = 'none';
+        _pilhaProcContext = null;
+    }
+
+    function salvarPilhaProcessual() {
+        if (!_pilhaProcContext) return;
+        const topico = topicos.find(t => t.id === _pilhaProcContext.topicoId);
+        const chks = document.querySelectorAll('.pilha-chk:checked');
+        
+        if (chks.length < 2) {
+            if(typeof exibirToast === 'function') exibirToast('Selecione pelo menos 2 provas.', 'aviso');
+            return;
+        }
+
+        const novaPilhaId = 'pilhaProc-' + Date.now();
+        
+        chks.forEach(chk => {
+            const idx = parseInt(chk.value, 10);
+            topico.anotacoes[_pilhaProcContext.parentIndex].itensCorrelacionados[idx].pilhaProcId = novaPilhaId;
+        });
+
+        fecharModalPilhaProcessual();
+        renderizarFichario(topicos); 
+        if(window.salvarBackupAutomatico) salvarBackupAutomatico();
+        if(typeof exibirToast === 'function') exibirToast('Pilha Processual criada!', 'sucesso');
+    }
+
+    function desagruparPilhaProcessual(topicoId, parentIndex, pilhaId) {
+        if(!confirm('Desagrupar e restaurar as provas individualmente?')) return;
+        
+        const topico = topicos.find(t => t.id === topicoId);
+        topico.anotacoes[parentIndex].itensCorrelacionados.forEach(ic => {
+            if (ic.pilhaProcId === pilhaId) delete ic.pilhaProcId;
+        });
+
+        renderizarFichario(topicos);
+        if(window.salvarBackupAutomatico) salvarBackupAutomatico();
+        if(typeof exibirToast === 'function') exibirToast('Pilha desagrupada com sucesso.', 'info');
+    }
+
+    // ==========================================
+    // INÍCIO: LÓGICA DA TESOURA E CHECKPOINT (ED - COM TRANSFERÊNCIA SELETIVA E EXPANSÃO)
+    // ==========================================
+    
+    const toRoman = (num) => {
+        const lookup = {M:1000,CM:900,D:500,CD:400,C:100,XC:90,L:50,XL:40,X:10,IX:9,V:5,IV:4,I:1};
+        let roman = '', i;
+        for (i in lookup) { while (num >= lookup[i]) { roman += i; num -= lookup[i]; } }
+        return roman;
+    };
+
+    const LIMITE_CAPACIDADE_VOLUME = 30;
+    let _debounceContagemItens = null;
+    let _ultimoIndiceClicadoCorte = null;
+    let _transitarTriggerEl = null;
+    let _ultimoSnapshotTransito = null;
+
+    /**
+     * Calcula o peso estrutural de um Grupo de Ideia (Mestre + Correlacionados + Sub-nós).
+     * Exclui cartões de checkpoint por serem banners estáticos sem impacto no motor SVG.
+     */
+    function _calcularPesoGrupoIdeia(an) {
+        if (!an || _ehCheckpoint(an)) return 0;
+        let peso = 1;
+        peso += Array.isArray(an.subAnotacoes) ? an.subAnotacoes.length : 0;
+        if (Array.isArray(an.itensCorrelacionados)) {
+            peso += an.itensCorrelacionados.length;
+            an.itensCorrelacionados.forEach(ic => {
+                peso += Array.isArray(ic.subAnotacoes) ? ic.subAnotacoes.length : 0;
+            });
+        }
+        return peso;
+    }
+
+    function _calcularPesoEstruturalTopico(topico) {
+        if (!topico || !Array.isArray(topico.anotacoes)) return 0;
+        let total = 0;
+        topico.anotacoes.forEach(an => { total += _calcularPesoGrupoIdeia(an); });
+        return total;
+    }
+
+    function _obterNumeroVolume(topico) {
+        if (!topico) return 1;
+        if (topico.volumeData && typeof topico.volumeData.sequencia === 'number') {
+            return topico.volumeData.sequencia;
+        }
+        return 1;
+    }
+
+    /**
+     * Sobe a cadeia volumeData.anteriorId até a raiz comum (com proteção contra ciclos).
+     */
+    function _obterRaizCadeiaVolume(topico, mapaPorId) {
+        const visitados = new Set();
+        let atual = topico;
+        let eloQuebrado = false;
+
+        while (atual && atual.volumeData && atual.volumeData.anteriorId) {
+            if (visitados.has(atual.id)) break;
+            visitados.add(atual.id);
+            const pai = mapaPorId.get(atual.volumeData.anteriorId);
+            if (!pai) {
+                eloQuebrado = true;
+                break;
+            }
+            atual = pai;
+        }
+        return { raizId: atual ? atual.id : null, eloQuebrado };
+    }
+
+    /**
+     * Retorna todos os volumes pertencentes à mesma família (mesma raiz anteriorId),
+     * ordenados crescentemente por número de sequência.
+     */
+    function obterFamiliaVolumes(topicoAlvo) {
+        if (!topicoAlvo || typeof topicos === 'undefined' || !Array.isArray(topicos)) return [];
+        const mapaPorId = new Map(topicos.map(t => [t.id, t]));
+        const { raizId } = _obterRaizCadeiaVolume(topicoAlvo, mapaPorId);
+        if (!raizId) return [topicoAlvo];
+
+        const familia = topicos.filter(t => _obterRaizCadeiaVolume(t, mapaPorId).raizId === raizId);
+        return familia.sort((a, b) => _obterNumeroVolume(a) - _obterNumeroVolume(b));
+    }
+
+    /**
+     * Atualiza de forma síncrona o estado habilitado/desabilitado de #btn-dividir-topico e #btn-transitar-volumes.
+     */
+    function atualizarEstadoFerramentasVolume(topicoOpcional = null) {
+        const btnTesoura = document.getElementById('btn-dividir-topico');
+        const btnTransitar = document.getElementById('btn-transitar-volumes');
+
+        const isAbaAnotacoes = document.body.dataset.activeTab === 'historico';
+        const listaTopicos = (typeof topicos !== 'undefined' && Array.isArray(topicos)) ? topicos : [];
+        const topicoRef = topicoOpcional || listaTopicos.find(t => t.id === activeTabId) || listaTopicos[0] || null;
+
+        if (!isAbaAnotacoes || !topicoRef || listaTopicos.length === 0) {
+            if (btnTesoura) {
+                btnTesoura.disabled = true;
+                btnTesoura.classList.remove('limite-pulse-alert');
+            }
+            if (btnTransitar) {
+                btnTransitar.disabled = true;
+                btnTransitar.title = 'Mover Grupos de Ideias entre Volumes (Disponível na aba Anotações quando houver 2+ volumes)';
+            }
+            return;
+        }
+
+        if (btnTesoura) {
+            btnTesoura.disabled = false;
+        }
+
+        if (btnTransitar) {
+            const familia = obterFamiliaVolumes(topicoRef);
+            const possuiMultiplosVolumes = familia.length >= 2;
+            btnTransitar.disabled = !possuiMultiplosVolumes;
+
+            if (possuiMultiplosVolumes) {
+                const volNum = _obterNumeroVolume(topicoRef);
+                btnTransitar.title = `Transitar Grupos de Ideias entre Volumes (${familia.length} volumes neste tópico — Atual: Vol. ${toRoman(volNum)})`;
+            } else {
+                btnTransitar.title = 'Mover Grupos de Ideias entre Volumes (Inativo: este tópico possui apenas 1 volume)';
+            }
+        }
+    }
+
+    function atualizarAlertaCapacidadeTopico(topico) {
+        clearTimeout(_debounceContagemItens);
+        _debounceContagemItens = setTimeout(() => {
+            if (document.body.dataset.activeTab !== 'historico') return;
+            if (!topico || !topico.anotacoes) return;
+
+            const total = _calcularPesoEstruturalTopico(topico);
+            const btn = document.getElementById('btn-dividir-topico');
+            if (btn) {
+                const jaDividido = topico.anotacoes.some(a => a && a.tipo === 'checkpoint_saida');
+                const limiteAtingido = total >= LIMITE_CAPACIDADE_VOLUME && !jaDividido;
+                btn.classList.toggle('limite-pulse-alert', limiteAtingido);
+                btn.disabled = false;
+
+                if (jaDividido) {
+                    btn.title = 'Este volume já foi dividido. Acesse o último volume criado para realizar nova divisão.';
+                } else if (limiteAtingido) {
+                    btn.title = '⚠️ Este tópico está muito longo! Clique para dividir em um novo volume e evitar que a IA se perca ou esqueça do contexto.';
+                } else {
+                    btn.title = 'Dividir Tópico em Volumes (Checkpoint IA)';
+                }
+            }
+        }, 500);
+    }
+
+    /**
+     * Extrai um resumo estruturado do Grupo de Ideia (Mestre + Correlacionados + Sub-nós)
+     * para exibição no checklist dos modais da Tesoura e de Trânsito.
+     */
+    function _obterResumoGrupoIdeia(anotacao) {
+        const doc = anotacao.documento || anotacao.polo || 'Elemento Probatório';
+        const folha = anotacao.pagina ? `fl. ${anotacao.pagina}` : '';
+        const qtdCorrelacionados = anotacao.itensCorrelacionados ? anotacao.itensCorrelacionados.length : 0;
+        let qtdNos = anotacao.subAnotacoes ? anotacao.subAnotacoes.length : 0;
+
+        if (anotacao.itensCorrelacionados) {
+            anotacao.itensCorrelacionados.forEach(ic => {
+                qtdNos += (ic.subAnotacoes ? ic.subAnotacoes.length : 0);
+            });
+        }
+
+        let previewTexto = '';
+        if (anotacao.tipo === 'texto') {
+            previewTexto = anotacao.conteudo || '';
+        } else if (anotacao.tipo === 'imagem') {
+            previewTexto = `[Imagem] ${anotacao.comentario || ''}`;
+        } else if (anotacao.tipo === 'audio') {
+            const dadosAudio = _obterDadosAudioSeguros(anotacao);
+            previewTexto = dadosAudio && !dadosAudio.isCorrompido
+                ? `[Áudio: ${dadosAudio.orador}] ${dadosAudio.transcricao || dadosAudio.comentario || ''}`
+                : '[Trecho de Áudio]';
+        }
+
+        const partesExtras = [];
+        if (qtdCorrelacionados > 0) partesExtras.push(`+${qtdCorrelacionados} agrupada(s)`);
+        if (qtdNos > 0) partesExtras.push(`${qtdNos} nó(s)`);
+
+        return {
+            doc,
+            folha,
+            tese: anotacao.tese ? anotacao.tese.trim() : '',
+            detalhesAgrupamento: partesExtras.join(' • '),
+            preview: previewTexto.replace(/\s+/g, ' ').trim().substring(0, 110)
+        };
+    }
+
+    function _atualizarResumoSelecaoCorte() {
+        const checkboxes = document.querySelectorAll('#safecut-ideas-list .safecut-idea-checkbox');
+        const total = checkboxes.length;
+        let selecionados = 0;
+        checkboxes.forEach(chk => { if (chk.checked) selecionados++; });
+
+        const summaryEl = document.getElementById('safecut-transfer-summary');
+        const btnLabelEl = document.getElementById('btn-executar-tesoura-label');
+
+        if (summaryEl) {
+            if (total === 0) {
+                summaryEl.textContent = 'Nenhum grupo disponível para transferência.';
+            } else if (selecionados === 0) {
+                summaryEl.textContent = 'Nenhum grupo selecionado (o novo volume iniciará vazio).';
+            } else {
+                summaryEl.textContent = `${selecionados} de ${total} grupo(s) selecionado(s) para mover ao novo volume.`;
+            }
+        }
+
+        if (btnLabelEl) {
+            btnLabelEl.textContent = selecionados === 0
+                ? 'Dividir em Volumes'
+                : `Mover (${selecionados}) e Dividir`;
+        }
+    }
+
+    function _alternarExpansaoModalVolume(modalId, btnExpandId, listId, forcarEstado) {
+        const modal = document.getElementById(modalId);
+        const btnExpand = document.getElementById(btnExpandId);
+        const listEl = document.getElementById(listId);
+        if (!modal || !btnExpand) return;
+
+        const novoEstado = typeof forcarEstado === 'boolean'
+            ? forcarEstado
+            : !modal.classList.contains('is-list-expanded');
+
+        modal.classList.toggle('is-list-expanded', novoEstado);
+        btnExpand.setAttribute('aria-pressed', novoEstado ? 'true' : 'false');
+        btnExpand.textContent = novoEstado ? '⤡ Restaurar tamanho' : '⤢ Expandir';
+
+        if (listEl) listEl.style.height = '';
+    }
+
+    function _alternarExpansaoListaCorte(forcarEstado) {
+        _alternarExpansaoModalVolume('modal-predivisao', 'btn-safecut-expand-list', 'safecut-ideas-list', forcarEstado);
+    }
+
+    /**
+     * Helper compartilhado (DRY) para delegação de eventos de checklist em lote
+     * usado tanto por #modal-predivisao (Tesoura) quanto por #modal-transitar-volumes (Trânsito).
+     */
+    function _vincularChecklistVolumeModal(modalId, btnExpandId, listId, onSelectionChange, onCustomAction = null) {
+        const modal = document.getElementById(modalId);
+        if (!modal || modal.dataset.safecutBound === 'true') return;
+
+        modal.addEventListener('click', (event) => {
+            const actionEl = event.target.closest('[data-safecut-action]');
+            if (actionEl) {
+                const action = actionEl.dataset.safecutAction;
+
+                if (action === 'toggle-expand') {
+                    event.preventDefault();
+                    _alternarExpansaoModalVolume(modalId, btnExpandId, listId);
+                    return;
+                }
+
+                if (action === 'from-here') {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    const startOrder = parseInt(actionEl.dataset.orderIndex, 10);
+                    if (!isNaN(startOrder)) {
+                        const allCheckboxes = Array.from(modal.querySelectorAll('.safecut-idea-checkbox'));
+                        allCheckboxes.forEach((chk, idx) => { chk.checked = (idx >= startOrder); });
+                        _ultimoIndiceClicadoCorte = startOrder;
+                        onSelectionChange();
+                    }
+                    return;
+                }
+
+                if (action === 'select-all' || action === 'clear-all') {
+                    event.preventDefault();
+                    const marcar = action === 'select-all';
+                    modal.querySelectorAll('.safecut-idea-checkbox').forEach(chk => { chk.checked = marcar; });
+                    _ultimoIndiceClicadoCorte = null;
+                    onSelectionChange();
+                    return;
+                }
+
+                if (typeof onCustomAction === 'function') {
+                    onCustomAction(action, event);
+                    return;
+                }
+            }
+
+            const chkTarget = event.target.closest('.safecut-idea-checkbox');
+            if (chkTarget) {
+                const currentOrder = parseInt(chkTarget.dataset.orderIndex, 10);
+                if (event.shiftKey && _ultimoIndiceClicadoCorte !== null && !isNaN(currentOrder)) {
+                    const allCheckboxes = Array.from(modal.querySelectorAll('.safecut-idea-checkbox'));
+                    const min = Math.min(_ultimoIndiceClicadoCorte, currentOrder);
+                    const max = Math.max(_ultimoIndiceClicadoCorte, currentOrder);
+                    const targetState = chkTarget.checked;
+                    for (let i = min; i <= max; i++) {
+                        if (allCheckboxes[i]) allCheckboxes[i].checked = targetState;
+                    }
+                }
+                _ultimoIndiceClicadoCorte = currentOrder;
+                onSelectionChange();
+            }
+        });
+
+        modal.addEventListener('change', (event) => {
+            if (event.target.classList.contains('safecut-idea-checkbox')) {
+                onSelectionChange();
+            }
+        });
+
+        modal.dataset.safecutBound = 'true';
+    }
+
+    function _inicializarEventosModalCorte() {
+        _vincularChecklistVolumeModal('modal-predivisao', 'btn-safecut-expand-list', 'safecut-ideas-list', _atualizarResumoSelecaoCorte);
+    }
+
+    function acionarDivisaoTopico() {
+        if (!activeTabId) {
+            if (window.exibirToast) window.exibirToast('Nenhum tópico selecionado.', 'aviso');
+            return;
+        }
+
+        const topicoAtual = topicos.find(t => t.id === activeTabId);
+        if (!topicoAtual) return;
+
+        // Guardrail de Integridade: Impede dividir novamente um volume que já foi encerrado
+        const jaPossuiSaida = (topicoAtual.anotacoes || []).some(a => a && a.tipo === 'checkpoint_saida');
+        if (jaPossuiSaida) {
+            if (window.exibirToast) {
+                window.exibirToast('Este volume já foi dividido anteriormente. Acesse o último volume criado para continuar ou realizar nova divisão.', 'aviso');
+            }
+            return;
+        }
+
+        _inicializarEventosModalCorte();
+        _ultimoIndiceClicadoCorte = null;
+
+        const listContainer = document.getElementById('safecut-ideas-list');
+        if (listContainer) {
+            const anotacoes = topicoAtual.anotacoes || [];
+            const mapaVisuais = _mapNumerosVisuais(anotacoes);
+            const corTopico = topicoAtual.cor || '#1a3a5c';
+            const corTexto = obterCorContraste(corTopico);
+            const htmlBuffer = [];
+            let orderIndex = 0;
+
+            anotacoes.forEach((an, idx) => {
+                if (_ehCheckpoint(an)) return;
+                const numVisual = mapaVisuais.get(idx);
+                const info = _obterResumoGrupoIdeia(an);
+                const currentOrder = orderIndex++;
+
+                htmlBuffer.push(`
+                <label class="safe-cut-idea-item">
+                    <input type="checkbox" class="safecut-idea-checkbox" value="${idx}" data-order-index="${currentOrder}">
+                    <span class="safe-cut-idea-badge" style="background-color: ${corTopico}; color: ${corTexto};">${numVisual}</span>
+                    <div class="safe-cut-idea-info">
+                        <div class="safe-cut-idea-title-row">
+                            <div class="safe-cut-idea-title-left">
+                                <span class="safe-cut-idea-doc">Ideia ${numVisual} — ${escaparHTML(info.doc)}</span>
+                                ${info.folha ? `<span class="safe-cut-idea-meta">(${escaparHTML(info.folha)})</span>` : ''}
+                                ${info.detalhesAgrupamento ? `<span class="safe-cut-idea-meta">• ${escaparHTML(info.detalhesAgrupamento)}</span>` : ''}
+                                ${info.tese ? `<span class="safe-cut-idea-tese">⚖️ ${escaparHTML(info.tese)}</span>` : ''}
+                            </div>
+                            <button type="button" class="btn-safecut-from-here" data-safecut-action="from-here" data-order-index="${currentOrder}" title="Marcar da Ideia ${numVisual} até o final">
+                                ⤵ Daqui até o fim
+                            </button>
+                        </div>
+                        ${info.preview ? `<div class="safe-cut-idea-preview">"${escaparHTML(info.preview)}"</div>` : ''}
+                    </div>
+                </label>`);
+            });
+
+            listContainer.innerHTML = htmlBuffer.length > 0
+                ? htmlBuffer.join('')
+                : '<p style="font-size:0.8rem; color:#64748b; text-align:center; padding:12px;">Este tópico ainda não possui grupos de ideias para transferir.</p>';
+            listContainer.scrollTop = 0;
+        }
+
+        _atualizarResumoSelecaoCorte();
+
+        if (window.RenderCycle) RenderCycle.bloquearScrollBody(true);
+
+        const backdrop = document.getElementById('safecut-backdrop');
+        if (backdrop) backdrop.classList.add('is-active');
+        
+        const btnCortar = document.getElementById('btn-executar-tesoura');
+        if (btnCortar) btnCortar.classList.remove('ready-to-cut');
+    }
+
+    function fecharModalPreDivisao() {
+        const backdrop = document.getElementById('safecut-backdrop');
+        if (backdrop) backdrop.classList.remove('is-active');
+        _alternarExpansaoListaCorte(false);
+        _ultimoIndiceClicadoCorte = null;
+        if (window.RenderCycle) RenderCycle.bloquearScrollBody(false);
+    }
+
+    async function baixarBackupPreCorte() {
+        try {
+            await acionarCriacaoBackup('_PRE_CORTE');
+            if (typeof exibirToast === 'function') {
+                exibirToast('Fotografia de segurança pré-corte salva com sucesso!', 'sucesso');
+            }
+            const btnCortar = document.getElementById('btn-executar-tesoura');
+            if (btnCortar) btnCortar.classList.add('ready-to-cut');
+        } catch (err) {
+            console.log("[Tesoura ED] Backup de segurança cancelado pelo usuário.");
+        }
+    }
+
+    function executarDivisaoTopico() {
+        console.log("[Tesoura ED] Processando divisão de volume...");
+        const topicoAtual = topicos.find(t => t.id === activeTabId);
+        if (!topicoAtual) return;
+
+        // 1. Coleta os índices originais marcados para transferência
+        const indicesSelecionados = new Set(
+            Array.from(document.querySelectorAll('#safecut-ideas-list .safecut-idea-checkbox:checked'))
+                .map(chk => parseInt(chk.value, 10))
+                .filter(n => !isNaN(n))
+        );
+
+        const anotacoesRestantes = [];
+        const anotacoesTransferidas = [];
+
+        (topicoAtual.anotacoes || []).forEach((an, idx) => {
+            if (!_ehCheckpoint(an) && indicesSelecionados.has(idx)) {
+                anotacoesTransferidas.push(an);
+            } else {
+                anotacoesRestantes.push(an);
+            }
+        });
+
+        // Desvincula os grupos transferidos do Volume atual
+        topicoAtual.anotacoes = anotacoesRestantes;
+
+        // 2. Herança e Particionamento seguro de Diretrizes (compatível com diretrizesPorVicio do ED e diretrizesPorTese)
+        const diretrizesPorVicioNovo = topicoAtual.diretrizesPorVicio
+            ? JSON.parse(JSON.stringify(topicoAtual.diretrizesPorVicio))
+            : {};
+
+        const diretrizesPorTeseNovo = {};
+        if (topicoAtual.diretrizesPorTese && anotacoesTransferidas.length > 0) {
+            const tesesTransferidas = new Set(
+                anotacoesTransferidas.map(a => a.tese || "Tese Não Nomeada")
+            );
+            const tesesRestantes = new Set(
+                anotacoesRestantes.filter(a => !_ehCheckpoint(a)).map(a => a.tese || "Tese Não Nomeada")
+            );
+
+            tesesTransferidas.forEach(chaveTese => {
+                if (topicoAtual.diretrizesPorTese[chaveTese]) {
+                    diretrizesPorTeseNovo[chaveTese] = JSON.parse(
+                        JSON.stringify(topicoAtual.diretrizesPorTese[chaveTese])
+                    );
+                    if (!tesesRestantes.has(chaveTese)) {
+                        delete topicoAtual.diretrizesPorTese[chaveTese];
+                    }
+                }
+            });
+        }
+
+        const volAtual = topicoAtual.volumeData && topicoAtual.volumeData.sequencia ? topicoAtual.volumeData.sequencia : 1;
+        const proxVol = volAtual + 1;
+        const nomeBase = topicoAtual.nome.replace(/\s*\(Vol\. [IVXLCDM]+\)$/, '');
+        const novoNome = `${nomeBase} (Vol. ${toRoman(proxVol)})`;
+        const novoId = 'topico-' + Date.now();
+        const slugA = nomeBase.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, '-');
+        const chkId = `CHK-${slugA}-v${volAtual}`;
+
+        topicoAtual.anotacoes.push({
+            uuid: 'id-chk-out-' + Date.now(),
+            tipo: 'checkpoint_saida',
+            conteudo: `CONTINUA NO TÓPICO: "${novoNome}" | ID: ${chkId}`,
+            metaHandoff: { alvo: novoNome, slug: slugA, versao: volAtual, chkId: chkId }
+        });
+
+        const checkpointEntrada = {
+            uuid: 'id-chk-in-' + Date.now(),
+            tipo: 'checkpoint_entrada',
+            conteudo: `CONTINUAÇÃO DO TÓPICO: "${topicoAtual.nome}" | ID: ${chkId}`,
+            metaHandoff: { origem: topicoAtual.nome, slug: slugA, versao: volAtual, chkId: chkId }
+        };
+
+        // HERANÇA ESPECÍFICA DO ED: Herda também o vício, diretrizesPorVicio e os grupos transferidos
+        const novoTopico = {
+            id: novoId,
+            nome: novoNome,
+            cor: topicoAtual.cor,
+            alegacoes: topicoAtual.alegacoes,
+            fundamentos: topicoAtual.fundamentos,
+            veredito: topicoAtual.veredito, 
+            vicio: topicoAtual.vicio,
+            diretrizesPorVicio: diretrizesPorVicioNovo,
+            diretrizesPorTese: diretrizesPorTeseNovo,
+            volumeData: { sequencia: proxVol, anteriorId: topicoAtual.id, chkId: chkId },
+            diretrizesGlobais: [], 
+            anotacoes: [checkpointEntrada, ...anotacoesTransferidas]
+        };
+
+        topicos.push(novoTopico);
+        activeTabId = novoId;
+
+        // Suprime a restauração do yOffset do Volume anterior para iniciar no topo do novo Volume
+        suprimirProximaRestauracao();
+        renderizarFichario(topicos); 
+        fecharModalPreDivisao();
+
+        // Feedback visual tátil no primeiro grupo transferido sem conflitar com o _scrollGuard
+        if (anotacoesTransferidas.length > 0) {
+            const primeiroUuid = anotacoesTransferidas[0].uuid;
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                    const wrapperAlvo = primeiroUuid
+                        ? document.getElementById(`timeline-wrapper-${primeiroUuid}`)
+                        : null;
+                    const cardAlvo = wrapperAlvo
+                        ? wrapperAlvo.querySelector('.main-card-wrapper > .annotation-card')
+                        : null;
+                    if (cardAlvo) {
+                        cardAlvo.classList.remove('card-flash-focus');
+                        void cardAlvo.offsetWidth;
+                        cardAlvo.classList.add('card-flash-focus');
+                    }
+                });
+            });
+        }
+
+        // Sincroniza os badges numéricos nas páginas do PDF e salva o backup
+        if (typeof window.sincronizarHighlightsGerais === 'function') window.sincronizarHighlightsGerais();
+        if (typeof salvarBackupAutomatico === 'function') salvarBackupAutomatico();
+        if (typeof exibirToast === 'function') {
+            const msg = anotacoesTransferidas.length > 0
+                ? `Volume ${toRoman(proxVol)} criado com ${anotacoesTransferidas.length} grupo(s) transferido(s) e renumerado(s)!`
+                : 'Novo volume criado com sucesso.';
+            exibirToast(msg, 'sucesso');
+        }
+    }
+
+    // ==========================================
+    // FIM: LÓGICA DA TESOURA E CHECKPOINT
+    // ==========================================
+
+    function _obterDadosAudioSeguros(alvo) {
+        if (!alvo || alvo.tipo !== 'audio') return { isCorrompido: true };
+        try {
+            const dados = JSON.parse(alvo.conteudo);
+            const formatter = window.AudioManager?.formatTime || ((sec) => `${Math.floor(sec/60)}' ${Math.floor(sec%60)}''`);
+            
+            return {
+                isCorrompido: false,
+                transcricao: dados.transcricao || '',
+                comentario: alvo.comentario || dados.comentario || '',
+                orador: dados.role || dados.oradorStr || 'Orador',
+                rotuloTempo: (dados.inicio !== undefined && dados.fim !== undefined) 
+                    ? `${formatter(dados.inicio)} a ${formatter(dados.fim)}` 
+                    : 'Tempo indefinido'
+            };
+        } catch(e) {
+            return { isCorrompido: true };
+        }
+    }
+
+    /**
+     * Clona profundamente a árvore mutável de cartões (metadados, subAnotacoes, itensCorrelacionados,
+     * highlightRects) preservando a referência da string primitiva imutável `conteudo` (evita duplicar Base64).
+     */
+    function _clonarAnotacoesParaSnapshot(listaAnotacoes) {
+        if (!Array.isArray(listaAnotacoes)) return [];
+        return listaAnotacoes.map(an => {
+            if (!an || typeof an !== 'object') return an;
+            const copia = { ...an };
+            if (an.metaHandoff) copia.metaHandoff = { ...an.metaHandoff };
+            if (Array.isArray(an.highlightRects)) {
+                copia.highlightRects = an.highlightRects.map(r => ({ ...r }));
+            }
+            if (Array.isArray(an.subAnotacoes)) {
+                copia.subAnotacoes = an.subAnotacoes.map(s => ({ ...s }));
+            }
+            if (Array.isArray(an.itensCorrelacionados)) {
+                copia.itensCorrelacionados = an.itensCorrelacionados.map(ic => {
+                    const copiaIc = { ...ic };
+                    if (Array.isArray(ic.highlightRects)) {
+                        copiaIc.highlightRects = ic.highlightRects.map(r => ({ ...r }));
+                    }
+                    if (Array.isArray(ic.subAnotacoes)) {
+                        copiaIc.subAnotacoes = ic.subAnotacoes.map(s => ({ ...s }));
+                    }
+                    return copiaIc;
+                });
+            }
+            return copia;
+        });
+    }
+
+    function _popularSelectsRotaTransito(familia, idOrigemSelecionado, idDestinoPreferido = null) {
+        const selectOrigem = document.getElementById('select-transitar-origem');
+        const selectDestino = document.getElementById('select-transitar-destino');
+        if (!selectOrigem || !selectDestino) return;
+
+        selectOrigem.innerHTML = '';
+        familia.forEach(vol => {
+            const numVol = _obterNumeroVolume(vol);
+            const qtdGrupos = (vol.anotacoes || []).filter(a => !_ehCheckpoint(a)).length;
+            const label = `Vol. ${toRoman(numVol)} — ${vol.nome} (${qtdGrupos} ideia${qtdGrupos === 1 ? '' : 's'})`;
+            const opt = new Option(label, vol.id);
+            opt.dataset.shortLabel = `Vol. ${toRoman(numVol)}`;
+            if (vol.id === idOrigemSelecionado) opt.selected = true;
+            selectOrigem.appendChild(opt);
+        });
+        selectOrigem.title = selectOrigem.selectedOptions[0]?.textContent || '';
+
+        const topicoOrigem = familia.find(t => t.id === selectOrigem.value) || familia[0];
+        const numOrigem = _obterNumeroVolume(topicoOrigem);
+        const irmaosDestino = familia.filter(t => t.id !== topicoOrigem.id);
+
+        let targetId = irmaosDestino[0]?.id;
+        if (idDestinoPreferido && irmaosDestino.some(i => i.id === idDestinoPreferido)) {
+            targetId = idDestinoPreferido;
+        } else {
+            const prox = irmaosDestino.find(i => _obterNumeroVolume(i) > numOrigem);
+            const ant = [...irmaosDestino].reverse().find(i => _obterNumeroVolume(i) < numOrigem);
+            if (prox) targetId = prox.id;
+            else if (ant) targetId = ant.id;
+        }
+
+        selectDestino.innerHTML = '';
+        irmaosDestino.forEach(irmao => {
+            const numIrmao = _obterNumeroVolume(irmao);
+            const qtdGrupos = (irmao.anotacoes || []).filter(a => !_ehCheckpoint(a)).length;
+            const seta = numIrmao > numOrigem ? 'Avançar ➔' : '⬅ Retornar';
+            const shortLabel = `Vol. ${toRoman(numIrmao)}`;
+            const label = `${seta} ${shortLabel} — ${irmao.nome} (${qtdGrupos} ideia${qtdGrupos === 1 ? '' : 's'})`;
+            const opt = new Option(label, irmao.id);
+            opt.dataset.shortLabel = shortLabel;
+            if (irmao.id === targetId) opt.selected = true;
+            selectDestino.appendChild(opt);
+        });
+        selectDestino.title = selectDestino.selectedOptions[0]?.textContent || '';
+    }
+
+    function _renderizarListaIdeiasOrigemTransito() {
+        const selectOrigem = document.getElementById('select-transitar-origem');
+        const listContainer = document.getElementById('transitar-ideas-list');
+        const modal = document.getElementById('modal-transitar-volumes');
+        if (!selectOrigem || !listContainer) return;
+
+        const topicoOrigem = topicos.find(t => t.id === selectOrigem.value);
+        _ultimoIndiceClicadoCorte = null;
+
+        if (!topicoOrigem) {
+            listContainer.innerHTML = '';
+            _atualizarResumoECapacidadeTransito();
+            return;
+        }
+
+        const corTopico = topicoOrigem.cor || '#1a3a5c';
+        const corTexto = obterCorContraste(corTopico);
+        if (modal) {
+            modal.style.setProperty('--transitar-topic-color', corTopico);
+        }
+
+        const anotacoes = topicoOrigem.anotacoes || [];
+        const mapaVisuais = _mapNumerosVisuais(anotacoes);
+        const htmlBuffer = [];
+        let orderIndex = 0;
+
+        anotacoes.forEach((an, idx) => {
+            if (_ehCheckpoint(an)) return;
+            const numVisual = mapaVisuais.get(idx);
+            const info = _obterResumoGrupoIdeia(an);
+            const pesoGrupo = _calcularPesoGrupoIdeia(an);
+            const currentOrder = orderIndex++;
+
+            htmlBuffer.push(`
+            <label class="safe-cut-idea-item">
+                <input type="checkbox" class="safecut-idea-checkbox" value="${idx}" data-order-index="${currentOrder}" data-peso="${pesoGrupo}">
+                <span class="safe-cut-idea-badge" style="background-color: ${corTopico}; color: ${corTexto};">${numVisual}</span>
+                <div class="safe-cut-idea-info">
+                    <div class="safe-cut-idea-title-row">
+                        <div class="safe-cut-idea-title-left">
+                            <span class="safe-cut-idea-doc">Ideia ${numVisual} — ${escaparHTML(info.doc)}</span>
+                            ${info.folha ? `<span class="safe-cut-idea-meta">(${escaparHTML(info.folha)})</span>` : ''}
+                            ${info.detalhesAgrupamento ? `<span class="safe-cut-idea-meta">• ${escaparHTML(info.detalhesAgrupamento)}</span>` : ''}
+                            ${info.tese ? `<span class="safe-cut-idea-tese">⚖️ ${escaparHTML(info.tese)}</span>` : ''}
+                        </div>
+                        <button type="button" class="btn-safecut-from-here" data-safecut-action="from-here" data-order-index="${currentOrder}" title="Marcar da Ideia ${numVisual} até o final">
+                            ⤵ Daqui até o fim
+                        </button>
+                    </div>
+                    ${info.preview ? `<div class="safe-cut-idea-preview">"${escaparHTML(info.preview)}"</div>` : ''}
+                </div>
+            </label>`);
+        });
+
+        listContainer.innerHTML = htmlBuffer.length > 0
+            ? htmlBuffer.join('')
+            : '<p style="font-size:0.8rem; color:#64748b; text-align:center; padding:16px;">Este volume de origem não possui grupos de ideias. Clique no botão <strong>⇄</strong> acima para inverter a rota e buscar ideias de outro volume.</p>';
+        listContainer.scrollTop = 0;
+
+        _atualizarResumoECapacidadeTransito();
+    }
+
+    function _atualizarResumoECapacidadeTransito() {
+        const checkboxes = document.querySelectorAll('#transitar-ideas-list .safecut-idea-checkbox');
+        const selectDestino = document.getElementById('select-transitar-destino');
+        const summaryEl = document.getElementById('transitar-transfer-summary');
+        const meterEl = document.getElementById('transitar-capacity-meter');
+        const btnConfirmar = document.getElementById('btn-confirmar-transitar-volumes');
+        const btnLabelEl = document.getElementById('btn-confirmar-transitar-label');
+        const btnDesfazer = document.getElementById('btn-desfazer-transito');
+
+        if (btnDesfazer) {
+            const snapshotValido = _ultimoSnapshotTransito &&
+                topicos.some(t => t.id === _ultimoSnapshotTransito.origemId) &&
+                topicos.some(t => t.id === _ultimoSnapshotTransito.destinoId);
+            btnDesfazer.style.display = snapshotValido ? 'inline-flex' : 'none';
+        }
+
+        const total = checkboxes.length;
+        let selecionados = 0;
+        let pesoSelecionado = 0;
+
+        checkboxes.forEach(chk => {
+            if (chk.checked) {
+                selecionados++;
+                pesoSelecionado += parseInt(chk.dataset.peso || '1', 10);
+            }
+        });
+
+        const topicoDestino = selectDestino ? topicos.find(t => t.id === selectDestino.value) : null;
+        const pesoAtualDestino = _calcularPesoEstruturalTopico(topicoDestino);
+        const pesoProjetado = pesoAtualDestino + pesoSelecionado;
+        const nomeDestino = selectDestino && selectDestino.selectedOptions[0]
+            ? selectDestino.selectedOptions[0].dataset.shortLabel || 'Destino'
+            : 'Destino';
+
+        if (meterEl) {
+            meterEl.textContent = `Carga no ${nomeDestino}: ${pesoProjetado} / ${LIMITE_CAPACIDADE_VOLUME} itens`;
+            meterEl.classList.remove('is-warning', 'is-danger');
+            if (pesoProjetado >= LIMITE_CAPACIDADE_VOLUME) {
+                meterEl.classList.add('is-danger');
+                meterEl.title = `⚠️ Atenção: O ${nomeDestino} ficará com ${pesoProjetado} itens (acima do limite recomendado de ${LIMITE_CAPACIDADE_VOLUME}).`;
+            } else if (pesoProjetado >= 25) {
+                meterEl.classList.add('is-warning');
+                meterEl.title = `O ${nomeDestino} ficará próximo da capacidade máxima (${pesoProjetado}/${LIMITE_CAPACIDADE_VOLUME} itens).`;
+            } else {
+                meterEl.title = `Capacidade saudável no ${nomeDestino} (${pesoProjetado}/${LIMITE_CAPACIDADE_VOLUME} itens).`;
+            }
+        }
+
+        if (summaryEl) {
+            if (total === 0) {
+                summaryEl.textContent = 'Nenhum grupo disponível na origem selecionada.';
+            } else if (selecionados === 0) {
+                summaryEl.textContent = 'Selecione ao menos 1 grupo de ideias para transferir.';
+            } else {
+                summaryEl.textContent = `${selecionados} grupo(s) selecionado(s) (+${pesoSelecionado} itens) ➔ ${nomeDestino}.`;
+            }
+        }
+
+        if (btnConfirmar) {
+            btnConfirmar.disabled = (selecionados === 0 || !topicoDestino);
+        }
+
+        if (btnLabelEl) {
+            btnLabelEl.textContent = selecionados > 0
+                ? `Transferir (${selecionados}) para ${nomeDestino}`
+                : 'Transferir Selecionados';
+        }
+    }
+
+    function _inicializarEventosModalTransito() {
+        const modal = document.getElementById('modal-transitar-volumes');
+        if (!modal) return;
+
+        _vincularChecklistVolumeModal(
+            'modal-transitar-volumes',
+            'btn-transitar-expand-list',
+            'transitar-ideas-list',
+            _atualizarResumoECapacidadeTransito,
+            (action, event) => {
+                if (action === 'swap-route') {
+                    event.preventDefault();
+                    const selectOrigem = document.getElementById('select-transitar-origem');
+                    const selectDestino = document.getElementById('select-transitar-destino');
+                    if (!selectOrigem || !selectDestino || !selectDestino.value) return;
+
+                    const antigaOrigemId = selectOrigem.value;
+                    const antigoDestinoId = selectDestino.value;
+                    const topicoRef = topicos.find(t => t.id === antigaOrigemId);
+                    const familia = obterFamiliaVolumes(topicoRef);
+
+                    _popularSelectsRotaTransito(familia, antigoDestinoId, antigaOrigemId);
+                    _renderizarListaIdeiasOrigemTransito();
+                }
+            }
+        );
+
+        if (modal.dataset.transitarSelectsBound !== 'true') {
+            modal.addEventListener('change', (event) => {
+                if (event.target.id === 'select-transitar-origem') {
+                    const selectDestino = document.getElementById('select-transitar-destino');
+                    const destinoAnterior = selectDestino ? selectDestino.value : null;
+                    const topicoRef = topicos.find(t => t.id === event.target.value);
+                    const familia = obterFamiliaVolumes(topicoRef);
+                    _popularSelectsRotaTransito(familia, event.target.value, destinoAnterior);
+                    _renderizarListaIdeiasOrigemTransito();
+                } else if (event.target.id === 'select-transitar-destino') {
+                    event.target.title = event.target.selectedOptions[0]?.textContent || '';
+                    _atualizarResumoECapacidadeTransito();
+                }
+            });
+            modal.dataset.transitarSelectsBound = 'true';
+        }
+    }
+
+    function abrirModalTransitarVolumes() {
+        if (!activeTabId) return;
+        const topicoAtual = topicos.find(t => t.id === activeTabId);
+        if (!topicoAtual) return;
+
+        const mapaPorId = new Map(topicos.map(t => [t.id, t]));
+        const { eloQuebrado } = _obterRaizCadeiaVolume(topicoAtual, mapaPorId);
+        const familia = obterFamiliaVolumes(topicoAtual);
+
+        if (familia.length < 2) {
+            if (typeof exibirToast === 'function') {
+                const msg = eloQuebrado
+                    ? 'O vínculo deste volume foi interrompido pela exclusão de uma aba anterior.'
+                    : 'Este tópico possui apenas 1 volume. Use a Tesoura para dividir em volumes primeiro.';
+                exibirToast(msg, 'aviso');
+            }
+            return;
+        }
+
+        _transitarTriggerEl = document.activeElement;
+        _inicializarEventosModalTransito();
+        _popularSelectsRotaTransito(familia, topicoAtual.id);
+        _renderizarListaIdeiasOrigemTransito();
+
+        if (window.RenderCycle) RenderCycle.bloquearScrollBody(true);
+        const backdrop = document.getElementById('transitar-volumes-backdrop');
+        if (backdrop) backdrop.classList.add('is-active');
+
+        requestAnimationFrame(() => {
+            const selectOrigem = document.getElementById('select-transitar-origem');
+            if (selectOrigem) selectOrigem.focus({ preventScroll: true });
+        });
+    }
+
+    function fecharModalTransitarVolumes() {
+        const backdrop = document.getElementById('transitar-volumes-backdrop');
+        if (backdrop) backdrop.classList.remove('is-active');
+        _alternarExpansaoModalVolume('modal-transitar-volumes', 'btn-transitar-expand-list', 'transitar-ideas-list', false);
+        _ultimoIndiceClicadoCorte = null;
+        if (window.RenderCycle) RenderCycle.bloquearScrollBody(false);
+
+        if (_transitarTriggerEl && typeof _transitarTriggerEl.focus === 'function') {
+            try { _transitarTriggerEl.focus({ preventScroll: true }); } catch (e) {}
+        }
+        _transitarTriggerEl = null;
+    }
+
+    /**
+     * Protege contra colisão de grupoId (Pilhas de Ideias) em TODO o lote transferido:
+     * varre subAnotacoes dos cartões mestres, itensCorrelacionados e novasDiretrizes.
+     */
+    function _protegerColisaoGrupoIdNoLote(topicoDestino, cartoesTransferidos, listaNovasDiretrizes) {
+        const gruposExistentesNoDestino = new Map();
+        _percorrerTodosOsNos(topicoDestino, (no) => {
+            if (no && no.grupoId && !gruposExistentesNoDestino.has(no.grupoId)) {
+                gruposExistentesNoDestino.set(no.grupoId, no.grupoTitulo || '');
+            }
+        });
+
+        const mapaRemapGrupoId = new Map();
+        const higienizarNo = (no) => {
+            if (!no || !no.grupoId) return;
+            if (gruposExistentesNoDestino.has(no.grupoId)) {
+                const tituloDestino = gruposExistentesNoDestino.get(no.grupoId);
+                const tituloOrigem = no.grupoTitulo || '';
+                if (tituloDestino !== tituloOrigem) {
+                    if (!mapaRemapGrupoId.has(no.grupoId)) {
+                        mapaRemapGrupoId.set(no.grupoId, 'grupo-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6));
+                    }
+                    no.grupoId = mapaRemapGrupoId.get(no.grupoId);
+                }
+            }
+        };
+
+        cartoesTransferidos.forEach(card => {
+            if (Array.isArray(card.subAnotacoes)) card.subAnotacoes.forEach(higienizarNo);
+            if (Array.isArray(card.itensCorrelacionados)) {
+                card.itensCorrelacionados.forEach(ic => {
+                    if (Array.isArray(ic.subAnotacoes)) ic.subAnotacoes.forEach(higienizarNo);
+                });
+            }
+        });
+
+        if (Array.isArray(listaNovasDiretrizes)) {
+            listaNovasDiretrizes.forEach(higienizarNo);
+        }
+    }
+
+    /**
+     * Insere os cartões transferidos no destino preservando:
+     * 1. Chave de tese idêntica à de renderizarFichario (an.tese || "Tese Não Nomeada").
+     * 2. Ordem relativa exata dos cartões (sem inversão no modo 'inicio').
+     * 3. Agrupamento contíguo para teses existentes e para teses novas intercaladas (A, B, A -> A, A, B).
+     * 4. Fronteiras estritas de checkpoint (checkpoint_entrada no topo, checkpoint_saida no rodapé).
+     */
+    function _inserirLoteCienteDeTese(arrDestino, cartoesTransferidos, modoPosicao) {
+        const gruposTeseNomeada = new Map();
+        const cartoesSemTese = [];
+
+        cartoesTransferidos.forEach(card => {
+            const chaveTeseCrua = card.tese || "Tese Não Nomeada";
+            const isTesePreenchida = Boolean(card.tese && card.tese.trim() !== '');
+
+            if (isTesePreenchida) {
+                if (!gruposTeseNomeada.has(chaveTeseCrua)) {
+                    gruposTeseNomeada.set(chaveTeseCrua, []);
+                }
+                gruposTeseNomeada.get(chaveTeseCrua).push(card);
+            } else {
+                cartoesSemTese.push(card);
+            }
+        });
+
+        const filaNovosBlocos = [];
+
+        gruposTeseNomeada.forEach((loteDaTese, chaveTeseCrua) => {
+            let primeiroIdxTese = -1;
+            let ultimoIdxTese = -1;
+
+            for (let i = 0; i < arrDestino.length; i++) {
+                const item = arrDestino[i];
+                if (!_ehCheckpoint(item) && (item.tese || "Tese Não Nomeada") === chaveTeseCrua) {
+                    if (primeiroIdxTese === -1) primeiroIdxTese = i;
+                    ultimoIdxTese = i;
+                }
+            }
+
+            if (ultimoIdxTese !== -1) {
+                const targetIdx = (modoPosicao === 'inicio') ? primeiroIdxTese : (ultimoIdxTese + 1);
+                arrDestino.splice(targetIdx, 0, ...loteDaTese);
+            } else {
+                filaNovosBlocos.push(...loteDaTese);
+            }
+        });
+
+        const loteRestante = [...filaNovosBlocos, ...cartoesSemTese];
+        if (loteRestante.length > 0) {
+            const idxEntrada = arrDestino.findIndex(a => a && a.tipo === 'checkpoint_entrada');
+            const idxSaida = arrDestino.findIndex(a => a && a.tipo === 'checkpoint_saida');
+            const minIdx = idxEntrada !== -1 ? idxEntrada + 1 : 0;
+            const maxIdx = idxSaida !== -1 ? idxSaida : arrDestino.length;
+
+            const insertPos = (modoPosicao === 'inicio') ? minIdx : maxIdx;
+            arrDestino.splice(insertPos, 0, ...loteRestante);
+        }
+    }
+
+    /**
+     * Executa a transferência bidirecional com snapshot isolado e navegação limpa sem duplo scroll.
+     */
+    function executarTransitoVolumes() {
+        const selectOrigem = document.getElementById('select-transitar-origem');
+        const selectDestino = document.getElementById('select-transitar-destino');
+        if (!selectOrigem || !selectDestino || !selectOrigem.value || !selectDestino.value) return;
+
+        const topicoOrigem = topicos.find(t => t.id === selectOrigem.value);
+        const topicoDestino = topicos.find(t => t.id === selectDestino.value);
+        if (!topicoOrigem || !topicoDestino || topicoOrigem.id === topicoDestino.id) return;
+
+        const familiaOrigem = obterFamiliaVolumes(topicoOrigem);
+        if (!familiaOrigem.some(v => v.id === topicoDestino.id)) {
+            if (typeof exibirToast === 'function') exibirToast('Operação bloqueada: os volumes selecionados não pertencem ao mesmo tópico.', 'erro');
+            return;
+        }
+
+        const indicesSelecionados = new Set(
+            Array.from(document.querySelectorAll('#transitar-ideas-list .safecut-idea-checkbox:checked'))
+                .map(chk => parseInt(chk.value, 10))
+                .filter(n => !isNaN(n))
+        );
+
+        if (indicesSelecionados.size === 0) {
+            if (typeof exibirToast === 'function') exibirToast('Selecione ao menos um grupo de ideias.', 'aviso');
+            return;
+        }
+
+        let pesoTransferido = 0;
+        (topicoOrigem.anotacoes || []).forEach((an, idx) => {
+            if (!_ehCheckpoint(an) && indicesSelecionados.has(idx)) {
+                pesoTransferido += _calcularPesoGrupoIdeia(an);
+            }
+        });
+        const pesoProjetadoDestino = _calcularPesoEstruturalTopico(topicoDestino) + pesoTransferido;
+        const numVolOrigem = toRoman(_obterNumeroVolume(topicoOrigem));
+        const numVolDestino = toRoman(_obterNumeroVolume(topicoDestino));
+
+        if (pesoProjetadoDestino >= LIMITE_CAPACIDADE_VOLUME) {
+            const msgCapacidade = `⚠️ ALERTA DE CAPACIDADE NO DESTINO\n\n` +
+                `O Volume ${numVolDestino} passará a ter ${pesoProjetadoDestino} itens estruturais (acima do limite recomendado de ${LIMITE_CAPACIDADE_VOLUME} itens por volume).\n\n` +
+                `Deseja confirmar a transferência mesmo assim?`;
+            if (!confirm(msgCapacidade)) return;
+        }
+
+        const modoPosicao = document.querySelector('input[name="transitar_posicao"]:checked')?.value || 'final';
+        const makeUUID = () => (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+            ? ('id-' + crypto.randomUUID())
+            : ('id-' + Math.random().toString(36).substring(2, 11) + '-' + Date.now().toString(36));
+
+        let nextOrigemAnotacoes = [];
+        let nextDestinoAnotacoes;
+        let nextOrigemDiretrizes;
+        let nextDestinoDiretrizes;
+        let cartoesTransferidos = [];
+        let diretrizesMescladas = 0;
+
+        try {
+            // Snapshot isolado estruturalmente (protegido contra mutações posteriores sem duplicar strings Base64)
+            const snapshotOrigemAnotacoes = _clonarAnotacoesParaSnapshot(topicoOrigem.anotacoes || []);
+            const snapshotDestinoAnotacoes = _clonarAnotacoesParaSnapshot(topicoDestino.anotacoes || []);
+            const snapshotOrigemDiretrizes = structuredClone(topicoOrigem.diretrizesPorTese || {});
+            const snapshotDestinoDiretrizes = structuredClone(topicoDestino.diretrizesPorTese || {});
+
+            const trabalhoOrigem = _clonarAnotacoesParaSnapshot(topicoOrigem.anotacoes || []);
+            nextDestinoAnotacoes = _clonarAnotacoesParaSnapshot(topicoDestino.anotacoes || []);
+            nextOrigemDiretrizes = structuredClone(snapshotOrigemDiretrizes);
+            nextDestinoDiretrizes = structuredClone(snapshotDestinoDiretrizes);
+
+            trabalhoOrigem.forEach((an, idx) => {
+                if (!_ehCheckpoint(an) && indicesSelecionados.has(idx)) {
+                    if (!an.uuid) an.uuid = makeUUID();
+                    cartoesTransferidos.push(an);
+                } else {
+                    nextOrigemAnotacoes.push(an);
+                }
+            });
+
+            if (cartoesTransferidos.length === 0) return;
+
+            const assinaturaDiretriz = (d) => `${d.intencao || 'premissa'}|${(d.texto || '').trim()}`;
+            const tesesMovidas = new Set(cartoesTransferidos.map(a => a.tese || "Tese Não Nomeada"));
+            const tesesFicaramOrigem = new Set(
+                nextOrigemAnotacoes.filter(a => !_ehCheckpoint(a)).map(a => a.tese || "Tese Não Nomeada")
+            );
+
+            const todasNovasDiretrizes = [];
+
+            tesesMovidas.forEach(chaveTese => {
+                const listaDirOrigem = nextOrigemDiretrizes[chaveTese];
+                if (!Array.isArray(listaDirOrigem) || listaDirOrigem.length === 0) return;
+
+                if (!Array.isArray(nextDestinoDiretrizes[chaveTese])) {
+                    nextDestinoDiretrizes[chaveTese] = [];
+                }
+
+                const assinaturasExistentesDestino = new Set(
+                    nextDestinoDiretrizes[chaveTese].map(assinaturaDiretriz)
+                );
+
+                const novasDiretrizesDaTese = [];
+                listaDirOrigem.forEach(dirOrig => {
+                    const sig = assinaturaDiretriz(dirOrig);
+                    if (!assinaturasExistentesDestino.has(sig)) {
+                        assinaturasExistentesDestino.add(sig);
+                        const cloneDir = structuredClone(dirOrig);
+                        novasDiretrizesDaTese.push(cloneDir);
+                        todasNovasDiretrizes.push(cloneDir);
+                        diretrizesMescladas++;
+                    }
+                });
+
+                if (novasDiretrizesDaTese.length > 0) {
+                    nextDestinoDiretrizes[chaveTese].push(...novasDiretrizesDaTese);
+                }
+
+                if (!tesesFicaramOrigem.has(chaveTese)) {
+                    delete nextOrigemDiretrizes[chaveTese];
+                }
+            });
+
+            // Higieniza grupoId em todo o lote (sub-nós dos cartões, correlacionados e novas diretrizes)
+            _protegerColisaoGrupoIdNoLote(topicoDestino, cartoesTransferidos, todasNovasDiretrizes);
+
+            _inserirLoteCienteDeTese(nextDestinoAnotacoes, cartoesTransferidos, modoPosicao);
+
+            _ultimoSnapshotTransito = {
+                origemId: topicoOrigem.id,
+                destinoId: topicoDestino.id,
+                anotacoesOrigem: snapshotOrigemAnotacoes,
+                anotacoesDestino: snapshotDestinoAnotacoes,
+                diretrizesOrigem: snapshotOrigemDiretrizes,
+                diretrizesDestino: snapshotDestinoDiretrizes
+            };
+
+            // Commit Atômico Síncrono
+            topicoOrigem.anotacoes = nextOrigemAnotacoes;
+            topicoOrigem.diretrizesPorTese = nextOrigemDiretrizes;
+            topicoDestino.anotacoes = nextDestinoAnotacoes;
+            topicoDestino.diretrizesPorTese = nextDestinoDiretrizes;
+        } catch (err) {
+            console.error('[TopicsManager] Transação abortada ao transitar volumes:', err);
+            if (typeof exibirToast === 'function') {
+                exibirToast('Erro ao processar transferência. Nenhuma alteração foi aplicada.', 'erro');
+            }
+            return;
+        }
+
+        const primeiroUuidTransferido = cartoesTransferidos[0]?.uuid;
+        fecharModalTransitarVolumes();
+
+        // Muda activeTabId sem acionar suprimirProximaRestauracao() quando há card alvo,
+        // evitando que restaurarScroll() dispare um scrollTo(0, 'smooth') concorrente.
+        activeTabId = topicoDestino.id;
+        if (!primeiroUuidTransferido) {
+            suprimirProximaRestauracao();
+        }
+
+        if (typeof renderizarTopicos === 'function') {
+            renderizarTopicos();
+        } else {
+            renderizarFichario(topicos);
+        }
+
+        if (primeiroUuidTransferido) {
+            // Aguarda os 2 frames do ciclo posicionarNosDeIdeia + desenharConexoes antes de medir e rolar
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                    const wrapperAlvo = document.getElementById(`timeline-wrapper-${primeiroUuidTransferido}`);
+                    const scrollContainer = document.getElementById('history-container');
+                    if (wrapperAlvo && scrollContainer) {
+                        const offset = (wrapperAlvo.getBoundingClientRect().top - scrollContainer.getBoundingClientRect().top) + scrollContainer.scrollTop - 24;
+                        scrollContainer.scrollTo({ top: offset, behavior: 'smooth' });
+
+                        const cardAlvo = wrapperAlvo.querySelector('.main-card-wrapper > .annotation-card');
+                        if (cardAlvo) {
+                            cardAlvo.classList.remove('card-flash-focus');
+                            void cardAlvo.offsetWidth;
+                            cardAlvo.classList.add('card-flash-focus');
+                        }
+                    }
+                });
+            });
+        }
+
+        if (typeof window.sincronizarHighlightsGerais === 'function') window.sincronizarHighlightsGerais();
+        if (typeof salvarBackupAutomatico === 'function') salvarBackupAutomatico();
+
+        if (typeof exibirToast === 'function') {
+            const infoDir = diretrizesMescladas > 0 ? ` (${diretrizesMescladas} diretriz(es) mesclada(s))` : '';
+            exibirToast(`${cartoesTransferidos.length} grupo(s) movido(s) do Vol. ${numVolOrigem} para o Vol. ${numVolDestino}!${infoDir}`, 'sucesso');
+        }
+    }
+
+    /**
+     * Reverte a última transferência entre volumes realizada na sessão.
+     */
+    function desfazerUltimoTransito() {
+        if (!_ultimoSnapshotTransito) return;
+        const topicoOrigem = topicos.find(t => t.id === _ultimoSnapshotTransito.origemId);
+        const topicoDestino = topicos.find(t => t.id === _ultimoSnapshotTransito.destinoId);
+
+        if (!topicoOrigem || !topicoDestino) {
+            _ultimoSnapshotTransito = null;
+            if (typeof exibirToast === 'function') exibirToast('Não foi possível desfazer: um dos volumes foi excluído.', 'aviso');
+            return;
+        }
+
+        topicoOrigem.anotacoes = _ultimoSnapshotTransito.anotacoesOrigem;
+        topicoOrigem.diretrizesPorTese = _ultimoSnapshotTransito.diretrizesOrigem;
+        topicoDestino.anotacoes = _ultimoSnapshotTransito.anotacoesDestino;
+        topicoDestino.diretrizesPorTese = _ultimoSnapshotTransito.diretrizesDestino;
+
+        const idVoltar = topicoOrigem.id;
+        _ultimoSnapshotTransito = null;
+
+        fecharModalTransitarVolumes();
+        activeTabId = idVoltar;
+        suprimirProximaRestauracao();
+
+        if (typeof renderizarTopicos === 'function') {
+            renderizarTopicos();
+        } else {
+            renderizarFichario(topicos);
+        }
+
+        if (typeof window.sincronizarHighlightsGerais === 'function') window.sincronizarHighlightsGerais();
+        if (typeof salvarBackupAutomatico === 'function') salvarBackupAutomatico();
+        if (typeof exibirToast === 'function') exibirToast('Última transferência entre volumes desfeita com sucesso!', 'sucesso');
+    }
+
+    // ==========================================
+    // FIM: LÓGICA DA TESOURA E CHECKPOINT
+    // ==========================================
+
+    // Sincronia de Web Fonts com o Canvas SVG do Mapa Mental
+    if (document.fonts && document.fonts.ready) {
+        document.fonts.ready.then(() => {
+            requestAnimationFrame(() => {
+                const container = document.getElementById('timeline-container');
+                if (container && container.offsetParent !== null) {
+                    posicionarNosDeIdeia(container);
+                    desenharConexoes();
+                    _sincronizarAcessibilidadeTagsTruncadas(container);
+                }
+            });
+        });
+    }
+
+    // API pública do módulo
+    return {
+        obterDadosAudioSeguros: _obterDadosAudioSeguros,
+        suprimirProximaRestauracao,
+        toggleDiretrizesGlobais,
+        togglePreambuloTopico,
+        resetVisibilidadeGlobais,
+        obterCor,
+        abrirModalPilha,
+        fecharModalPilha,
+        salvarEdicaoPilha,
+        obterCorContraste,
+        renderizarFichario,
+        abrirModoLeituraPilha,
+        desagruparPilha,
+        getActiveTabId: () => activeTabId,
+        setActiveTabId: (id) => { activeTabId = id; },
+        escaparHTML,
+        renderizarMarkdownSeguro,
+        abrirModoLeitura,
+        fecharModoLeitura,
+        copiarTextoModoLeitura,
+        hexToRgba,
+        rolarParaProximaNotaOculta,
+        abrirModalNotasOcultas,
+        fecharModalNotasOcultas,
+        selecionarTopicoNotaOculta,
+        sinalizarNotasOcultasPendentes,
+        abrirModoLeituraPilhaProcessual,
+        abrirModalPilhaProcessual,
+        fecharModalPilhaProcessual,
+        salvarPilhaProcessual,
+        desagruparPilhaProcessual,
+        toRoman,
+        acionarDivisaoTopico,
+        fecharModalPreDivisao,
+        baixarBackupPreCorte,
+        executarDivisaoTopico,
+        obterFamiliaVolumes,
+        atualizarEstadoFerramentasVolume,
+        abrirModalTransitarVolumes,
+        fecharModalTransitarVolumes,
+        executarTransitoVolumes,
+        desfazerUltimoTransito
+    };
+
+})();
+
+/* ================================================
+   VISÃO ESTRUTURADA E VISÃO DE MINUTA (ED)
+   Movidas para js/ed_document-views.js
+   ================================================ */
