@@ -700,9 +700,10 @@
 <!-- MODAL EDITAR ACERVO -->
 <div id="modal-editar-modelo-acervo" class="crop-wizard-popup" style="display:none; z-index: 4006;">
     <div class="wizard-header" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid var(--border-color); padding-bottom: 8px;">
-        <div style="display: flex; align-items: center; gap: 8px;">
+        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
             ✏️ <span id="edit-modelo-nome" style="color:var(--text-dark);"></span>
             <button class="acervo-action-btn" title="Renomear Modelo" style="padding: 4px;" onclick="acionarRenomearModeloAtual()"><svg viewBox="0 0 24 24" fill="none" stroke="var(--trt-blue-mid)" stroke-width="2" style="width: 16px; height: 16px;"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg></button>
+            <button type="button" id="btn-toggle-auditado-modelo" class="acervo-audit-toggle-btn" onclick="alternarStatusAuditoriaModeloAtual()" title="Alternar status de auditoria de nomenclatura pela IA"></button>
         </div>
         <button class="acervo-action-btn delete-btn" title="Excluir Modelo Definitivamente" style="padding: 4px; color: #c62828;" onclick="acionarExcluirModeloAtual()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px;"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg></button>
     </div>
@@ -725,16 +726,61 @@
 </div>
 
 <!-- MODAL GERENCIAR TAGS -->
-<div id="modal-gerenciar-tags" class="crop-wizard-popup" style="display:none; z-index: 4007; min-width: 380px;">
-    <div class="wizard-header">🏷️ Gerenciar Tags Globais</div>
-    <div style="display: flex; gap: 8px; margin-bottom: 12px; align-items: stretch;">
+<div id="modal-gerenciar-tags" class="crop-wizard-popup fechavel-por-esc" role="dialog" aria-modal="true" aria-labelledby="titulo-modal-tags" style="display:none; z-index: 4007; min-width: 480px; max-width: 640px;">
+    <div class="wizard-header" id="titulo-modal-tags">🏷️ Gerenciar Tags e Governança do Acervo</div>
+    <div style="display: flex; gap: 8px; margin-bottom: 10px; align-items: stretch;">
         <input type="text" id="input-nova-tag" class="topic-select" placeholder="Digite uma nova tag (Ex: Dano Moral)" style="flex: 1; margin: 0;">
-        <button class="chip-btn chip-autora" style="width: auto; padding: 0 16px; background: var(--creme-neon-bg, #FDFCE5); color: var(--creme-neon-text, #4A4A32); border: 1px solid var(--creme-neon-border, #EBE6C5);" onclick="adicionarTagGlobal()">+ Adicionar</button>
+        <button type="button" class="chip-btn chip-autora" style="width: auto; padding: 0 16px; background: var(--creme-neon-bg, #FDFCE5); color: var(--creme-neon-text, #4A4A32); border: 1px solid var(--creme-neon-border, #EBE6C5);" onclick="adicionarTagGlobal()">+ Adicionar</button>
     </div>
-    <div id="lista-tags-globais" class="doc-list-container" style="max-height: 180px; padding: 8px; display: flex; flex-direction: column; gap: 6px;"></div>
-    <div class="wizard-actions" style="justify-content: space-between;">
-        <button class="chip-btn chip-autora" style="background: var(--trt-blue); color: white; border: none;" onclick="exportarBaseParaNotebookLM(event)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 16px; height: 16px; margin-right: 6px; display: inline-block; vertical-align: text-bottom;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>Exportar Base para IA</button>
-        <button class="chip-btn chip-cancelar" onclick="fecharModalGerenciarTags()">✕ Voltar ao Acervo</button>
+    <div id="lista-tags-globais" class="doc-list-container" style="max-height: 145px; padding: 8px; display: flex; flex-direction: column; gap: 6px;"></div>
+
+    <!-- Painel de Escalabilidade e Governança de Exportação IA -->
+    <div class="acervo-governance-panel">
+        <div class="acervo-governance-header">
+            <span class="acervo-governance-title">🤖 Auditoria Taxonômica (Escala 500+ Modelos)</span>
+            <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                <span id="badge-resumo-auditoria-acervo" class="acervo-audit-summary-pill">Carregando...</span>
+                <button type="button" id="btn-marcar-base-atual-auditada" class="acervo-import-link-btn" style="display: none;" onclick="marcarBaseAtualComoAuditada()" title="Marca todos os modelos pendentes atuais como já revisados para auditar apenas os próximos que forem criados">✔ Marcar base atual como auditada</button>
+            </div>
+        </div>
+
+        <div class="acervo-export-mode-options">
+            <label class="acervo-export-mode-label">
+                <input type="radio" name="modo_exportacao_acervo_ia" value="incremental" checked>
+                <div>
+                    <strong>⚡ Incremental em 2 Camadas (Recomendado):</strong>
+                    <span>Envia o conteúdo completo apenas dos <em>Pendentes</em> + índice leve (sem IDs e sem textos) dos <em>Já Auditados</em> como referência de padrão.</span>
+                </div>
+            </label>
+            <label class="acervo-export-mode-label">
+                <input type="radio" name="modo_exportacao_acervo_ia" value="completo">
+                <div>
+                    <strong>📦 Reauditoria Completa (Ignorar Selo):</strong>
+                    <span>Reavalia todos os modelos em fila rotativa (incluindo fusão de tags e árvore taxonômica), respeitando o limite por rodada abaixo.</span>
+                </div>
+            </label>
+        </div>
+
+        <div class="acervo-batch-limit-row">
+            <label for="select-tamanho-lote-ia" style="font-size: 0.76rem; font-weight: 700; color: #334155;">Tamanho máximo do lote por rodada (Seção 2):</label>
+            <select id="select-tamanho-lote-ia" class="topic-select" style="width: auto; padding: 4px 10px; font-size: 0.76rem; margin: 0;">
+                <option value="30">Até 30 modelos (Alta precisão)</option>
+                <option value="50" selected>Até 50 modelos (Padrão ideal)</option>
+                <option value="100">Até 100 modelos (Lote amplo)</option>
+            </select>
+        </div>
+    </div>
+
+    <div class="wizard-actions" style="justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-top: 12px;">
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <button type="button" class="chip-btn chip-autora" style="width: auto; background: var(--trt-blue); color: white; border: none;" onclick="exportarBaseParaNotebookLM(event)">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 16px; height: 16px; margin-right: 6px; display: inline-block; vertical-align: text-bottom;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>Exportar Lote para IA
+            </button>
+            <button type="button" class="chip-btn chip-autora" style="width: auto; background: #2e7d32; color: white; border: none;" onclick="if(window.abrirModalImportarRenomeacoes) window.abrirModalImportarRenomeacoes('tags');">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 16px; height: 16px; margin-right: 6px; display: inline-block; vertical-align: text-bottom;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>Importar Retorno da IA
+            </button>
+        </div>
+        <button type="button" class="chip-btn chip-cancelar" style="width: auto;" onclick="fecharModalGerenciarTags()">✕ Voltar ao Acervo</button>
     </div>
 </div>
 
@@ -930,47 +976,92 @@
 
 <!-- MODAL PROMPT NOTEBOOKLM -->
 <div id="prompt-notebooklm-backdrop" style="display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.40); z-index: 4008;" onclick="fecharModalPromptNotebookLM()"></div>
-<div id="modal-prompt-notebooklm" class="crop-wizard-popup" style="display:none; z-index: 4009; max-width: 750px; width: 90vw;">
+<div id="modal-prompt-notebooklm" class="crop-wizard-popup fechavel-por-esc" role="dialog" aria-modal="true" aria-labelledby="titulo-modal-notebooklm" style="display:none; z-index: 4009; max-width: 780px; width: 92vw;">
     <div class="wizard-header" style="display: flex; justify-content: space-between; align-items: center;">
-        <span>🤖 Exportação Concluída! Auditoria no NotebookLM</span>
-        <button style="background: none; border: none; font-size: 1.2rem; cursor: pointer; color: #64748b;" onclick="fecharModalPromptNotebookLM()">✕</button>
+        <span id="titulo-modal-notebooklm">🤖 Exportação Concluída! Auditoria no NotebookLM</span>
+        <button type="button" style="background: none; border: none; font-size: 1.2rem; cursor: pointer; color: #64748b;" onclick="fecharModalPromptNotebookLM()" aria-label="Fechar">✕</button>
     </div>
-    <p class="popup-label" style="margin-top: 12px;">Seu arquivo de conhecimento foi baixado.</p>
-    <p style="font-size: 0.85rem; color: #555; margin-bottom: 12px;">Suba o arquivo .txt gerado no <strong>Google NotebookLM</strong> e cole o comando abaixo para auditar e organizar sua taxonomia:</p>
-    <textarea id="textarea-prompt-notebooklm" class="popup-textarea textarea-readonly" style="display: block; min-height: 320px; font-family: monospace; font-size: 0.8rem; line-height: 1.4; padding: 12px;" readonly># PERSONA E CONTEXTO
-Atue como um Engenheiro de Conhecimento e Especialista em Taxonomia Jurídica.
-Como fonte de conhecimento, você tem um arquivo do sistema ("Juris Notes") contendo uma base de Modelos Recursais e de Teses do gabinete. Esta base JÁ PASSOU por uma primeira rodada de organização. 
-
-# A REGRA DE OURO: O FILTRO DE TOLERÂNCIA
-Sua missão NÃO é buscar a perfeição absoluta ou criticar cada detalhe. Você deve atuar com um "Filtro de Bom Senso". 
-Se um modelo já possui um nome descritivo, claro e funcional (ex: aborda o tema e a especificidade de forma compreensível), considere-o [ADEQUADO] e NÃO o inclua na lista de correções. 
-Seu foco exclusivo deve ser apontar os "Outliers": nomes genéricos demais, confusos, totalmente fora de padrão lógico ou que prejudiquem a localização do arquivo.
-
-# ENTREGAS ESPERADAS
-Gere um Relatório de Auditoria Cirúrgica com a seguinte estrutura:
-
-1. Diagnóstico de Nomenclatura e Padrão Sugerido
-Apresente qual é a estrutura lógica ideal que você utilizou como régua para essa auditoria (exemplo: [Tema Principal] - [Subtema] - [Especificidade]).
-
-2. Tabela de Resgate (De -> Para)
-Apresente uma tabela APENAS com os modelos que estão em estado [CRÍTICO] de nomenclatura. 
-Regra estrita: Se o nome atual já for aceitável e claro, ele está expressamente proibido de aparecer nesta tabela. 
-Colunas: "Nome Problemático Atual" | "Sugestão de Novo Nome" | "Motivo da Alteração".
-
-3. Auditoria de Tags e Categorização
-* Unificação de Ruídos: Identifique apenas sinônimos óbvios ou tags fragmentadas que estejam poluindo a base (ex: juntar "Dano Moral" e "Danos Morais") e sugira a fusão.
-* Resgate de Órfãos: Liste os modelos exportados com o status [SEM TAGS]. Leia o núcleo do texto (nós de ideia) desses modelos e sugira 2 a 3 tags precisas para cada um.
-
-4. Árvore Taxonômica Essencial
-Crie um sumário hierárquico enxuto com as Grandes Categorias e Subcategorias que emergem do acervo, focado em criar um índice limpo, rápido e eficiente para o uso diário no software.</textarea>
-    <div class="wizard-actions" style="margin-top: 16px; justify-content: space-between;">
-        <button class="chip-btn chip-cancelar" onclick="fecharModalPromptNotebookLM()">Fechar</button>
-        <div style="display: flex; gap: 8px;">
-            <button class="chip-btn chip-autora" style="background: #2e7d32; color: white; border: none; padding-left: 16px; padding-right: 16px;" onclick="copiarPromptNotebookLM()" title="Copiar comando novamente">📋 Copiar Mestre</button>
+    <p class="popup-label" style="margin-top: 12px;" id="subtitulo-exportacao-notebooklm">Seu arquivo de conhecimento foi baixado.</p>
+    <p style="font-size: 0.85rem; color: #555; margin-bottom: 12px;">Suba o arquivo <code>.txt</code> gerado no <strong>Google NotebookLM</strong> (ou outra IA) e cole o comando abaixo. Depois, copie a resposta da IA e clique em <strong>"Importar Retorno da IA"</strong>:</p>
+    <textarea id="textarea-prompt-notebooklm" class="popup-textarea textarea-readonly" style="display: block; min-height: 300px; font-family: monospace; font-size: 0.8rem; line-height: 1.4; padding: 12px;" readonly></textarea>
+    <div class="wizard-actions" style="margin-top: 16px; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+        <button type="button" class="chip-btn chip-cancelar" style="width: auto;" onclick="fecharModalPromptNotebookLM()">Fechar</button>
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <button type="button" class="chip-btn chip-autora" style="width: auto; background: #1565c0; color: white; border: none; padding-left: 14px; padding-right: 14px;" onclick="if(window.abrirModalImportarRenomeacoes) window.abrirModalImportarRenomeacoes('notebooklm');" title="Colar ou carregar a resposta da IA para atualizar os nomes e homologar o lote">📥 Importar Retorno da IA</button>
+            <button type="button" class="chip-btn chip-autora" style="width: auto; background: #2e7d32; color: white; border: none; padding-left: 16px; padding-right: 16px;" onclick="copiarPromptNotebookLM(false)" title="Copiar comando novamente">📋 Copiar Comando</button>
             <a href="https://notebooklm.google.com/" target="_blank" rel="noopener noreferrer" style="text-decoration: none;">
-                <button class="chip-btn chip-autora" style="background: var(--trt-blue); color: white; border: none; padding-left: 16px; padding-right: 16px; cursor: pointer; height: 100%; display: flex; align-items: center; gap: 6px;">Abrir NotebookLM <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px; height:14px;"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></button>
+                <button type="button" class="chip-btn chip-autora" style="width: auto; background: var(--trt-blue); color: white; border: none; padding-left: 16px; padding-right: 16px; cursor: pointer; height: 100%; display: flex; align-items: center; gap: 6px;">Abrir NotebookLM <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px; height:14px;"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></button>
             </a>
         </div>
+    </div>
+</div>
+
+<!-- MODAL IMPORTAR RENOMEAÇÕES EM LOTE (IA) -->
+<div id="importar-renomeacoes-backdrop" style="display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.45); z-index: 4010;" onclick="fecharModalImportarRenomeacoes()"></div>
+<div id="modal-importar-renomeacoes" class="crop-wizard-popup fechavel-por-esc" role="dialog" aria-modal="true" aria-labelledby="titulo-modal-importar-renomeacoes" style="display:none; z-index: 4011; max-width: 880px; width: 92vw;" onkeydown="if(event.key === 'Escape') fecharModalImportarRenomeacoes()">
+    <div class="wizard-header" style="display: flex; justify-content: space-between; align-items: center;">
+        <span id="titulo-modal-importar-renomeacoes">🔄 Importar Atualização de Nomes (De ➔ Para) e Homologar Lote</span>
+        <button type="button" style="background: none; border: none; font-size: 1.2rem; cursor: pointer; color: #64748b;" onclick="fecharModalImportarRenomeacoes()" aria-label="Fechar">✕</button>
+    </div>
+
+    <!-- Barra de Reversão da Sessão -->
+    <div id="barra-reversao-renomeacoes" class="acervo-undo-banner" style="display: none;">
+        <span id="texto-barra-reversao" style="font-size: 0.8rem; color: #1e3a8a; font-weight: 600;">Última atualização pronta para reversão caso necessário.</span>
+        <div style="display: flex; gap: 8px;">
+            <button type="button" id="btn-baixar-reversao-lote" class="acervo-import-link-btn" onclick="baixarArquivoReversaoUltimoLote()" title="Baixar arquivo .txt apenas com os modelos que tiveram o nome alterado">💾 Baixar Reversão (.txt)</button>
+            <button type="button" class="acervo-import-link-btn danger" onclick="desfazerUltimoLoteRenomeacao()" title="Restaurar imediatamente os nomes e o status de auditoria anteriores na nuvem">↶ Desfazer Último Lote</button>
+        </div>
+    </div>
+
+    <div class="acervo-import-toolbar">
+        <div style="flex: 1; min-width: 240px;">
+            <p class="popup-label" style="margin-bottom: 4px;">1. Cole a resposta da IA (contendo o bloco <code>&lt;&lt;&lt;JURIS_RENOMEAR&gt;&gt;&gt;</code>) ou carregue um arquivo <code>.txt</code>:</p>
+            <p style="font-size: 0.75rem; color: #64748b; margin: 0;">Aceita renomeações (<code>ID ||| Nome Antigo ||| Novo Nome</code>) e vereditos explícitos de aprovação (<code>ID ||| &lt;OK&gt;</code>).</p>
+        </div>
+        <label for="input-file-renomeacoes" class="chip-btn" style="width: auto; cursor: pointer; background: #f8fafc; border: 1px solid #cbd5e1; color: var(--trt-blue); display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; margin: 0;">
+            📂 Carregar Arquivo (.txt)
+        </label>
+        <input type="file" id="input-file-renomeacoes" accept=".txt,.md" style="display: none;" onchange="carregarArquivoRenomeacoesIA(event)">
+    </div>
+
+    <textarea id="textarea-import-renomeacoes" class="popup-textarea" style="display: block; min-height: 100px; font-family: monospace; font-size: 0.8rem;" placeholder="Cole aqui a resposta completa da IA contendo <<<JURIS_RENOMEAR>>> ... <<<FIM_JURIS_RENOMEAR>>>" oninput="analisarTextoRenomeacoesDebounced()"></textarea>
+
+    <!-- Alerta de Integridade (Resposta Cortada ou Lote Não Localizado) -->
+    <div id="alerta-integridade-renomeacoes" class="acervo-truncation-warning" style="display: none;" role="alert">
+        <strong id="titulo-alerta-integridade">⚠️ Atenção</strong>
+        <span id="texto-alerta-integridade"></span>
+    </div>
+
+    <!-- Caixa de Homologação Explícita dos Modelos Aprovados (<OK> / Sem Alteração) -->
+    <div id="box-homologar-lote-aprovados" class="acervo-batch-homologation-box" style="display: none;">
+        <label class="acervo-batch-homologation-label">
+            <input type="checkbox" id="chk-homologar-aprovados-lote" checked onchange="atualizarResumoHomologacaoLoteUI()">
+            <div style="flex: 1;">
+                <strong id="titulo-homologar-aprovados">✔ Homologar modelos aprovados explicitamente pela IA neste lote</strong>
+                <p id="desc-homologar-aprovados">Aplica o selo auto-invalidável aos modelos que receberam veredito explícito de adequação. Modelos eventualmente omitidos pela IA permanecerão pendentes por segurança.</p>
+            </div>
+        </label>
+        <details id="detalhes-homologar-aprovados" class="acervo-homologation-details">
+            <summary id="sumario-homologar-aprovados">Ver lista de modelos aprovados sem alteração</summary>
+            <div id="lista-homologar-aprovados" class="acervo-homologation-list"></div>
+        </details>
+    </div>
+
+    <div id="box-preview-renomeacoes" style="display: none; flex-direction: column; gap: 8px; margin-top: 8px;">
+        <div class="acervo-preview-header-bar">
+            <div id="resumo-preview-renomeacoes" class="acervo-preview-stats" aria-live="polite"></div>
+            <div style="display: flex; gap: 8px; align-items: center;">
+                <button type="button" class="acervo-import-link-btn" onclick="alternarSelecaoTodasRenomeacoes(true)">Marcar prontos</button>
+                <span style="color: #cbd5e1;" aria-hidden="true">|</span>
+                <button type="button" class="acervo-import-link-btn" onclick="alternarSelecaoTodasRenomeacoes(false)">Desmarcar todos</button>
+            </div>
+        </div>
+        <div id="lista-preview-renomeacoes" class="doc-list-container acervo-rename-preview-list" role="region" aria-label="Pré-visualização de renomeações"></div>
+    </div>
+
+    <div class="wizard-actions" style="margin-top: 14px; justify-content: space-between; align-items: center;">
+        <button type="button" class="chip-btn chip-cancelar" style="width: auto;" onclick="fecharModalImportarRenomeacoes()">← Voltar</button>
+        <button type="button" id="btn-confirmar-renomeacoes-lote" class="chip-btn chip-autora" style="width: auto; background: var(--trt-blue); color: white; border: none; padding: 10px 20px;" onclick="executarRenomeacaoEmLoteIA()" disabled>✔ Aplicar Atualizações Selecionadas</button>
     </div>
 </div>
 

@@ -1083,6 +1083,435 @@
 .btn-copy-degravacao:active { transform: scale(0.95); }
 
 /* ================================================
+   7.1 IMPORTAÇÃO EM LOTE DE RENOMEAÇÕES DO ACERVO (IA)
+   ================================================ */
+.acervo-import-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-top: 6px;
+}
+
+.acervo-undo-banner {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    padding: 8px 12px;
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    border-radius: 6px;
+    margin-top: 4px;
+}
+
+.acervo-preview-header-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.acervo-preview-stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: var(--trt-blue);
+}
+
+.acervo-stat-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 0.72rem;
+    font-weight: 700;
+}
+.acervo-stat-pill.pronto { background: #dcfce7; color: #166534; }
+.acervo-stat-pill.conferir { background: #fef3c7; color: #92400e; }
+.acervo-stat-pill.inalterado { background: #f1f5f9; color: #475569; }
+.acervo-stat-pill.erro { background: #fee2e2; color: #991b1b; }
+
+.acervo-import-link-btn {
+    background: none;
+    border: none;
+    padding: 2px 6px;
+    font-size: 0.76rem;
+    font-weight: 700;
+    color: var(--trt-blue-mid);
+    cursor: pointer;
+    border-radius: 4px;
+    transition: background-color 0.15s, color 0.15s;
+}
+.acervo-import-link-btn:hover {
+    background: #e2e8f0;
+    color: var(--trt-blue);
+}
+.acervo-import-link-btn.danger {
+    color: #c62828;
+}
+.acervo-import-link-btn.danger:hover {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+.acervo-rename-preview-list {
+    max-height: 280px;
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    background: #f8fafc;
+}
+
+.acervo-rename-row {
+    display: grid;
+    grid-template-columns: 22px minmax(0, 1fr) 24px minmax(0, 1.25fr);
+    align-items: start;
+    gap: 10px;
+    padding: 10px 12px;
+    background: #ffffff;
+    border: 1px solid var(--border-color);
+    border-left: 4px solid #2e7d32;
+    border-radius: 6px;
+    font-size: 0.82rem;
+}
+
+.acervo-rename-row.status-conferir {
+    border-left-color: #f59e0b;
+    background: #fffbeb;
+}
+
+.acervo-rename-row.status-sem-alteracao {
+    border-left-color: #94a3b8;
+    background: #f8fafc;
+    opacity: 0.8;
+}
+
+.acervo-rename-row.status-nao-encontrado {
+    border-left-color: #ef4444;
+    background: #fff5f5;
+    opacity: 0.85;
+}
+
+.acervo-rename-old-col {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+}
+
+.acervo-rename-old {
+    color: #475569;
+    line-height: 1.4;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+}
+
+.acervo-rename-row.status-pronto .acervo-rename-old {
+    text-decoration: line-through;
+    color: #64748b;
+}
+
+.acervo-rename-id-chip {
+    font-family: monospace;
+    font-size: 0.68rem;
+    color: #64748b;
+    background: #f1f5f9;
+    padding: 1px 5px;
+    border-radius: 4px;
+    width: fit-content;
+}
+
+.acervo-rename-arrow {
+    color: var(--trt-blue);
+    font-weight: 800;
+    font-size: 0.95rem;
+    text-align: center;
+    padding-top: 4px;
+}
+
+.acervo-rename-new-col {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.acervo-rename-new-input {
+    width: 100%;
+    padding: 6px 8px;
+    border: 1px solid #cbd5e1;
+    border-radius: 5px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--trt-blue);
+    background: #ffffff;
+    box-sizing: border-box;
+}
+
+.acervo-rename-new-input:focus {
+    border-color: var(--trt-blue-mid);
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(26, 58, 92, 0.12);
+}
+
+.acervo-rename-new-input.has-conflict {
+    border-color: #d97706;
+    background: #fffbeb;
+}
+
+.acervo-rename-status-badge {
+    display: inline-block;
+    font-size: 0.71rem;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 4px;
+    line-height: 1.35;
+}
+.acervo-rename-status-badge.warn {
+    background: #fef3c7;
+    color: #92400e;
+    border: 1px solid #fde68a;
+}
+.acervo-rename-status-badge.error {
+    background: #fee2e2;
+    color: #991b1b;
+}
+.acervo-rename-status-badge.neutral {
+    background: #e2e8f0;
+    color: #475569;
+}
+
+@media (max-width: 640px) {
+    .acervo-rename-row {
+        grid-template-columns: 22px minmax(0, 1fr);
+        gap: 6px;
+    }
+    .acervo-rename-arrow {
+        display: none;
+    }
+    .acervo-rename-new-col {
+        grid-column: 1 / -1;
+        padding-left: 28px;
+    }
+}
+
+/* Indicador Minimalista de Pendência no Card do Acervo (Sem Poluição Visual) */
+.acervo-pending-dot {
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background-color: #f59e0b;
+    box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.2);
+    margin-right: 6px;
+    flex-shrink: 0;
+}
+
+/* Botão de Alternância Manual de Auditoria no Modal de Edição */
+.acervo-audit-toggle-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 3px 9px;
+    border-radius: 12px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    border: 1px solid transparent;
+}
+
+.acervo-audit-toggle-btn.is-audited {
+    background: #dcfce7;
+    color: #166534;
+    border-color: #86efac;
+}
+.acervo-audit-toggle-btn.is-audited:hover { background: #bbf7d0; }
+
+.acervo-audit-toggle-btn.is-pending {
+    background: #fef3c7;
+    color: #92400e;
+    border-color: #fde68a;
+}
+.acervo-audit-toggle-btn.is-pending:hover { background: #fde68a; }
+
+/* Painel de Governança e Escalabilidade (Modal de Tags) */
+.acervo-governance-panel {
+    background: #f8fafc;
+    border: 1px solid var(--border-color);
+    border-left: 4px solid var(--trt-blue);
+    border-radius: 6px;
+    padding: 10px 12px;
+    margin-top: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.acervo-governance-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.acervo-governance-title {
+    font-size: 0.8rem;
+    font-weight: 800;
+    color: var(--trt-blue);
+}
+
+.acervo-audit-summary-pill {
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 12px;
+    background: #e2e8f0;
+    color: #334155;
+}
+
+.acervo-export-mode-options {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.acervo-export-mode-label {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    font-size: 0.76rem;
+    color: #334155;
+    cursor: pointer;
+    padding: 6px 8px;
+    border-radius: 5px;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    line-height: 1.35;
+}
+.acervo-export-mode-label:hover { border-color: var(--trt-blue-mid); }
+.acervo-export-mode-label input[type="radio"] {
+    margin-top: 2px;
+    accent-color: var(--trt-blue);
+    flex-shrink: 0;
+}
+.acervo-export-mode-label span {
+    display: block;
+    color: #64748b;
+    font-size: 0.72rem;
+    margin-top: 2px;
+}
+
+.acervo-batch-limit-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    padding-top: 6px;
+    border-top: 1px dashed #cbd5e1;
+    flex-wrap: wrap;
+}
+
+/* Alerta de Integridade (Resposta Cortada ou Lote Não Localizado) */
+.acervo-truncation-warning {
+    background: #fffbeb;
+    border: 1px solid #fde68a;
+    border-left: 4px solid #d97706;
+    border-radius: 6px;
+    padding: 8px 12px;
+    margin-top: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 0.78rem;
+    color: #92400e;
+}
+
+/* Caixa de Homologação Explícita dos Modelos Aprovados */
+.acervo-batch-homologation-box {
+    background: #f0fdf4;
+    border: 1px solid #bbf7d0;
+    border-left: 4px solid #16a34a;
+    border-radius: 6px;
+    padding: 9px 12px;
+    margin-top: 6px;
+}
+
+.acervo-batch-homologation-label {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    cursor: pointer;
+    font-size: 0.8rem;
+    color: #166534;
+    line-height: 1.4;
+}
+.acervo-batch-homologation-label input[type="checkbox"] {
+    margin-top: 3px;
+    width: 16px;
+    height: 16px;
+    accent-color: #16a34a;
+    flex-shrink: 0;
+    cursor: pointer;
+}
+.acervo-batch-homologation-label p {
+    margin: 2px 0 0 0;
+    font-size: 0.73rem;
+    color: #15803d;
+}
+
+.acervo-homologation-details {
+    margin-top: 6px;
+    margin-left: 26px;
+    font-size: 0.75rem;
+    color: #166534;
+}
+
+.acervo-homologation-details summary {
+    cursor: pointer;
+    font-weight: 700;
+    user-select: none;
+    color: #15803d;
+}
+
+.acervo-homologation-list {
+    margin-top: 6px;
+    max-height: 130px;
+    overflow-y: auto;
+    background: #ffffff;
+    border: 1px solid #bbf7d0;
+    border-radius: 4px;
+    padding: 6px 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.acervo-homologation-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.74rem;
+    color: #334155;
+    border-bottom: 1px dashed #e2e8f0;
+    padding-bottom: 3px;
+}
+.acervo-homologation-item:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+}
+
+/* ================================================
    8. HIERARQUIA DE DIRETRIZES (GLOBAIS E DE TESE)
    ================================================ */
 .timeline-item-master.nivel-hierarquico {
