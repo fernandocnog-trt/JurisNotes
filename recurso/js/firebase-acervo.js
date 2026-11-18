@@ -31,6 +31,9 @@ window.AcervoManager = (function() {
             case 'permission-denied':
                 msgUsuario = "Acesso negado. Verifique as regras de segurança do banco de dados.";
                 break;
+            case 'not-found':
+                msgUsuario = "Um ou mais modelos não foram encontrados na nuvem (podem ter sido excluídos em outra aba).";
+                break;
             case 'unavailable':
             case 'network-request-failed':
                 msgUsuario = "Sem conexão com a internet. Verifique sua rede e tente novamente.";
@@ -93,30 +96,43 @@ window.AcervoManager = (function() {
         }
     }
 
-    async function carregarModelos() {
+    // HELPER: Verifica se a assinatura de auditoria continua íntegra (auto-invalidação por nome ou nº de nós)
+    function verificarSeModeloAuditado(mod) {
+        if (!mod || !mod.auditoriaIA || typeof mod.auditoriaIA !== 'object') return false;
+        const qtdNosAtual = Array.isArray(mod.nos) ? mod.nos.length : 0;
+        return (
+            mod.auditoriaIA.nome === mod.nome &&
+            mod.auditoriaIA.qtdNos === qtdNosAtual
+        );
+    }
+
+    function criarAssinaturaAuditoria(nome, qtdNos, loteId = 'manual') {
+        return {
+            nome: String(nome || '').trim(),
+            qtdNos: Number(qtdNos) || 0,
+            em: Date.now(),
+            loteId: loteId || 'manual'
+        };
+    }
+
+    async function carregarModelos(forcarAtualizacao = false) {
         const uid = getUserId();
         if (!uid) return [];
-        if (modelosEmCache.length > 0) return modelosEmCache;
+        if (!forcarAtualizacao && modelosEmCache.length > 0) return modelosEmCache;
 
         const q = query(collection(db, "usuarios", uid, "acervo"), orderBy("nome", "asc"));
         const querySnapshot = await getDocs(q);
         
         const modelos = [];
-        const moduloContexto = _getModuloAtual(); // Qual painel está aberto?
+        const moduloContexto = _getModuloAtual();
 
         querySnapshot.forEach((docSnap) => {
-            // TRAVA DE SEGURANÇA: Ignora o nosso arquivo de tags na listagem de modelos
-            if (docSnap.id === "--CONFIG-TAGS--") return;
+            // TRAVA DE SEGURANÇA: Ignora qualquer documento de configuração (--CONFIG-TAGS--, --CONFIG-LOTE-IA-*, etc.)
+            if (docSnap.id.startsWith("--CONFIG-")) return;
             
             const dadosModelo = docSnap.data();
-            
-            // TRATAMENTO DE RETROCOMPATIBILIDADE: 
-            // Modelos antigos que não têm a propriedade 'modulo' assumem o valor 'ro'.
-            // Evita que o usuário perca dados legado.
             const moduloDoModelo = dadosModelo.modulo || 'ro'; 
 
-            // FILTRAGEM CLIENT-SIDE:
-            // Compara o carimbo do modelo com a porta da sala. Se bater, mostra.
             if (moduloDoModelo === moduloContexto) {
                 modelos.push({ id: docSnap.id, ...dadosModelo });
             }
@@ -250,6 +266,126 @@ window.AcervoManager = (function() {
         modelosEmCache = [];
     }
 
+    async function definirStatusAuditoriaModelo(modeloId, marcarComoAuditado) {
+        const uid = getUserId();
+        if (!uid) throw new Error("Usuário não autenticado.");
+
+        const docRef = doc(db, "usuarios", uid, "acervo", modeloId);
+        const docSnap = await getDoc(docRef);
+        if (!docSnap.exists()) throw new Error("Modelo não encontrado na nuvem.");
+
+        const dados = docSnap.data();
+        const qtdNos = Array.isArray(dados.nos) ? dados.nos.length : 0;
+        const novaAssinatura = marcarComoAuditado
+            ? criarAssinaturaAuditoria(dados.nome, qtdNos, 'manual')
+            : null;
+
+        await updateDoc(docRef, {
+            auditoriaIA: novaAssinatura,
+            atualizadoEm: Date.now()
+        });
+        modelosEmCache = [];
+        return novaAssinatura;
+    }
+
+    async function salvarManifestoLoteIA(loteInfo) {
+        const uid = getUserId();
+        if (!uid || !loteInfo || !loteInfo.loteId) return;
+
+        const modulo = _getModuloAtual();
+        const docId = `--CONFIG-LOTE-IA-${modulo}--`;
+        const docRef = doc(db, "usuarios", uid, "acervo", docId);
+
+        try {
+            const snap = await getDoc(docRef);
+            const historicoAtual = (snap.exists() && snap.data().historicoLotes) ? snap.data().historicoLotes : {};
+
+            historicoAtual[loteInfo.loteId] = {
+                loteId: loteInfo.loteId,
+                ids: Array.isArray(loteInfo.ids) ? loteInfo.ids : [],
+                modo: loteInfo.modo || 'incremental',
+                criadoEm: loteInfo.criadoEm || Date.now()
+            };
+
+            const chavesOrdenadas = Object.keys(historicoAtual).sort(
+                (a, b) => (historicoAtual[b].criadoEm || 0) - (historicoAtual[a].criadoEm || 0)
+            );
+            const historicoEnxuto = {};
+            chavesOrdenadas.slice(0, 10).forEach(k => { historicoEnxuto[k] = historicoAtual[k]; });
+
+            await setDoc(docRef, {
+                ultimoLoteId: loteInfo.loteId,
+                historicoLotes: historicoEnxuto,
+                atualizadoEm: Date.now()
+            });
+        } catch (e) {
+            console.warn("[AcervoManager] Falha não-crítica ao persistir manifesto de lote na nuvem:", e);
+        }
+    }
+
+    async function carregarManifestoLoteIA(loteIdEspecifico) {
+        const uid = getUserId();
+        if (!uid || !loteIdEspecifico) return null;
+
+        const modulo = _getModuloAtual();
+        const docId = `--CONFIG-LOTE-IA-${modulo}--`;
+        const docRef = doc(db, "usuarios", uid, "acervo", docId);
+
+        try {
+            const snap = await getDoc(docRef);
+            if (!snap.exists()) return null;
+            const historico = snap.data().historicoLotes || {};
+            return historico[loteIdEspecifico] || null;
+        } catch (e) {
+            console.warn("[AcervoManager] Falha ao ler manifesto de lote da nuvem:", e);
+            return null;
+        }
+    }
+
+    async function renomearModelosEmLote(listaOperacoes) {
+        const uid = getUserId();
+        if (!uid) throw new Error("Usuário não autenticado.");
+        if (!Array.isArray(listaOperacoes) || listaOperacoes.length === 0) return 0;
+
+        const TAMANHO_BATCH = 450; // Cada lote individual de até 450 itens é gravado via writeBatch; listas maiores usam lotes sequenciais
+        let totalCommitados = 0;
+        const agora = Date.now();
+
+        try {
+            for (let i = 0; i < listaOperacoes.length; i += TAMANHO_BATCH) {
+                const fatia = listaOperacoes.slice(i, i + TAMANHO_BATCH);
+                const batch = writeBatch(db);
+                let opsNoBatch = 0;
+
+                fatia.forEach(op => {
+                    if (!op || !op.id) return;
+                    const docRef = doc(db, "usuarios", uid, "acervo", op.id);
+                    const payloadUpdate = { atualizadoEm: agora };
+
+                    if (typeof op.novoNome === 'string' && op.novoNome.trim() !== '') {
+                        payloadUpdate.nome = op.novoNome.trim();
+                    }
+                    if (op.auditoriaIA !== undefined) {
+                        payloadUpdate.auditoriaIA = op.auditoriaIA;
+                    }
+
+                    batch.update(docRef, payloadUpdate);
+                    opsNoBatch++;
+                });
+
+                if (opsNoBatch > 0) {
+                    await batch.commit();
+                    totalCommitados += opsNoBatch;
+                }
+            }
+            return totalCommitados;
+        } catch (e) {
+            _processarErroFirebase(e, 'renomearModelosEmLote (writeBatch)');
+        } finally {
+            modelosEmCache = [];
+        }
+    }
+
     return { 
         salvarNovoModelo, 
         adicionarNoAModelo, 
@@ -257,6 +393,12 @@ window.AcervoManager = (function() {
         atualizarNoDoModelo, 
         removerNoDoModelo,
         renomearModelo,
+        renomearModelosEmLote,
+        definirStatusAuditoriaModelo,
+        verificarSeModeloAuditado,
+        criarAssinaturaAuditoria,
+        salvarManifestoLoteIA,
+        carregarManifestoLoteIA,
         excluirModeloCompleto,
         salvarConfigTags,
         carregarConfigTags,
