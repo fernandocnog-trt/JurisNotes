@@ -1868,8 +1868,8 @@ window.TopicsManager = (function () {
         let ultimaTeseRenderizada = null;
 
         topicoAtivo.anotacoes.forEach((anotacao, index) => {
-            const chaveTeseCrua = anotacao.tese || "Provas não agrupadas";
-            const isTesePreenchida = (anotacao.tese && anotacao.tese.trim() !== '');
+            const isTesePreenchida = Boolean(anotacao.tese && anotacao.tese.trim() !== '');
+            const chaveTeseCrua = isTesePreenchida ? anotacao.tese.trim() : "Tese Não Nomeada";
             const vicioRaw = anotacao.vicio || topicoAtivo.vicio || 'omissao';
             const vicioFormatado = window.JurisUtils.formatarVicioED(vicioRaw);
 
@@ -1879,7 +1879,7 @@ window.TopicsManager = (function () {
                                           : [];
 
                 if (isTesePreenchida || diretrizesDoVicio.length > 0) {
-                    const tituloExibicao = isTesePreenchida ? anotacao.tese.trim() : "Provas não agrupadas";
+                    const tituloExibicao = isTesePreenchida ? anotacao.tese.trim() : "Tese Não Nomeada";
                     // Fallback seguro caso JurisUtils falhe
                     const vicioSeguroUI = vicioFormatado || 'Vício Não Identificado';
 
@@ -1947,18 +1947,16 @@ window.TopicsManager = (function () {
         }
             
         requestAnimationFrame(() => {
-            document.querySelectorAll('.sub-text-content, .card-texto, .juris-scroll-fade-body').forEach(el => {
-                if (typeof resizeObserver !== 'undefined') resizeObserver.observe(el);
-            });
-            const historyContainer = document.getElementById('history-container');
-            if (historyContainer && typeof resizeObserver !== 'undefined') resizeObserver.observe(historyContainer);
+            if (typeof resizeObserver !== 'undefined') {
+                document.querySelectorAll(
+                    '.sub-text-content, .card-texto, .juris-scroll-fade-body, .image-resize-wrapper'
+                ).forEach(el => resizeObserver.observe(el));
+
+                const historyContainer = document.getElementById('history-container');
+                if (historyContainer) resizeObserver.observe(historyContainer);
+            }
 
             aplicarTruncamentoDinamicoSeguro();
-            
-            document.querySelectorAll('.image-resize-wrapper').forEach(wrapper => {
-                wrapper.addEventListener('mouseup', () => desenharConexoes());
-                wrapper.addEventListener('mouseleave', () => desenharConexoes());
-            });
 
             const container = document.getElementById('timeline-container');
             if (container) {
@@ -2220,27 +2218,6 @@ window.TopicsManager = (function () {
         });
 
         svg.innerHTML = svgContent;
-    }
-
-    /**
-     * Motor de Sincronia: Executa posicionamento e aciona loop passivo de SVG
-     */
-    function _sincronizarConexoesComAnimacao(container) {
-        if (typeof posicionarNosDeIdeia === 'function') posicionarNosDeIdeia(container);
-        
-        const isZenModeActive = document.getElementById('topics-tab-content').classList.contains('zen-mode-ativo');
-        let start = null;
-        const duration = 350; 
-
-        function step(timestamp) {
-            if (!start) start = timestamp;
-            const progress = timestamp - start;
-            
-            desenharConexoes(isZenModeActive);
-
-            if (progress < duration) requestAnimationFrame(step);
-        }
-        requestAnimationFrame(step);
     }
 
     // A função toggleTextExpansion foi removida. O sistema agora utiliza o Modo de Leitura Centralizado.
@@ -2552,14 +2529,17 @@ window.TopicsManager = (function () {
         // 2. Varre Vícios e Provas
         let ultimaTese = null;
         topico.anotacoes.forEach(an => {
-            const teseAtual = an.tese || "Provas sem agrupamento";
+            const teseAtual = (an.tese && an.tese.trim() !== '') ? an.tese.trim() : "Tese Não Nomeada";
             const vicioRaw = an.vicio || topico.vicio || 'omissao';
             
-            // Subnós de Vício (ED)
+            // Subnós de Vício (ED) e eventual Diretriz por Tese
             if (teseAtual !== ultimaTese) {
                 if (topico.diretrizesPorVicio && topico.diretrizesPorVicio[vicioRaw]) {
                     const vicioFormatado = window.JurisUtils ? window.JurisUtils.formatarVicioED(vicioRaw) : vicioRaw;
                     processar(topico.diretrizesPorVicio[vicioRaw], `⚖️ Diretriz do Vício: <strong>${escaparHTML(vicioFormatado)}</strong>`);
+                }
+                if (topico.diretrizesPorTese && topico.diretrizesPorTese[teseAtual]) {
+                    processar(topico.diretrizesPorTese[teseAtual], `⚖️ Tese: <strong>${escaparHTML(teseAtual)}</strong>`);
                 }
                 ultimaTese = teseAtual;
             }

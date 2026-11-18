@@ -62,6 +62,15 @@ function _safeDisplay(id, styleStr) {
     else console.warn(`[ED Acervo UI] Elemento não encontrado: ${id}`);
 }
 
+function _isModeloAuditado(mod) {
+    if (window.AcervoManager && typeof AcervoManager.verificarSeModeloAuditado === 'function') {
+        return AcervoManager.verificarSeModeloAuditado(mod);
+    }
+    if (!mod || !mod.auditoriaIA) return false;
+    const qtdNos = Array.isArray(mod.nos) ? mod.nos.length : 0;
+    return mod.auditoriaIA.nome === mod.nome && mod.auditoriaIA.qtdNos === qtdNos;
+}
+
 // --- HELPER VISUAL (Fábrica de SVGs) ---
 function getIconeAcervoSVG(intencao) {
     const map = {
@@ -444,12 +453,16 @@ function renderizarProximoLoteAcervo() {
         if(escopoAtual === 'global') escopoSelo = `<span class="acervo-node-badge" style="background:#e3f2fd; color:#0d47a1; margin-right:6px;">🌐 Global</span>`;
         if(escopoAtual === 'tese') escopoSelo = `<span class="acervo-node-badge" style="background:#f3e5f5; color:#6a1b9a; margin-right:6px;">⚖️ Vício</span>`;
 
+        const pontoPendente = !_isModeloAuditado(mod)
+            ? `<span class="acervo-pending-dot" title="Modelo novo ou modificado (pendente de auditoria IA)"></span>`
+            : '';
+
         // Remoção completa de eventos inlines (onclick)
         item.innerHTML = `
             <div class="acervo-item-header">
                 <div style="flex: 1; pointer-events: none;"> <!-- pointer-events previne falsos alvos no clique -->
-                    <div class="acervo-item-titulo">${TopicsManager.escaparHTML(mod.nome)}</div>
-                    <div style="font-size:0.7rem; color:#888; margin-top:2px;">${escopoSelo} ${mod.nos.length} nó(s) salvos</div>
+                    <div class="acervo-item-titulo" style="display:flex; align-items:center;">${pontoPendente}<span>${TopicsManager.escaparHTML(mod.nome)}</span></div>
+                    <div style="font-size:0.7rem; color:#888; margin-top:2px; display:flex; align-items:center;">${escopoSelo} ${mod.nos.length} nó(s) salvos</div>
                     ${htmlTags}
                 </div>
                 <button class="acervo-action-btn" data-action="edit" data-id="${mod.id}" title="Editar este modelo">
@@ -794,7 +807,31 @@ window.abrirEdicaoModeloAcervo = async function(event, modeloId) {
         container.appendChild(box);
     });
 
+    _sincronizarBotaoAuditoriaModalEdicao(_isModeloAuditado(modelo));
     document.getElementById('modal-editar-modelo-acervo').style.display = 'flex';
+};
+
+function _sincronizarBotaoAuditoriaModalEdicao(isAuditado) {
+    const btn = document.getElementById('btn-toggle-auditado-modelo');
+    if (!btn) return;
+    btn.className = `acervo-audit-toggle-btn ${isAuditado ? 'is-audited' : 'is-pending'}`;
+    btn.textContent = isAuditado ? '✔ Auditado IA' : '⏳ Pendente IA';
+    btn.dataset.auditado = isAuditado ? 'true' : 'false';
+}
+
+window.alternarStatusAuditoriaModeloAtual = async function() {
+    if (!_modeloSelecionadoId || !window.AcervoManager) return;
+    const btn = document.getElementById('btn-toggle-auditado-modelo');
+    const estadoAtual = btn && btn.dataset.auditado === 'true';
+    const novoEstado = !estadoAtual;
+
+    try {
+        await AcervoManager.definirStatusAuditoriaModelo(_modeloSelecionadoId, novoEstado);
+        _sincronizarBotaoAuditoriaModalEdicao(novoEstado);
+        exibirToast(novoEstado ? 'Modelo marcado como Auditado pela IA.' : 'Modelo marcado como Pendente de auditoria.', 'sucesso');
+    } catch (e) {
+        exibirToast('Erro ao atualizar status de auditoria.', 'erro');
+    }
 };
 
 function renderizarTagsSelecionadas(modeloId) {
@@ -898,10 +935,59 @@ window.criarEAdicionarTagInline = async function(novaTag) {
     }
 };
 
-window.abrirModalGerenciarTags = function() {
+window.abrirModalGerenciarTags = async function() {
     document.getElementById('modal-acervo-inserir').style.display = 'none';
     renderizarListaTagsGlobais();
     document.getElementById('modal-gerenciar-tags').style.display = 'flex';
+    await _atualizarPlacarAuditoriaModalTags();
+};
+
+async function _atualizarPlacarAuditoriaModalTags() {
+    const badgeResumo = document.getElementById('badge-resumo-auditoria-acervo');
+    const btnMarcarBase = document.getElementById('btn-marcar-base-atual-auditada');
+    if (!badgeResumo || !window.AcervoManager) return;
+
+    try {
+        const modelos = await AcervoManager.carregarModelos();
+        const total = modelos.length;
+        const auditados = modelos.filter(_isModeloAuditado).length;
+        const pendentes = total - auditados;
+        badgeResumo.textContent = `${pendentes} pendente(s) • ${auditados} auditado(s) (Total: ${total})`;
+        if (btnMarcarBase) {
+            btnMarcarBase.style.display = pendentes > 0 ? 'inline-block' : 'none';
+        }
+    } catch (e) {
+        badgeResumo.textContent = 'Indisponível';
+    }
+}
+
+window.marcarBaseAtualComoAuditada = async function() {
+    if (!window.AcervoManager) return;
+    const modelos = await AcervoManager.carregarModelos(true);
+    const pendentes = modelos.filter(m => !_isModeloAuditado(m));
+    if (pendentes.length === 0) return exibirToast('Todos os modelos já estão marcados como auditados.', 'aviso');
+
+    if (!confirm(
+        `Deseja marcar todos os ${pendentes.length} modelo(s) pendentes atuais como "Auditados pela IA"?\n\n` +
+        `Use esta opção se a sua base atual já passou por padronização e você deseja exportar apenas os modelos novos criados a partir de agora.`
+    )) return;
+
+    try {
+        const operacoes = pendentes.map(mod => ({
+            id: mod.id,
+            novoNome: null,
+            auditoriaIA: AcervoManager.criarAssinaturaAuditoria(
+                mod.nome,
+                Array.isArray(mod.nos) ? mod.nos.length : 0,
+                'bootstrap-manual'
+            )
+        }));
+        const gravados = await AcervoManager.renomearModelosEmLote(operacoes);
+        await _atualizarPlacarAuditoriaModalTags();
+        exibirToast(`${gravados} modelo(s) marcados como auditados!`, 'sucesso');
+    } catch (e) {
+        exibirToast(e.message || 'Erro ao marcar base atual.', 'erro');
+    }
 };
 
 window.fecharModalGerenciarTags = function() {
@@ -1121,6 +1207,7 @@ window.exportarBaseParaNotebookLM = async function(event) {
             const escopo = mod.escopo ? mod.escopo.toUpperCase() : 'CARD';
             
             txtConteudo += `### NOME DO MODELO: ${mod.nome}\n`;
+            txtConteudo += `ID DO MODELO: ${mod.id}\n`;
             txtConteudo += `TAGS: ${tags}\n`;
             txtConteudo += `ESCOPO: ${escopo}\n`;
             txtConteudo += `CONTEÚDO (Nós de Ideia):\n`;
@@ -1290,4 +1377,727 @@ window.desativarModoFocoAcervo = function() {
 window.toggleFullscreenAcervo = function() {
     const modal = document.getElementById('modal-acervo-inserir');
     if(modal) modal.classList.toggle('is-fullscreen');
+};
+
+// ==========================================
+// MÓDULO 4: IMPORTAÇÃO EM LOTE DE RENOMEAÇÕES (IA)
+// ==========================================
+let _modelosBaseImportacao = [];
+let _itensRenomeacaoIA = [];
+let _edicoesManuaisRenomeacao = new Map(); // chaveEstavel -> { selecionado, novoNome }
+let _ultimoLoteReversaoIA = null; // Array<{ id, nomeAnterior, nomeAplicado }>
+let _modalOrigemImportacao = 'tags'; // 'tags' | 'notebooklm'
+let _delegacaoImportacaoAtiva = false;
+
+/**
+ * Normalização conservadora para comparação de títulos:
+ * Usa Unicode NFC, colapsa espaços múltiplos e remove apenas aspas/crases/asteriscos externos.
+ * NUNCA remove algarismos ou pontuação jurídica (ex: "13º Salário", "40% do FGTS").
+ */
+function _normalizarTituloComparacao(texto) {
+    if (!texto) return '';
+    return String(texto)
+        .normalize('NFC')
+        .trim()
+        .replace(/^[\s"'`*]+|[\s"'`*]+$/g, '')
+        .replace(/\s+/g, ' ')
+        .toLowerCase();
+}
+
+function _limparCampoBrutoImportacao(texto) {
+    if (!texto) return '';
+    return String(texto)
+        .normalize('NFC')
+        .trim()
+        .replace(/^[\s"'`*]+|[\s"'`*]+$/g, '')
+        .replace(/\s+/g, ' ');
+}
+
+/**
+ * Extrai estritamente linhas de renomeação:
+ * 1. Se houver sentinelas <<<JURIS_RENOMEAR>>> ... <<<FIM_JURIS_RENOMEAR>>>, lê apenas o interior.
+ * 2. Aceita exclusivamente linhas separadas por "|||".
+ *    - 3 campos: ID ||| Nome Antigo ||| Novo Nome
+ *    - 2 campos: Nome Antigo ||| Novo Nome
+ */
+function _extrairInstrucoesRenomeacaoEstritas(textoBruto) {
+    if (!textoBruto || !textoBruto.trim()) return [];
+
+    let escopoTexto = textoBruto;
+    const regexBloco = /<<<JURIS_RENOMEAR>>>([\s\S]*?)(?:<<<FIM_JURIS_RENOMEAR>>>|<<<FIM>>>|$)/i;
+    const matchBloco = textoBruto.match(regexBloco);
+    if (matchBloco && matchBloco[1]) {
+        escopoTexto = matchBloco[1];
+    }
+
+    const linhas = escopoTexto.split(/\r?\n/);
+    const instrucoes = [];
+
+    for (const rawLine of linhas) {
+        const linha = rawLine.trim();
+        if (!linha || !linha.includes('|||')) continue;
+        if (linha.startsWith('#') || linha.startsWith('```')) continue;
+
+        const partes = linha.split('|||').map(_limparCampoBrutoImportacao);
+        if (partes.length >= 3) {
+            const idInformado = partes[0];
+            const nomeAntigo = partes[1];
+            const novoNome = partes.slice(2).join(' - ');
+
+            // Ignora a linha de exemplo literal do prompt
+            if (idInformado === 'ID_DO_MODELO' || nomeAntigo === 'Nome Problemático Atual Exato') continue;
+            if (!idInformado && !nomeAntigo) continue;
+
+            instrucoes.push({
+                formato: '3-campos',
+                idInformado,
+                nomeAntigoInformado: nomeAntigo,
+                novoNomeSugerido: novoNome
+            });
+        } else if (partes.length === 2) {
+            const nomeAntigo = partes[0];
+            const novoNome = partes[1];
+
+            if (nomeAntigo === 'Nome Problemático Atual Exato') continue;
+            if (!nomeAntigo) continue;
+
+            instrucoes.push({
+                formato: '2-campos',
+                idInformado: null,
+                nomeAntigoInformado: nomeAntigo,
+                novoNomeSugerido: novoNome
+            });
+        }
+    }
+
+    return instrucoes;
+}
+
+window.abrirModalImportarRenomeacoes = async function(origem = 'tags') {
+    if (!window.AcervoManager) return exibirToast('Conecte-se ao Firebase primeiro.', 'erro');
+
+    _modalOrigemImportacao = origem;
+
+    _safeDisplay('modal-gerenciar-tags', 'none');
+    _safeDisplay('modal-prompt-notebooklm', 'none');
+    _safeDisplay('prompt-notebooklm-backdrop', 'none');
+    _safeDisplay('modal-acervo-inserir', 'none');
+    _safeDisplay('wizard-backdrop', 'none');
+
+    const historyContainer = document.getElementById('history-container');
+    if (historyContainer) historyContainer.classList.add('pdf-foco-ativo');
+
+    try {
+        // Força leitura atualizada do Firestore para evitar comparação contra cache defasado
+        _modelosBaseImportacao = await AcervoManager.carregarModelos(true);
+    } catch (e) {
+        return exibirToast(e.message || 'Erro ao carregar modelos atuais para conferência.', 'erro');
+    }
+
+    _itensRenomeacaoIA = [];
+    _edicoesManuaisRenomeacao.clear();
+
+    const textarea = document.getElementById('textarea-import-renomeacoes');
+    if (textarea) textarea.value = '';
+    const fileInput = document.getElementById('input-file-renomeacoes');
+    if (fileInput) fileInput.value = '';
+
+    _safeDisplay('box-preview-renomeacoes', 'none');
+    _atualizarBarraReversaoUI();
+    _configurarEventDelegationImportacao();
+
+    const btnConfirmar = document.getElementById('btn-confirmar-renomeacoes-lote');
+    if (btnConfirmar) {
+        btnConfirmar.disabled = true;
+        btnConfirmar.textContent = '✔ Aplicar Atualizações Selecionadas';
+    }
+
+    _safeDisplay('importar-renomeacoes-backdrop', 'block');
+    _safeDisplay('modal-importar-renomeacoes', 'flex');
+
+    setTimeout(() => { if (textarea) textarea.focus(); }, 50);
+};
+
+window.fecharModalImportarRenomeacoes = function() {
+    if (window.analisarTextoRenomeacoesDebounced && window.analisarTextoRenomeacoesDebounced.cancel) {
+        window.analisarTextoRenomeacoesDebounced.cancel();
+    }
+
+    _safeDisplay('importar-renomeacoes-backdrop', 'none');
+    _safeDisplay('modal-importar-renomeacoes', 'none');
+
+    _itensRenomeacaoIA = [];
+    _edicoesManuaisRenomeacao.clear();
+
+    // Retorna de forma previsível ao modal de origem
+    if (_modalOrigemImportacao === 'notebooklm') {
+        window.abrirModalPromptNotebookLM();
+    } else {
+        document.getElementById('wizard-backdrop').style.display = 'block';
+        window.abrirModalGerenciarTags();
+    }
+};
+
+window.carregarArquivoRenomeacoesIA = function(event) {
+    const file = event.target.files && event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const conteudo = e.target.result || '';
+        const textarea = document.getElementById('textarea-import-renomeacoes');
+        if (textarea) {
+            textarea.value = conteudo;
+            window.analisarTextoRenomeacoesIA();
+        }
+    };
+    reader.onerror = function() {
+        exibirToast('Erro ao ler o arquivo selecionado.', 'erro');
+    };
+    reader.readAsText(file, 'UTF-8');
+};
+
+function _resolverModeloPorIdOuPrefixo(idBruto, mapaPorId) {
+    if (!idBruto) return { modelo: null, ambiguo: false };
+    const idLimpo = idBruto.trim();
+    if (mapaPorId.has(idLimpo)) {
+        return { modelo: mapaPorId.get(idLimpo), ambiguo: false };
+    }
+
+    // Fallback seguro caso a IA tenha enviado apenas o prefixo de 8+ caracteres do ID
+    const prefixoAlvo = idLimpo.startsWith('mod-') ? idLimpo : `mod-${idLimpo}`;
+    if (prefixoAlvo.length >= 10) {
+        const candidatos = _modelosBaseImportacao.filter(m => m.id.startsWith(prefixoAlvo));
+        if (candidatos.length === 1) return { modelo: candidatos[0], ambiguo: false };
+        if (candidatos.length > 1) return { modelo: null, ambiguo: true };
+    }
+    return { modelo: null, ambiguo: false };
+}
+
+window.analisarTextoRenomeacoesIA = function() {
+    const textarea = document.getElementById('textarea-import-renomeacoes');
+    const boxPreview = document.getElementById('box-preview-renomeacoes');
+    const btnConfirmar = document.getElementById('btn-confirmar-renomeacoes-lote');
+
+    if (!textarea || !boxPreview) return;
+
+    const instrucoes = _extrairInstrucoesRenomeacaoEstritas(textarea.value);
+    if (instrucoes.length === 0) {
+        boxPreview.style.display = 'none';
+        _itensRenomeacaoIA = [];
+        if (btnConfirmar) {
+            btnConfirmar.disabled = true;
+            btnConfirmar.textContent = '✔ Aplicar Atualizações Selecionadas';
+        }
+        return;
+    }
+
+    // Índices locais do acervo atual
+    const mapaPorId = new Map();
+    const mapaListaPorNome = new Map();
+
+    _modelosBaseImportacao.forEach(mod => {
+        mapaPorId.set(mod.id, mod);
+        const chaveNome = _normalizarTituloComparacao(mod.nome);
+        if (!mapaListaPorNome.has(chaveNome)) {
+            mapaListaPorNome.set(chaveNome, []);
+        }
+        mapaListaPorNome.get(chaveNome).push(mod);
+    });
+
+    const idsJaIncluidosNoLote = new Set();
+    const novosItens = [];
+
+    instrucoes.forEach((inst, idx) => {
+        let modeloAlvo = null;
+        let statusBase = 'nao-encontrado';
+        let motivoAviso = '';
+
+        if (inst.idInformado) {
+            const resId = _resolverModeloPorIdOuPrefixo(inst.idInformado, mapaPorId);
+            if (resId.modelo) {
+                modeloAlvo = resId.modelo;
+                const nomeBancoNorm = _normalizarTituloComparacao(modeloAlvo.nome);
+                const nomeInformadoNorm = _normalizarTituloComparacao(inst.nomeAntigoInformado);
+
+                if (inst.nomeAntigoInformado && nomeBancoNorm !== nomeInformadoNorm) {
+                    statusBase = 'conferir';
+                    motivoAviso = `O ID corresponde a "${modeloAlvo.nome}", que difere do nome antigo informado ("${inst.nomeAntigoInformado}").`;
+                } else {
+                    statusBase = 'pronto';
+                }
+            } else if (resId.ambiguo) {
+                statusBase = 'nao-encontrado';
+                motivoAviso = `Prefixo de ID "${inst.idInformado}" é ambíguo.`;
+            } else {
+                // Se o ID falhou mas o nome antigo existe univocamente, sinaliza para conferência
+                const candidatosNome = mapaListaPorNome.get(_normalizarTituloComparacao(inst.nomeAntigoInformado)) || [];
+                if (candidatosNome.length === 1) {
+                    modeloAlvo = candidatosNome[0];
+                    statusBase = 'conferir';
+                    motivoAviso = `ID "${inst.idInformado}" não localizado; encontrado apenas pelo nome antigo. Confira antes de marcar.`;
+                } else if (candidatosNome.length > 1) {
+                    statusBase = 'nao-encontrado';
+                    motivoAviso = `ID inválido e existem ${candidatosNome.length} modelos homônimos com este nome.`;
+                } else {
+                    statusBase = 'nao-encontrado';
+                    motivoAviso = 'ID e nome antigo não localizados no acervo deste módulo.';
+                }
+            }
+        } else {
+            // Formato de 2 campos (apenas Nome Antigo ||| Novo Nome)
+            const candidatosNome = mapaListaPorNome.get(_normalizarTituloComparacao(inst.nomeAntigoInformado)) || [];
+            if (candidatosNome.length === 1) {
+                modeloAlvo = candidatosNome[0];
+                statusBase = 'pronto';
+            } else if (candidatosNome.length > 1) {
+                modeloAlvo = candidatosNome[0];
+                statusBase = 'conferir';
+                motivoAviso = `Atenção: Existem ${candidatosNome.length} modelos com o nome "${inst.nomeAntigoInformado}". Exporte novamente e use o ID para precisão.`;
+            } else {
+                statusBase = 'nao-encontrado';
+                motivoAviso = 'Nome antigo não localizado no acervo deste módulo.';
+            }
+        }
+
+        // Deduplicação por modeloId dentro do mesmo lote
+        if (modeloAlvo) {
+            if (idsJaIncluidosNoLote.has(modeloAlvo.id)) return;
+            idsJaIncluidosNoLote.add(modeloAlvo.id);
+
+            if (_normalizarTituloComparacao(modeloAlvo.nome) === _normalizarTituloComparacao(inst.novoNomeSugerido)) {
+                statusBase = 'sem-alteracao';
+                motivoAviso = 'O novo nome sugerido já é igual ao nome atual do modelo.';
+            }
+        }
+
+        const chaveEstavel = modeloAlvo ? `id:${modeloAlvo.id}` : `raw:${idx}:${inst.nomeAntigoInformado}`;
+        const edicaoPrevia = _edicoesManuaisRenomeacao.get(chaveEstavel);
+
+        const novoNomeFinal = edicaoPrevia ? edicaoPrevia.novoNome : inst.novoNomeSugerido;
+        const selecionadoDefault = (statusBase === 'pronto');
+        const selecionadoFinal = (edicaoPrevia && typeof edicaoPrevia.selecionado === 'boolean' && statusBase !== 'nao-encontrado' && statusBase !== 'sem-alteracao')
+            ? edicaoPrevia.selecionado
+            : selecionadoDefault;
+
+        novosItens.push({
+            chaveEstavel,
+            modeloId: modeloAlvo ? modeloAlvo.id : null,
+            nomeOriginalBanco: modeloAlvo ? modeloAlvo.nome : (inst.nomeAntigoInformado || '(Sem nome)'),
+            novoNome: novoNomeFinal,
+            statusBase,
+            statusEfetivo: statusBase,
+            motivoAvisoBase: motivoAviso,
+            motivoConflitoNome: '',
+            selecionado: selecionadoFinal
+        });
+    });
+
+    _itensRenomeacaoIA = novosItens;
+    _recalcularConflitosDeNomes();
+    _renderizarDOMPreviewRenomeacoes();
+};
+
+window.analisarTextoRenomeacoesDebounced = window.debounce(window.analisarTextoRenomeacoesIA, 250);
+
+/**
+ * Verifica se algum item selecionado (ou editado) possui:
+ * - Novo nome vazio
+ * - Novo nome duplicado com outro item do próprio lote
+ * - Novo nome idêntico a outro modelo já existente no acervo (que não está sendo renomeado)
+ */
+function _recalcularConflitosDeNomes() {
+    const idsSendoRenomeados = new Set(
+        _itensRenomeacaoIA.filter(i => i.modeloId && i.selecionado).map(i => i.modeloId)
+    );
+
+    const nomesExistentesNaoRenomeados = new Set();
+    _modelosBaseImportacao.forEach(mod => {
+        if (!idsSendoRenomeados.has(mod.id)) {
+            nomesExistentesNaoRenomeados.add(_normalizarTituloComparacao(mod.nome));
+        }
+    });
+
+    const contagemNovosNomesNoLote = new Map();
+    _itensRenomeacaoIA.forEach(item => {
+        if (!item.modeloId || item.statusBase === 'nao-encontrado') return;
+        const norm = _normalizarTituloComparacao(item.novoNome);
+        if (norm) {
+            contagemNovosNomesNoLote.set(norm, (contagemNovosNomesNoLote.get(norm) || 0) + 1);
+        }
+    });
+
+    _itensRenomeacaoIA.forEach(item => {
+        item.motivoConflitoNome = '';
+        item.statusEfetivo = item.statusBase;
+
+        if (!item.modeloId || item.statusBase === 'nao-encontrado') return;
+
+        const novoNorm = _normalizarTituloComparacao(item.novoNome);
+        const origNorm = _normalizarTituloComparacao(item.nomeOriginalBanco);
+
+        if (!novoNorm) {
+            item.statusEfetivo = 'conferir';
+            item.motivoConflitoNome = 'O novo nome não pode ficar vazio.';
+            return;
+        }
+
+        if (novoNorm === origNorm) {
+            item.statusEfetivo = 'sem-alteracao';
+            item.motivoConflitoNome = 'O nome digitado é igual ao nome atual.';
+            item.selecionado = false;
+            return;
+        } else if (item.statusBase === 'sem-alteracao') {
+            // Usuário editou manualmente um item que antes era sem-alteracao
+            item.statusEfetivo = 'pronto';
+        }
+
+        if ((contagemNovosNomesNoLote.get(novoNorm) || 0) > 1) {
+            item.statusEfetivo = 'conferir';
+            item.motivoConflitoNome = 'Aviso: Outro item desta lista possui exatamente o mesmo novo nome.';
+        } else if (nomesExistentesNaoRenomeados.has(novoNorm)) {
+            item.statusEfetivo = 'conferir';
+            item.motivoConflitoNome = 'Aviso: Já existe outro modelo no acervo com este exato nome.';
+        }
+    });
+}
+
+/**
+ * Constrói a lista de pré-visualização utilizando exclusivamente DOM API segura
+ * (createElement, textContent, input.value) sem innerHTML interpolado.
+ */
+function _renderizarDOMPreviewRenomeacoes() {
+    const boxPreview = document.getElementById('box-preview-renomeacoes');
+    const listaEl = document.getElementById('lista-preview-renomeacoes');
+    if (!boxPreview || !listaEl) return;
+
+    boxPreview.style.display = 'flex';
+    listaEl.textContent = '';
+
+    const fragment = document.createDocumentFragment();
+
+    _itensRenomeacaoIA.forEach((item, idx) => {
+        const row = document.createElement('div');
+        row.className = `acervo-rename-row status-${item.statusEfetivo}`;
+        row.dataset.idx = String(idx);
+
+        // Coluna 1: Checkbox
+        const chk = document.createElement('input');
+        chk.type = 'checkbox';
+        chk.className = 'chk-rename-ia';
+        chk.dataset.idx = String(idx);
+        const desabilitado = (item.statusEfetivo === 'nao-encontrado' || item.statusEfetivo === 'sem-alteracao');
+        chk.disabled = desabilitado;
+        chk.checked = !desabilitado && Boolean(item.selecionado);
+        chk.style.marginTop = '4px';
+
+        // Coluna 2: Nome Antigo + Chip de ID
+        const oldCol = document.createElement('div');
+        oldCol.className = 'acervo-rename-old-col';
+
+        const oldSpan = document.createElement('span');
+        oldSpan.className = 'acervo-rename-old';
+        oldSpan.textContent = item.nomeOriginalBanco;
+        oldCol.appendChild(oldSpan);
+
+        if (item.modeloId) {
+            const idChip = document.createElement('span');
+            idChip.className = 'acervo-rename-id-chip';
+            idChip.textContent = item.modeloId;
+            oldCol.appendChild(idChip);
+        }
+
+        // Coluna 3: Seta
+        const arrowSpan = document.createElement('span');
+        arrowSpan.className = 'acervo-rename-arrow';
+        arrowSpan.setAttribute('aria-hidden', 'true');
+        arrowSpan.textContent = '➔';
+
+        // Coluna 4: Input Editável + Badges de Aviso/Erro
+        const newCol = document.createElement('div');
+        newCol.className = 'acervo-rename-new-col';
+
+        if (item.statusBase !== 'nao-encontrado') {
+            const inputNovo = document.createElement('input');
+            inputNovo.type = 'text';
+            inputNovo.className = 'acervo-rename-new-input';
+            if (item.motivoConflitoNome) inputNovo.classList.add('has-conflict');
+            inputNovo.dataset.idx = String(idx);
+            inputNovo.value = item.novoNome;
+            inputNovo.setAttribute('aria-label', `Novo nome para ${item.nomeOriginalBanco}`);
+            newCol.appendChild(inputNovo);
+        }
+
+        const badgeContainer = document.createElement('div');
+        badgeContainer.className = 'acervo-rename-feedback-slot';
+        _popularBadgesFeedbackItem(badgeContainer, item);
+        newCol.appendChild(badgeContainer);
+
+        row.appendChild(chk);
+        row.appendChild(oldCol);
+        row.appendChild(arrowSpan);
+        row.appendChild(newCol);
+
+        fragment.appendChild(row);
+    });
+
+    listaEl.appendChild(fragment);
+    _atualizarResumoEBotaoConfirmarUI();
+}
+
+function _popularBadgesFeedbackItem(containerEl, item) {
+    containerEl.textContent = '';
+    const msg = item.motivoConflitoNome || item.motivoAvisoBase;
+    if (!msg) return;
+
+    const badge = document.createElement('span');
+    let tipoClasse = 'warn';
+    if (item.statusEfetivo === 'nao-encontrado') tipoClasse = 'error';
+    else if (item.statusEfetivo === 'sem-alteracao') tipoClasse = 'neutral';
+
+    badge.className = `acervo-rename-status-badge ${tipoClasse}`;
+    badge.textContent = msg;
+    containerEl.appendChild(badge);
+}
+
+/**
+ * Atualiza classes de conflito, checkboxes e contadores sem destruir os elementos <input>,
+ * preservando o foco e a posição do cursor durante a digitação.
+ */
+function _sincronizarLinhasExistentesSemReflow() {
+    const listaEl = document.getElementById('lista-preview-renomeacoes');
+    if (!listaEl) return;
+
+    const rows = listaEl.querySelectorAll('.acervo-rename-row');
+    rows.forEach(row => {
+        const idx = parseInt(row.dataset.idx, 10);
+        const item = _itensRenomeacaoIA[idx];
+        if (!item) return;
+
+        row.className = `acervo-rename-row status-${item.statusEfetivo}`;
+
+        const chk = row.querySelector('.chk-rename-ia');
+        if (chk) {
+            const desabilitado = (item.statusEfetivo === 'nao-encontrado' || item.statusEfetivo === 'sem-alteracao');
+            chk.disabled = desabilitado;
+            chk.checked = !desabilitado && Boolean(item.selecionado);
+        }
+
+        const input = row.querySelector('.acervo-rename-new-input');
+        if (input) {
+            input.classList.toggle('has-conflict', Boolean(item.motivoConflitoNome));
+        }
+
+        const slot = row.querySelector('.acervo-rename-feedback-slot');
+        if (slot) {
+            _popularBadgesFeedbackItem(slot, item);
+        }
+    });
+
+    _atualizarResumoEBotaoConfirmarUI();
+}
+
+function _atualizarResumoEBotaoConfirmarUI() {
+    const resumoEl = document.getElementById('resumo-preview-renomeacoes');
+    const btnConfirmar = document.getElementById('btn-confirmar-renomeacoes-lote');
+
+    let qtdPronto = 0;
+    let qtdConferir = 0;
+    let qtdInalterado = 0;
+    let qtdNaoEncontrado = 0;
+    let qtdSelecionadosValidos = 0;
+
+    _itensRenomeacaoIA.forEach(item => {
+        if (item.statusEfetivo === 'pronto') qtdPronto++;
+        else if (item.statusEfetivo === 'conferir') qtdConferir++;
+        else if (item.statusEfetivo === 'sem-alteracao') qtdInalterado++;
+        else if (item.statusEfetivo === 'nao-encontrado') qtdNaoEncontrado++;
+
+        const nomeValido = item.novoNome && item.novoNome.trim() !== '';
+        const mudou = _normalizarTituloComparacao(item.novoNome) !== _normalizarTituloComparacao(item.nomeOriginalBanco);
+        if (item.modeloId && item.selecionado && nomeValido && mudou) {
+            qtdSelecionadosValidos++;
+        }
+    });
+
+    if (resumoEl) {
+        resumoEl.textContent = '';
+        const criarPill = (texto, classe) => {
+            const pill = document.createElement('span');
+            pill.className = `acervo-stat-pill ${classe}`;
+            pill.textContent = texto;
+            return pill;
+        };
+
+        resumoEl.appendChild(criarPill(`✔ ${qtdPronto} pronto(s)`, 'pronto'));
+        if (qtdConferir > 0) resumoEl.appendChild(criarPill(`⚠️ ${qtdConferir} p/ conferir`, 'conferir'));
+        if (qtdInalterado > 0) resumoEl.appendChild(criarPill(`＝ ${qtdInalterado} sem alteração`, 'inalterado'));
+        if (qtdNaoEncontrado > 0) resumoEl.appendChild(criarPill(`✕ ${qtdNaoEncontrado} não encontrado(s)`, 'erro'));
+    }
+
+    if (btnConfirmar) {
+        btnConfirmar.disabled = (qtdSelecionadosValidos === 0);
+        btnConfirmar.textContent = qtdSelecionadosValidos > 0
+            ? `✔ Aplicar ${qtdSelecionadosValidos} Atualização(ões)`
+            : '✔ Aplicar Atualizações Selecionadas';
+    }
+}
+
+function _configurarEventDelegationImportacao() {
+    if (_delegacaoImportacaoAtiva) return;
+    const listaEl = document.getElementById('lista-preview-renomeacoes');
+    if (!listaEl) return;
+
+    listaEl.addEventListener('change', (e) => {
+        const chk = e.target.closest('.chk-rename-ia');
+        if (!chk) return;
+        const idx = parseInt(chk.dataset.idx, 10);
+        const item = _itensRenomeacaoIA[idx];
+        if (!item) return;
+
+        item.selecionado = chk.checked;
+        _edicoesManuaisRenomeacao.set(item.chaveEstavel, {
+            selecionado: item.selecionado,
+            novoNome: item.novoNome
+        });
+
+        _recalcularConflitosDeNomes();
+        _sincronizarLinhasExistentesSemReflow();
+    });
+
+    listaEl.addEventListener('input', (e) => {
+        const input = e.target.closest('.acervo-rename-new-input');
+        if (!input) return;
+        const idx = parseInt(input.dataset.idx, 10);
+        const item = _itensRenomeacaoIA[idx];
+        if (!item) return;
+
+        item.novoNome = input.value;
+        _edicoesManuaisRenomeacao.set(item.chaveEstavel, {
+            selecionado: item.selecionado,
+            novoNome: item.novoNome
+        });
+
+        _recalcularConflitosDeNomes();
+        _sincronizarLinhasExistentesSemReflow();
+    });
+
+    _delegacaoImportacaoAtiva = true;
+}
+
+window.alternarSelecaoTodasRenomeacoes = function(marcarProntos) {
+    _itensRenomeacaoIA.forEach(item => {
+        if (!item.modeloId || item.statusEfetivo === 'nao-encontrado' || item.statusEfetivo === 'sem-alteracao') {
+            item.selecionado = false;
+            return;
+        }
+        // "Marcar prontos" seleciona apenas os itens sem conflito/divergência; o usuário marca manualmente os "conferir" se desejar
+        item.selecionado = marcarProntos ? (item.statusEfetivo === 'pronto') : false;
+        _edicoesManuaisRenomeacao.set(item.chaveEstavel, {
+            selecionado: item.selecionado,
+            novoNome: item.novoNome
+        });
+    });
+
+    _recalcularConflitosDeNomes();
+    _sincronizarLinhasExistentesSemReflow();
+};
+
+window.executarRenomeacaoEmLoteIA = async function() {
+    const selecionados = _itensRenomeacaoIA.filter(item => {
+        const nomeValido = item.novoNome && item.novoNome.trim() !== '';
+        const mudou = _normalizarTituloComparacao(item.novoNome) !== _normalizarTituloComparacao(item.nomeOriginalBanco);
+        return Boolean(item.modeloId && item.selecionado && nomeValido && mudou);
+    });
+
+    if (selecionados.length === 0) return;
+
+    const btnConfirmar = document.getElementById('btn-confirmar-renomeacoes-lote');
+    const textoOriginalBtn = btnConfirmar ? btnConfirmar.textContent : '';
+    if (btnConfirmar) {
+        btnConfirmar.disabled = true;
+        btnConfirmar.textContent = '⌛ Gravando lote na nuvem...';
+    }
+
+    try {
+        const payloadFirestore = selecionados.map(item => ({
+            id: item.modeloId,
+            novoNome: item.novoNome.trim()
+        }));
+
+        const totalGravados = await AcervoManager.renomearModelosEmLote(payloadFirestore);
+
+        // Armazena espelho inverso para reversão em 1 clique ou download de segurança
+        _ultimoLoteReversaoIA = selecionados.map(item => ({
+            id: item.modeloId,
+            nomeAnterior: item.nomeOriginalBanco,
+            nomeAplicado: item.novoNome.trim()
+        }));
+
+        // Atualiza a base local do modal caso o usuário permaneça nele
+        _modelosBaseImportacao = await AcervoManager.carregarModelos(true);
+        _atualizarBarraReversaoUI();
+
+        exibirToast(`${totalGravados} modelo(s) atualizado(s) com sucesso!`, 'sucesso');
+
+        // Reanalisa o texto atual contra os novos nomes já salvos
+        window.analisarTextoRenomeacoesIA();
+    } catch (e) {
+        console.error('[ED AcervoController] Falha ao aplicar renomeações em lote:', e);
+        exibirToast(e.message || 'Erro ao aplicar renomeações na nuvem.', 'erro');
+        if (btnConfirmar) {
+            btnConfirmar.disabled = false;
+            btnConfirmar.textContent = textoOriginalBtn;
+        }
+    }
+};
+
+function _atualizarBarraReversaoUI() {
+    const barra = document.getElementById('barra-reversao-renomeacoes');
+    const texto = document.getElementById('texto-barra-reversao');
+    if (!barra || !texto) return;
+
+    if (_ultimoLoteReversaoIA && _ultimoLoteReversaoIA.length > 0) {
+        texto.textContent = `✔ Último lote aplicado (${_ultimoLoteReversaoIA.length} modelo(s)). Deseja baixar backup de reversão ou desfazer?`;
+        barra.style.display = 'flex';
+    } else {
+        barra.style.display = 'none';
+    }
+}
+
+window.baixarArquivoReversaoUltimoLote = function() {
+    if (!_ultimoLoteReversaoIA || _ultimoLoteReversaoIA.length === 0) return;
+
+    let conteudo = '<<<JURIS_RENOMEAR>>>\n';
+    _ultimoLoteReversaoIA.forEach(item => {
+        conteudo += `${item.id} ||| ${item.nomeAplicado} ||| ${item.nomeAnterior}\n`;
+    });
+    conteudo += '<<<FIM_JURIS_RENOMEAR>>>\n';
+
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+    _downloadTextoComoArquivo(`JurisNotes_ED_Reversao_Nomes_${stamp}.txt`, conteudo);
+    exibirToast('Arquivo de reversão baixado.', 'sucesso');
+};
+
+window.desfazerUltimoLoteRenomeacao = async function() {
+    if (!_ultimoLoteReversaoIA || _ultimoLoteReversaoIA.length === 0) return;
+    if (!confirm(`Restaurar o nome anterior de ${_ultimoLoteReversaoIA.length} modelo(s) atualizado(s) no último lote?`)) return;
+
+    try {
+        const payloadReversao = _ultimoLoteReversaoIA.map(item => ({
+            id: item.id,
+            novoNome: item.nomeAnterior
+        }));
+
+        const restaurados = await AcervoManager.renomearModelosEmLote(payloadReversao);
+        _ultimoLoteReversaoIA = null;
+        _atualizarBarraReversaoUI();
+
+        _modelosBaseImportacao = await AcervoManager.carregarModelos(true);
+        window.analisarTextoRenomeacoesIA();
+
+        exibirToast(`${restaurados} modelo(s) restaurado(s) aos nomes originais!`, 'sucesso');
+    } catch (e) {
+        exibirToast(e.message || 'Erro ao desfazer alterações.', 'erro');
+    }
 };

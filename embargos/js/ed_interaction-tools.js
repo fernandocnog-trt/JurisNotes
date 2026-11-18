@@ -223,38 +223,39 @@ window.toggleModoFoco = function(ativar) {
 // --- CONFIGURAÇÃO CENTRAL DE DOCUMENTOS ---
 const DOC_CONFIG = [
     // --- FASE 1: O Escopo ---
-    { label: 'Embargos de Declaração',    polo: 'DUAL',         tipo: 'dual',   fase: 1 },
-    { label: 'Contraminuta aos EDs',      polo: 'DUAL',         tipo: 'dual',   fase: 1 },
-    { label: 'Embargos à Execução',       polo: 'Parte Executada', tipo: 'auto', fase: 1, isExecucao: true },
-    { label: 'Impugnação aos Cálculos',   polo: 'Parte Exequente', tipo: 'auto', fase: 1, isExecucao: true },
+    { label: 'Embargos de Declaração',    polo: 'DUAL',         tipo: 'dual',   fase: 1, natureza: 'alegacao_recurso' },
+    { label: 'Contraminuta aos EDs',      polo: 'DUAL',         tipo: 'dual',   fase: 1, natureza: 'alegacao_contrarrazoes' },
+    { label: 'Embargos à Execução',       polo: 'Parte Executada', tipo: 'auto', fase: 1, isExecucao: true, natureza: 'alegacao_postulatoria' },
+    { label: 'Impugnação aos Cálculos',   polo: 'Parte Exequente', tipo: 'auto', fase: 1, isExecucao: true, natureza: 'alegacao_postulatoria' },
     
     // --- FASE 2: Provocação Original ---
-    { label: 'Recurso Ordinário',         polo: 'DUAL',         tipo: 'dual',   fase: 2 },
-    { label: 'Recurso Adesivo',           polo: 'DUAL',         tipo: 'dual',   fase: 2 },
-    { label: 'Contrarrazões ao RO',       polo: 'DUAL',         tipo: 'dual',   fase: 2 },
-    { label: 'Petição Inicial',           polo: 'Parte Autora', tipo: 'auto',   fase: 2 },
-    { label: 'Contestação',               polo: 'Parte Ré',     tipo: 'auto',   fase: 2 },
-    { label: 'Impugnação à Contestação',  polo: 'Parte Autora', tipo: 'auto',   fase: 2 },
-    { label: 'Cálculos de Liquidação',    polo: 'DUAL',         tipo: 'dual',   fase: 2, isExecucao: true },
-    { label: 'Audiência de Instrução',    polo: 'DUAL',         tipo: 'dual',   fase: 2 },
+    { label: 'Recurso Ordinário',         polo: 'DUAL',         tipo: 'dual',   fase: 2, natureza: 'alegacao_recurso' },
+    { label: 'Recurso Adesivo',           polo: 'DUAL',         tipo: 'dual',   fase: 2, natureza: 'alegacao_recurso' },
+    { label: 'Contrarrazões ao RO',       polo: 'DUAL',         tipo: 'dual',   fase: 2, natureza: 'alegacao_contrarrazoes' },
+    { label: 'Petição Inicial',           polo: 'Parte Autora', tipo: 'auto',   fase: 2, natureza: 'alegacao_postulatoria' },
+    { label: 'Contestação',               polo: 'Parte Ré',     tipo: 'auto',   fase: 2, natureza: 'alegacao_postulatoria' },
+    { label: 'Impugnação à Contestação',  polo: 'Parte Autora', tipo: 'auto',   fase: 2, natureza: 'alegacao_postulatoria' },
+    { label: 'Cálculos de Liquidação',    polo: 'DUAL',         tipo: 'dual',   fase: 2, isExecucao: true, natureza: 'calculo_liquidacao' },
+    { label: 'Audiência de Instrução',    polo: 'DUAL',         tipo: 'dual',   fase: 2, natureza: 'prova_autos' },
 
     // --- FASE 3: A Decisão ---
-    { label: 'Acórdão Embargado',         polo: 'Juízo',        tipo: 'auto',   fase: 3 },
-    { label: 'Sentença Embargada',        polo: 'Juízo',        tipo: 'auto',   fase: 3 },
-    { label: 'Sentença de Liquidação',    polo: 'Juízo',        tipo: 'auto',   fase: 3, isExecucao: true },
+    { label: 'Acórdão Embargado',         polo: 'Juízo',        tipo: 'auto',   fase: 3, natureza: 'decisao_recorrida' },
+    { label: 'Sentença Embargada',        polo: 'Juízo',        tipo: 'auto',   fase: 3, natureza: 'decisao_recorrida' },
+    { label: 'Sentença de Liquidação',    polo: 'Juízo',        tipo: 'auto',   fase: 3, isExecucao: true, natureza: 'decisao_recorrida' },
     
     // --- FASE 4: Validação / Provas (Expansão ED) ---
-    { label: 'Guia de Recolhimento / Comprovante', polo: 'DUAL', tipo: 'dual', fase: 4 },
-    { label: 'Petição Original (Erro Material)',   polo: 'DUAL', tipo: 'dual', fase: 4 },
-    { label: 'Súmula / Jurisprudência Vinculante', polo: 'Tribunal', tipo: 'auto', fase: 4 },
+    { label: 'Guia de Recolhimento / Comprovante', polo: 'DUAL', tipo: 'dual', fase: 4, natureza: 'prova_autos' },
+    { label: 'Petição Original (Erro Material)',   polo: 'DUAL', tipo: 'dual', fase: 4, natureza: 'alegacao_postulatoria' },
+    { label: 'Súmula / Jurisprudência Vinculante', polo: 'Tribunal', tipo: 'auto', fase: 4, natureza: 'ato_judicial_oficial' },
     // Novas tipologias (Arquitetura One-Click com granularidade limpa para IA):
-    { label: 'Manifestação (Parte Autora)',        polo: 'Parte Autora', tipo: 'auto', fase: 4 },
-    { label: 'Manifestação (Parte Ré)',            polo: 'Parte Ré',     tipo: 'auto', fase: 4 },
-    { label: 'Manifestação (Exequente)',           polo: 'Parte Exequente', tipo: 'auto', fase: 4 },
-    { label: 'Manifestação (Executada)',           polo: 'Parte Executada', tipo: 'auto', fase: 4 },
-    { label: 'Atos da Secretaria / Certidões',     polo: 'Auxiliar da Justiça', tipo: 'auto', fase: 4 },
-    { label: 'Decisão / Despacho (Andamento)',     polo: 'Juízo', tipo: 'auto', fase: 4 }
+    { label: 'Manifestação (Parte Autora)',        polo: 'Parte Autora', tipo: 'auto', fase: 4, natureza: 'alegacao_postulatoria' },
+    { label: 'Manifestação (Parte Ré)',            polo: 'Parte Ré',     tipo: 'auto', fase: 4, natureza: 'alegacao_postulatoria' },
+    { label: 'Manifestação (Exequente)',           polo: 'Parte Exequente', tipo: 'auto', fase: 4, natureza: 'alegacao_postulatoria' },
+    { label: 'Manifestação (Executada)',           polo: 'Parte Executada', tipo: 'auto', fase: 4, natureza: 'alegacao_postulatoria' },
+    { label: 'Atos da Secretaria / Certidões',     polo: 'Auxiliar da Justiça', tipo: 'auto', fase: 4, natureza: 'ato_judicial_oficial' },
+    { label: 'Decisão / Despacho (Andamento)',     polo: 'Juízo', tipo: 'auto', fase: 4, natureza: 'ato_judicial_oficial' }
 ];
+window.DOC_CONFIG = DOC_CONFIG;
 
 let _docSelecionado = null;
 let _isWizardContext = false;
@@ -1433,8 +1434,24 @@ window.QuickRedactManager = (function() {
         agendarRadarAssincrono();
     }
 
+    /**
+     * Atualiza isoladamente o snapshot bruto de um único campo (ex: 'ctx-diretrizes')
+     * e reaplica os filtros LGPD ativos sem corromper os snapshots dos outros campos.
+     */
+    function ressincronizarCampo(idCampo, valorBrutoOriginal) {
+        const el = document.getElementById(idCampo);
+        const textoBase = String(valorBrutoOriginal || '');
+        _snapshotsOriginais.set(idCampo, textoBase);
+        if (!el) return;
+
+        const regexUnificada = _compilarRegexUnificada(obterTermos());
+        el.value = regexUnificada ? textoBase.replace(regexUnificada, MARCADOR_INLINE_LGPD) : textoBase;
+        agendarRadarAssincrono();
+    }
+
     return {
         inicializarSessaoModal,
+        ressincronizarCampo,
         adicionarTermoInput,
         aprovarSugestao,
         removerTermo,
@@ -1603,10 +1620,113 @@ window.salvarRascunhoContextoDebounced = _debounce(function() {
     }
 }, 800);
 
+/* --- CONTROLES DE HIERARQUIA EPISTEMOLÓGICA E AUDITORIA CRÍTICA IA (ED) --- */
+function _atualizarBadgeDiagnosticoEpistemologico(topico) {
+    const badge = document.getElementById('epistemic-stats-badge');
+    if (!badge || !topico) return;
+
+    const chaveSemNome = (window.ExportManager && window.ExportManager.CHAVE_TESE_SEM_NOME) || 'Tese Não Nomeada';
+    const anotacoesReais = (topico.anotacoes || []).filter(a => a && !(a.tipo && a.tipo.startsWith('checkpoint')));
+
+    let totalCartoesContexto = 0;
+    let totalNosIdeia = 0;
+    let ideiasSemDiretriz = 0;
+
+    const globaisValidas = (topico.diretrizesGlobais || []).filter(d => d && d.intencao !== 'nota');
+    totalNosIdeia += globaisValidas.length;
+
+    if (topico.diretrizesPorVicio) {
+        Object.values(topico.diretrizesPorVicio).forEach(lista => {
+            if (Array.isArray(lista)) {
+                totalNosIdeia += lista.filter(d => d && d.intencao !== 'nota').length;
+            }
+        });
+    }
+
+    if (topico.diretrizesPorTese) {
+        Object.values(topico.diretrizesPorTese).forEach(lista => {
+            if (Array.isArray(lista)) {
+                totalNosIdeia += lista.filter(d => d && d.intencao !== 'nota').length;
+            }
+        });
+    }
+
+    anotacoesReais.forEach(an => {
+        totalCartoesContexto += 1;
+        const corrList = Array.isArray(an.itensCorrelacionados) ? an.itensCorrelacionados : [];
+        totalCartoesContexto += corrList.length;
+
+        const nosLocaisMestre = (an.subAnotacoes || []).filter(s => s && s.intencao !== 'nota').length;
+        let nosLocaisCorr = 0;
+        corrList.forEach(c => {
+            nosLocaisCorr += (c.subAnotacoes || []).filter(s => s && s.intencao !== 'nota').length;
+        });
+
+        totalNosIdeia += nosLocaisMestre + nosLocaisCorr;
+
+        const vicioAtual = an.vicio || topico.vicio || 'omissao';
+        const nosDoVicio = (topico.diretrizesPorVicio && Array.isArray(topico.diretrizesPorVicio[vicioAtual]))
+            ? topico.diretrizesPorVicio[vicioAtual].filter(d => d && d.intencao !== 'nota').length
+            : 0;
+
+        const chaveTese = (an.tese && an.tese.trim() !== '') ? an.tese.trim() : chaveSemNome;
+        const nosDaTese = (topico.diretrizesPorTese && Array.isArray(topico.diretrizesPorTese[chaveTese]))
+            ? topico.diretrizesPorTese[chaveTese].filter(d => d && d.intencao !== 'nota').length
+            : 0;
+
+        if ((nosLocaisMestre + nosLocaisCorr + nosDoVicio + nosDaTese + globaisValidas.length) === 0 && !(topico.veredito && topico.veredito.trim() !== '')) {
+            ideiasSemDiretriz += 1;
+        }
+    });
+
+    if (totalNosIdeia === 0 && !(topico.veredito && topico.veredito.trim() !== '')) {
+        badge.classList.add('has-warning');
+        badge.textContent = `⚠️ ${totalCartoesContexto} cartão(ões) de contexto e 0 Nós de Ideia vinculantes. Adicione diretrizes para guiar a IA.`;
+    } else if (ideiasSemDiretriz > 0) {
+        badge.classList.add('has-warning');
+        badge.textContent = `🛡️ ${totalCartoesContexto} cartão(ões) (Contexto) | ${totalNosIdeia} Nó(s) de Ideia • (${ideiasSemDiretriz} ideia(s) sem nó específico)`;
+    } else {
+        badge.classList.remove('has-warning');
+        badge.textContent = `🛡️ ${totalCartoesContexto} cartão(ões) = Contexto Não-Vinculante | ${totalNosIdeia} Nó(s) de Ideia = Verdade Absoluta`;
+    }
+}
+
+window.alternarAuditoriaCriticaIA = function(ativo) {
+    if (!window.ExportManager) return;
+
+    if (typeof window.ExportManager.setAuditoriaCriticaAtiva === 'function') {
+        window.ExportManager.setAuditoriaCriticaAtiva(Boolean(ativo));
+    }
+
+    const dadosTopico = window.ExportManager.obterDadosDoTopicoAtivo({
+        modo: 'minuta',
+        auditoria: Boolean(ativo)
+    });
+
+    if (dadosTopico && typeof dadosTopico.markdown === 'string') {
+        if (window.QuickRedactManager && typeof window.QuickRedactManager.ressincronizarCampo === 'function') {
+            window.QuickRedactManager.ressincronizarCampo('ctx-diretrizes', dadosTopico.markdown);
+        } else {
+            const elDir = document.getElementById('ctx-diretrizes');
+            if (elDir) elDir.value = dadosTopico.markdown;
+        }
+    }
+};
+
 /* --- ABERTURA ASSÍNCRONA DO MODAL DE CONTEXTO (COM EXTRAÇÃO JIT - ED) --- */
 window.abrirModalGeradorContexto = async function() {
     if (!window.ExportManager) return;
-    const dadosTopico = ExportManager.obterDadosDoTopicoAtivo();
+
+    const auditoriaAtiva = typeof ExportManager.isAuditoriaCriticaAtiva === 'function'
+        ? ExportManager.isAuditoriaCriticaAtiva()
+        : true;
+    const chkAuditoria = document.getElementById('chk-auditoria-critica-ia');
+    if (chkAuditoria) chkAuditoria.checked = auditoriaAtiva;
+
+    const dadosTopico = ExportManager.obterDadosDoTopicoAtivo({
+        modo: 'minuta',
+        auditoria: auditoriaAtiva
+    });
     if (!dadosTopico) {
         exibirToast('Selecione um tópico com provas estruturadas antes de gerar o contexto.', 'aviso');
         return;
@@ -1624,6 +1744,7 @@ window.abrirModalGeradorContexto = async function() {
     try {
         // 2. EXTRAÇÃO ASSÍNCRONA DINÂMICA (Baseada nos Pinos)
         const topicoBruto = topicos.find(t => t.id === TopicsManager.getActiveTabId());
+        _atualizarBadgeDiagnosticoEpistemologico(topicoBruto);
         
         if (topicoBruto && topicoBruto.marcosExtracao && topicoBruto.marcosExtracao.length > 0) {
             // Agrupar marcos pareados por tipo de documento e polo
@@ -1668,12 +1789,11 @@ window.abrirModalGeradorContexto = async function() {
                         textoLimpo = window.ExportManager.aplicarFiltrosAvancados(textoLimpo, docTipo, amostrasMap, pInicio, pFim);
                     }
 
-                    // 2. CONSTRUÇÃO DO XML SEMÂNTICO (Engenharia de Prompt Segura)
-                    const tagName = docTipo.toUpperCase();
-                    // Se houver polo distinto, cria o atributo padronizado em snake_case (melhor parsing)
-                    const attrPolo = poloDaPeca !== 'Comum' ? ` polo="${poloDaPeca.replace(/\s+/g, '_')}"` : '';
-                    
-                    const xml = `\n<${tagName}${attrPolo}>\n${textoLimpo}\n</${tagName}>\n`;
+                    // 2. ENVELOPAMENTO EPISTEMOLÓGICO TOKENIZADO (com preservação de polo)
+                    const blocoEnvelopado = typeof window.ExportManager?.enveloparTeorIntegral === 'function'
+                        ? window.ExportManager.enveloparTeorIntegral(docTipo, textoLimpo, poloDaPeca)
+                        : `<${docTipo.toUpperCase()}${poloDaPeca !== 'Comum' ? ` polo="${poloDaPeca.replace(/\s+/g, '_')}"` : ''}>\n${textoLimpo}\n</${docTipo.toUpperCase()}>`;
+                    const xml = `\n${blocoEnvelopado}\n`;
 
                     if (docTipo === 'decisao') decisaoXML += xml;
                     else if (docTipo === 'embargos') embargosXML += xml;
@@ -1789,32 +1909,46 @@ Abaixo, envio os dados deste novo volume:
     const rascunho = document.getElementById('ctx-rascunho-ia').value.trim();
     if (rascunho) outputFinal += "== RASCUNHO BASE ==\n" + rascunho + "\n\n";
 
-    // INJEÇÃO XML SIGILOSA: Só ocorre se o modo for interno
+    // INJEÇÃO XML SIGILOSA: Só ocorre se o modo for interno (desambiguado de <escopo_auditoria>)
     if (modo === 'interno') {
         const decisao = document.getElementById('ctx-teor-decisao').value.trim();
         const embargos = document.getElementById('ctx-teor-embargos').value.trim();
         const confronto = document.getElementById('ctx-teor-confronto').value.trim();
 
         if (decisao || embargos || confronto) {
-            outputFinal += "<relatorio_do_conflito>\n";
+            const envelopar = (tipo, txt) => (window.ExportManager && typeof window.ExportManager.enveloparTeorIntegral === 'function')
+                ? window.ExportManager.enveloparTeorIntegral(tipo, txt)
+                : `<${tipo.toUpperCase()}>\n${txt}\n</${tipo.toUpperCase()}>`;
+
+            outputFinal += "<pecas_integrais_de_referencia_nao_vinculantes>\n";
+            outputFinal += "[ATENÇÃO IA]: Os inteiros teores abaixo servem apenas de consulta suplementar de contexto e delimitação do vício. Nenhuma alegação unilateral de parte ou fundamento superado pode prevalecer sobre os Nós de Ideia.\n\n";
             if (decisao) {
+                const decisaoEnvelopada = envelopar('decisao', decisao);
                 outputFinal += "  <inteiro_teor_decisao_embargada>\n";
-                // Identação profunda para delimitar pro LLM
-                outputFinal += `    ${decisao.replace(/\n/g, '\n    ')}\n`; 
+                outputFinal += `    ${decisaoEnvelopada.replace(/\n/g, '\n    ')}\n`; 
                 outputFinal += "  </inteiro_teor_decisao_embargada>\n\n";
             }
             if (embargos) {
+                const embargosEnvelopados = envelopar('embargos', embargos);
                 outputFinal += "  <inteiro_teor_embargos>\n";
-                outputFinal += `    ${embargos.replace(/\n/g, '\n    ')}\n`;
+                outputFinal += `    ${embargosEnvelopados.replace(/\n/g, '\n    ')}\n`;
                 outputFinal += "  </inteiro_teor_embargos>\n\n";
             }
             if (confronto) {
+                const confrontoEnvelopado = envelopar('documento_confronto', confronto);
                 outputFinal += "  <documentos_de_confronto>\n";
-                outputFinal += `    ${confronto.replace(/\n/g, '\n    ')}\n`;
+                outputFinal += `    ${confrontoEnvelopado.replace(/\n/g, '\n    ')}\n`;
                 outputFinal += "  </documentos_de_confronto>\n";
             }
-            outputFinal += "</relatorio_do_conflito>\n";
+            outputFinal += "</pecas_integrais_de_referencia_nao_vinculantes>\n\n";
         }
+    }
+
+    // ÂNCORA COGNITIVA FINAL: garante que o fechamento soberano dos Nós de Ideia seja o último bloco lido pela IA
+    if (window.ExportManager && typeof window.ExportManager.gerarLembreteFinalHierarquia === 'function') {
+        const chkAuditoria = document.getElementById('chk-auditoria-critica-ia');
+        const auditoriaAtiva = chkAuditoria ? chkAuditoria.checked : undefined;
+        outputFinal += window.ExportManager.gerarLembreteFinalHierarquia(topicoAtual, { auditoria: auditoriaAtiva });
     }
 
     // Feedback Visual Progressivo (Mutação Limpa sem Layout Shift)

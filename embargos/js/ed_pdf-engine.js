@@ -1,5 +1,5 @@
 /* ================================================
-   MOTOR DE RENDERIZAÇÃO DE PDF E METADADOS
+   MOTOR DE RENDERIZAÇÃO DE PDF E METADADOS (ED)
    Módulo isolado para gestão do PDF.js, Canvas e DOM do Inteiro Teor
    ================================================ */
 window.PdfEngine = (function () {
@@ -7,22 +7,27 @@ window.PdfEngine = (function () {
 
     // Estado Privado do Motor
     let _pdfDoc = null;
+    let _docEpoch = 0; // Contador monotônico de geração para invalidar Promises órfãs
     let _currentPage = 1;
     let _pageLabelsGlobais = null;
     const _pageMetadataCache = new Map();
+    const _footerBoundaryCache = new Map();
     let _pdfRenderObserver = null;
     let _pdfReadTracker = null;
     let _pdfDestroyObserver = null;
     const _activePages = new Set();
 
-    // Dependências Injetadas pelo app.js (Inversão de Controle)
+    // Dependências Injetadas pelo ed_app-core.js
     let _deps = {
         getTopicos: () => [],
         exibirToast: () => {},
         atualizarDisplayPaginador: () => {},
         validarPdf: async () => true,
+        compararPdf: null,
+        resolverDivergenciaPdf: null,
         iniciarSessaoBackup: async () => {},
         habilitarFerramentas: () => {},
+        onProcessoIdentificado: null,
         onPdfCarregado: async () => {}
     };
 
@@ -39,23 +44,20 @@ window.PdfEngine = (function () {
         externalLinkTarget: 2,
         
         goToDestination: async function(dest) {
-            console.group('🔵 [Diagnóstico LinkService] Gatilho Acionado!');
-            if (!_pdfDoc) {
-                console.error('Falha: Documento PDF não está disponível no escopo.');
-                console.groupEnd();
-                return;
-            }
+            if (!_pdfDoc) return;
+            const epoch = _docEpoch;
             try {
                 let explicitDest = dest;
                 if (typeof dest === 'string') {
                     explicitDest = await _pdfDoc.getDestination(dest);
                 }
+                if (epoch !== _docEpoch || !_pdfDoc) return;
                 if (Array.isArray(explicitDest)) {
                     const pageRef = explicitDest[0];
                     let pageNum;
-                    
                     if (typeof pageRef === 'object' && pageRef !== null) {
                         const pageIndex = await _pdfDoc.getPageIndex(pageRef);
+                        if (epoch !== _docEpoch) return;
                         pageNum = pageIndex + 1; 
                     } else if (Number.isInteger(pageRef)) {
                         pageNum = pageRef + 1;
@@ -65,10 +67,9 @@ window.PdfEngine = (function () {
             } catch (e) {
                 console.error('Exceção crítica na resolução do link:', e);
             }
-            console.groupEnd();
         },
         
-        goTo: function(pageNum) {
+        goTo: function(pageNum, opcoes = {}) {
             const pageContainer = document.querySelector(`.pdf-page-container[data-page-number="${pageNum}"]`);
             const scrollContainer = document.getElementById('pdf-container');
             
@@ -78,20 +79,29 @@ window.PdfEngine = (function () {
                 const targetScrollTop = scrollContainer.scrollTop + (pageRect.top - containerRect.top) - 16;
                 
                 scrollContainer.scrollTo({ top: targetScrollTop, behavior: 'auto' });
-                _deps.exibirToast(`Acessando fl. ${pageNum} via sumário.`, 'sucesso');
+                _currentPage = pageNum;
+                _deps.atualizarDisplayPaginador(pageNum);
+
+                if (!opcoes.silencioso) {
+                    _deps.exibirToast(`Acessando fl. ${pageNum} via sumário.`, 'sucesso');
+                }
+                return true;
             } else {
-                _deps.exibirToast('Página alvo não encontrada no DOM.', 'erro');
+                if (!opcoes.silencioso) {
+                    _deps.exibirToast('Página alvo não encontrada no DOM.', 'erro');
+                }
+                return false;
             }
         },
         
         getDestinationHash: function(dest) { return ''; },
         getAnchorUrl: function(hash) { return ''; },
         setDocument: function(doc) {},
-        executeNamedAction: function(action) { console.log('[JurisNotes] Ação interna:', action); }
+        executeNamedAction: function(action) {}
     };
 
     /* ================================================
-       METADADOS E BUSCA DE PÁGINAS
+       METADADOS E BUSCA DE PÁGINAS (BLINDADOS POR _docEpoch)
        ================================================ */
     function getDisplayLabel(pageNum) {
         const meta = _pageMetadataCache.get(pageNum);
@@ -105,6 +115,7 @@ window.PdfEngine = (function () {
     }
 
     function resolverPagina(termoBusca) {
+        if (!_pdfDoc) return null;
         let pageNum = parseInt(termoBusca, 10);
         let encontradoNoCache = false;
         
@@ -133,10 +144,16 @@ window.PdfEngine = (function () {
 
     async function extrairMetadadosDaPagina(pageNum, textContentPreCarregado = null) {
         if (_pageMetadataCache.has(pageNum)) return _pageMetadataCache.get(pageNum);
-        
+        if (!_pdfDoc) return { pjeId: null, flsNum: null };
+
+        const epoch = _docEpoch;
         try {
             const page = await _pdfDoc.getPage(pageNum);
+            if (epoch !== _docEpoch || !_pdfDoc) return { pjeId: null, flsNum: null };
+
             const textContent = textContentPreCarregado || await page.getTextContent();
+            if (epoch !== _docEpoch || !_pdfDoc) return { pjeId: null, flsNum: null };
+
             const viewport = page.getViewport({ scale: 1.0 });
             const items = textContent.items;
 
@@ -157,61 +174,60 @@ window.PdfEngine = (function () {
             const flsNum = matchFls ? matchFls[1] : null;
 
             const resultado = { pjeId, flsNum };
-            _pageMetadataCache.set(pageNum, resultado);
-            
+            if (epoch === _docEpoch) {
+                _pageMetadataCache.set(pageNum, resultado);
+            }
             return resultado;
         } catch (err) {
-            console.error('Falha ao extrair metadados físicos da página:', err);
+            if (epoch === _docEpoch) {
+                console.error('Falha ao extrair metadados físicos da página:', err);
+            }
             return { pjeId: null, flsNum: null };
         }
     }
 
-    const _footerBoundaryCache = new Map();
-
-    /**
-     * Detecta, para uma página específica, a coordenada Y (em pixels de viewport,
-     * escala 1.5 — a mesma usada na renderização) a partir da qual o conteúdo
-     * é bloco de assinatura eletrônica. Usa reconhecimento de padrão textual,
-     * não percentuais fixos, para se adaptar a rodapés de tamanhos diferentes.
-     */
     async function obterLimiteRodape(pageNum) {
         if (_footerBoundaryCache.has(pageNum)) return _footerBoundaryCache.get(pageNum);
+        if (!_pdfDoc) return null;
 
+        const epoch = _docEpoch;
         const REGEX_RODAPE_ASSINATURA = /(Documento\s+assinado\s+eletronicamente\s+por|Assinado\s+(?:digitalmente|eletronicamente)\s+por|Signatário(?:\(a\))?\s*:)/i;
 
         try {
             const page = await _pdfDoc.getPage(pageNum);
+            if (epoch !== _docEpoch || !_pdfDoc) return null;
+
             const viewport = page.getViewport({ scale: 1.5 });
             const textContent = await page.getTextContent();
+            if (epoch !== _docEpoch || !_pdfDoc) return null;
 
             let limiteY = null;
             for (const item of textContent.items) {
                 if (REGEX_RODAPE_ASSINATURA.test(item.str)) {
                     const [, vy] = viewport.convertToViewportPoint(item.transform[4], item.transform[5]);
-                    // Pequena margem de segurança para não cortar a última linha de conteúdo legítimo
                     const topoDoItem = vy - 4;
                     if (limiteY === null || topoDoItem < limiteY) limiteY = topoDoItem;
                 }
             }
 
-            _footerBoundaryCache.set(pageNum, limiteY);
+            if (epoch === _docEpoch) {
+                _footerBoundaryCache.set(pageNum, limiteY);
+            }
             return limiteY;
         } catch (err) {
-            console.warn('Falha ao calcular limite de rodapé da página', pageNum, err);
+            if (epoch === _docEpoch) {
+                console.warn('Falha ao calcular limite de rodapé da página', pageNum, err);
+            }
             return null;
         }
     }
 
-    /* ================================================
-       EXTRAÇÃO MATEMÁTICA DE TEXTO POR REGIÃO (ALFINETE)
-       ================================================ */
-    
-    // Função utilitária para liberar a Main Thread (macro-task)
     const _yieldToMain = () => new Promise(resolve => setTimeout(resolve, 0));
 
     async function extrairTextoPorRegiao(marcoInicio, marcoFim, onProgress = null, onPageRawText = null) {
         if (!_pdfDoc) return "";
         const targetPdfInstance = _pdfDoc;
+        const epoch = _docEpoch;
         let textoExtraido = "";
         
         const ESCALA_RENDERIZACAO_UI = 1.5; 
@@ -226,7 +242,9 @@ window.PdfEngine = (function () {
         let lastYieldTime = performance.now();
 
         for (let i = pInicio; i <= pFim; i++) {
-            if (_pdfDoc !== targetPdfInstance) throw new Error("CONCURRENCY_VIOLATION: O documento original foi alterado durante a extração.");
+            if (_pdfDoc !== targetPdfInstance || epoch !== _docEpoch) {
+                throw new Error("CONCURRENCY_VIOLATION: O documento original foi alterado durante a extração.");
+            }
             
             let page = null;
             try {
@@ -234,7 +252,6 @@ window.PdfEngine = (function () {
                 const viewportNative = page.getViewport({ scale: 1.0 }); 
                 const textContent = await page.getTextContent();
                 
-                // Hook de Amostragem (Single-Pass)
                 if (onPageRawText) {
                     onPageRawText(i, textContent.items.map(item => item.str).join(' '));
                 }
@@ -263,9 +280,8 @@ window.PdfEngine = (function () {
                     try { onProgress((i - pInicio) + 1, totalPaginas); } catch (e) {}
                 }
             } finally {
-                // Descarte O(1) nativo do V8 / Canvas
                 if (page && typeof page.cleanup === 'function') {
-                    try { page.cleanup(); } catch(e){}
+                    try { page.cleanup(); } catch (e) {}
                 }
             }
 
@@ -280,177 +296,340 @@ window.PdfEngine = (function () {
     }
 
     /* ================================================
-       CARREGAMENTO DE ARQUIVO E RENDERIZAÇÃO
+       INSPEÇÃO DE IDENTIDADE (CNJ + HASH DE PÁGINA) E DESMONTAGEM
        ================================================ */
-    async function carregarPDF(file, isRetomada) {
-        if (!file) return;
-
-        const fileReader = new FileReader();
-
-        fileReader.onload = async function () {
-            const arrayBuffer = this.result;
-
-            if (isRetomada) {
-                const hashValido = await _deps.validarPdf(arrayBuffer);
-                if (!hashValido) {
-                    _deps.exibirToast('PDF incorreto ou corrompido para este processo. Selecione o arquivo correto.', 'erro');
-                    const uploadInput = document.getElementById('pdf-upload');
-                    uploadInput.value = '';
-                    setTimeout(() => uploadInput.click(), 1500);
-                    return;
-                }
+    async function _extrairNumeroCnjCapa(firstPage) {
+        try {
+            const textContentFirstPage = await firstPage.getTextContent();
+            const rawString = textContentFirstPage.items.map(item => item.str).join('');
+            const sanitizedString = rawString.replace(/\s+/g, '');
+            const cnjRegex = /(\d{7})[-]?(\d{2})\.?(\d{4})\.?\d\.?\d{2}\.?\d{4}/;
+            const match = sanitizedString.match(cnjRegex);
+            if (match) {
+                const sequencialLimpo = match[1].slice(-4);
+                const digito = match[2];
+                const ano = match[3];
+                return `${sequencialLimpo}-${digito}.${ano}`;
             }
+        } catch (err) {
+            console.warn("[Juris Notes ED] Falha ao tentar capturar o número do processo na capa.", err);
+        }
+        return null;
+    }
 
-            if (!isRetomada) {
-                await _deps.iniciarSessaoBackup(file.name, arrayBuffer);
+    /**
+     * Gera um hash SHA-256 do conteúdo textual normalizado de uma página específica
+     * para detectar deslocamento de páginas (Page Shift) no meio do processo.
+     * Retorna null se a página for puramente imagem (< 20 caracteres alfanuméricos).
+     */
+    async function _calcularHashTextoPagina(pdfDocInstance, pageNum) {
+        if (!pdfDocInstance || !Number.isInteger(pageNum) || pageNum < 1 || pageNum > pdfDocInstance.numPages) {
+            return null;
+        }
+        let page = null;
+        try {
+            page = await pdfDocInstance.getPage(pageNum);
+            const textContent = await page.getTextContent();
+            const textoNormalizado = textContent.items
+                .map(item => item.str)
+                .join('')
+                .replace(/\s+/g, '')
+                .toLowerCase();
+
+            if (textoNormalizado.length < 20) return null;
+
+            const encoder = new TextEncoder();
+            const data = encoder.encode(textoNormalizado);
+            const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+            return Array.from(new Uint8Array(hashBuffer))
+                .map(b => b.toString(16).padStart(2, '0'))
+                .join('');
+        } catch (e) {
+            return null;
+        } finally {
+            if (page && typeof page.cleanup === 'function') {
+                try { page.cleanup(); } catch (e) {}
             }
+        }
+    }
 
+    function _desmontarDocumentoAtual() {
+        // Incrementa a época ANTES de cancelar/limpar para invalidar qualquer Promise em voo
+        _docEpoch++;
+
+        if (_pdfRenderObserver) {
+            _pdfRenderObserver.disconnect();
+            _pdfRenderObserver = null;
+        }
+        if (_pdfDestroyObserver) {
+            _pdfDestroyObserver.disconnect();
+            _pdfDestroyObserver = null;
+        }
+        if (_pdfReadTracker) {
+            _pdfReadTracker.disconnect();
+            _pdfReadTracker = null;
+        }
+
+        document.querySelectorAll('.pdf-page-container').forEach(container => {
+            if (container._scrollRaf) {
+                cancelAnimationFrame(container._scrollRaf);
+                container._scrollRaf = null;
+            }
+            descarregarPaginaElemento(container);
+        });
+
+        _activePages.clear();
+        _pageMetadataCache.clear();
+        _footerBoundaryCache.clear();
+        _pageLabelsGlobais = null;
+
+        if (_pdfDoc && typeof _pdfDoc.destroy === 'function') {
+            try { _pdfDoc.destroy(); } catch (e) {}
+        }
+        _pdfDoc = null;
+    }
+
+    /* ================================================
+       CARREGAMENTO TRANSACIONAL E RENDERIZAÇÃO
+       ================================================ */
+    async function carregarPDF(file, modoOuRetomada = false) {
+        if (!file) return { ok: false, motivo: 'arquivo_ausente' };
+
+        let modo = 'novo';
+        if (typeof modoOuRetomada === 'string') {
+            modo = modoOuRetomada;
+        } else if (modoOuRetomada && typeof modoOuRetomada === 'object' && modoOuRetomada.modo) {
+            modo = modoOuRetomada.modo;
+        } else if (modoOuRetomada === true) {
+            modo = 'retomada';
+        }
+
+        let arrayBuffer;
+        try {
+            arrayBuffer = await file.arrayBuffer();
+        } catch (err) {
+            console.error('Erro na leitura do arquivo:', err);
+            _deps.exibirToast('Não foi possível ler o arquivo selecionado.', 'erro');
+            return { ok: false, motivo: 'erro_io' };
+        }
+
+        // 1. Calcula o hash SHA-256 uma única vez antes de o pdf.js transferir o ArrayBuffer ao Worker
+        let comparacao = { coincide: true, hash: null, isLegado: false };
+        if (typeof _deps.compararPdf === 'function') {
+            comparacao = await _deps.compararPdf(arrayBuffer);
+        } else if (modo !== 'novo' && typeof _deps.validarPdf === 'function') {
+            const valido = await _deps.validarPdf(arrayBuffer);
+            comparacao = { coincide: valido, hash: null, isLegado: false };
+        }
+
+        // 2. Abre o PDF candidato em memória SEM tocar no documento atual
+        let novoDoc = null;
+        try {
             const typedarray = new Uint8Array(arrayBuffer);
+            novoDoc = await pdfjsLib.getDocument({ data: typedarray }).promise;
+        } catch (err) {
+            console.error('Erro ao processar estrutura do PDF:', err);
+            _deps.exibirToast('Erro ao ler o PDF. Verifique a integridade do arquivo.', 'erro');
+            return { ok: false, motivo: 'pdf_invalido' };
+        }
 
-            pdfjsLib.getDocument(typedarray).promise
-                .then(async pdf => {
-                    _pdfDoc = pdf;
-                    document.getElementById('total-page-display').textContent = pdf.numPages;
+        // 3. Inspeciona 1ª página (CNJ) e calcula o hash textual da última página do novoDoc
+        let firstPage = null;
+        let numeroCnjCapa = null;
+        let novaUltimaPaginaHash = null;
+        try {
+            firstPage = await novoDoc.getPage(1);
+            numeroCnjCapa = await _extrairNumeroCnjCapa(firstPage);
+            novaUltimaPaginaHash = await _calcularHashTextoPagina(novoDoc, novoDoc.numPages);
+        } catch (err) {
+            try { await novoDoc.destroy(); } catch (e) {}
+            _deps.exibirToast('Não foi possível ler as páginas do PDF.', 'erro');
+            return { ok: false, motivo: 'pagina_invalida' };
+        }
 
-                    try {
-                        _pageLabelsGlobais = await pdf.getPageLabels();
-                    } catch (e) {
-                        _pageLabelsGlobais = null;
-                    }
-
-                    _deps.habilitarFerramentas();
-
-                    const wrapper = document.getElementById('pdf-wrapper');
-                    wrapper.innerHTML = '';
-                    wrapper.style.display = 'flex';
-                    document.getElementById('pdf-placeholder').style.display = 'none';
-                    document.getElementById('floating-page-panel').style.display = 'flex';
-
-                    if (_pdfRenderObserver) _pdfRenderObserver.disconnect();
-                    if (_pdfDestroyObserver) _pdfDestroyObserver.disconnect();
-                    _activePages.clear();
-
-                    // Observer de Renderização com Micro-Task Filtering e Skeleton State (Adaptado ED: 800px)
-                    _pdfRenderObserver = new IntersectionObserver((entries) => {
-                        entries.forEach(entry => {
-                            const container = entry.target;
-                            
-                            if (entry.isIntersecting) {
-                                if (container.dataset.loaded === 'false') {
-                                    // Altera o estado imediatamente para mostrar o Spinner
-                                    container.dataset.loaded = 'loading'; 
-                                    
-                                    container._scrollRaf = requestAnimationFrame(() => {
-                                        renderizarPaginaElemento(parseInt(container.dataset.pageNumber), container);
-                                    });
-                                }
-                            } else {
-                                // Se saiu da tela rápido demais, aborta o frame e volta pro estado false
-                                if (container._scrollRaf && container.dataset.loaded === 'loading') {
-                                    cancelAnimationFrame(container._scrollRaf);
-                                    container._scrollRaf = null;
-                                    container.dataset.loaded = 'false';
-                                }
-                            }
-                        });
-                    }, { root: document.getElementById('pdf-container'), rootMargin: '800px 0px', threshold: 0 });
-
-                    // Observer 2: Destrói tarde (Histerese de 3000px)
-                    _pdfDestroyObserver = new IntersectionObserver((entries) => {
-                        entries.forEach(entry => {
-                            const container = entry.target;
-                            if (entry.isIntersecting) {
-                                _activePages.add(container);
-                            } else {
-                                _activePages.delete(container);
-                                if (container.dataset.loaded === 'true') {
-                                    descarregarPaginaElemento(container);
-                                    container.dataset.loaded = 'false';
-                                }
-                            }
-                        });
-                    }, { root: document.getElementById('pdf-container'), rootMargin: '3000px 0px', threshold: 0 });
-
-                    if (_pdfReadTracker) _pdfReadTracker.disconnect();
-                    _pdfReadTracker = new IntersectionObserver((entries) => {
-                        entries.forEach(entry => {
-                            if (entry.isIntersecting) {
-                                const pageNum = parseInt(entry.target.dataset.pageNumber);
-                                _currentPage = pageNum;
-                                _deps.atualizarDisplayPaginador(pageNum);
-                            }
-                        });
-                    }, { root: document.getElementById('pdf-container'), rootMargin: '-15% 0px -80% 0px', threshold: 0 });
-
-                    const firstPage = await pdf.getPage(1);
-                    const viewportCSS = firstPage.getViewport({ scale: 1.5 });
-
-                    // -- INÍCIO: OTIMIZAÇÃO DE MONTAGEM O(1) COM DOCUMENT FRAGMENT --
-                    const fragment = document.createDocumentFragment();
-
-                    for (let i = 1; i <= pdf.numPages; i++) {
-                        const pageContainer = document.createElement('div');
-                        pageContainer.className = 'pdf-page-container';
-                        pageContainer.dataset.pageNumber = i;
-                        pageContainer.dataset.loaded = 'false';
-                        pageContainer.style.cssText = `
-                            width: ${viewportCSS.width}px;
-                            height: ${viewportCSS.height}px;
-                            position: relative;
-                            margin-bottom: 24px;
-                            background-color: var(--pdf-bg-color);
-                            box-shadow: var(--shadow-md);
-                        `;
-                        fragment.appendChild(pageContainer);
-                        
-                        _pdfRenderObserver.observe(pageContainer);
-                        _pdfDestroyObserver.observe(pageContainer);
-                        _pdfReadTracker.observe(pageContainer);
-                    }
-                    
-                    wrapper.appendChild(fragment);
-                    // -- FIM: OTIMIZAÇÃO DE MONTAGEM O(1) --
-
-                    try {
-                        const textContentFirstPage = await firstPage.getTextContent();
-                        const rawString = textContentFirstPage.items.map(item => item.str).join('');
-                        const sanitizedString = rawString.replace(/\s+/g, '');
-
-                        const cnjRegex = /(\d{7})[-]?(\d{2})\.?(\d{4})\.?\d\.?\d{2}\.?\d{4}/;
-                        const match = sanitizedString.match(cnjRegex);
-
-                        if (match && typeof _deps.onProcessoIdentificado === 'function') {
-                            const sequencialLimpo = match[1].slice(-4); 
-                            const digito = match[2];
-                            const ano = match[3];
-
-                            const numeroUltraCurto = `${sequencialLimpo}-${digito}.${ano}`; 
-                            
-                            _deps.onProcessoIdentificado(numeroUltraCurto);
-                        }
-                    } catch (err) {
-                        console.warn("[Juris Notes ED] Falha ao tentar capturar o número do processo na capa.", err);
-                    }
-
-                    await _deps.onPdfCarregado(isRetomada);
-                })
-                .catch(err => {
-                    console.error('Erro ao processar PDF:', err);
-                    _deps.exibirToast('Erro ao ler o PDF. Verifique a integridade do arquivo.', 'erro');
+        // 4. Se for retomada com divergência ou substituição (Hot-Swap), valida com o usuário
+        if (modo !== 'novo' && (!comparacao.coincide || modo === 'substituicao')) {
+            let aceito = false;
+            if (typeof _deps.resolverDivergenciaPdf === 'function') {
+                aceito = await _deps.resolverDivergenciaPdf({
+                    hash: comparacao.hash,
+                    coincide: comparacao.coincide,
+                    numPaginas: novoDoc.numPages,
+                    nomeArquivo: file.name,
+                    numeroCnj: numeroCnjCapa,
+                    novaUltimaPaginaHash,
+                    inspecionarHashPagina: (numPag) => _calcularHashTextoPagina(novoDoc, numPag),
+                    modo
                 });
-        };
+            } else {
+                aceito = comparacao.coincide;
+            }
 
-        fileReader.readAsArrayBuffer(file);
+            if (!aceito) {
+                if (firstPage && typeof firstPage.cleanup === 'function') {
+                    try { firstPage.cleanup(); } catch (e) {}
+                }
+                try { await novoDoc.destroy(); } catch (e) {}
+
+                if (modo === 'retomada') {
+                    const uploadInput = document.getElementById('pdf-upload');
+                    if (uploadInput) {
+                        uploadInput.value = '';
+                        setTimeout(() => uploadInput.click(), 1200);
+                    }
+                }
+                return { ok: false, motivo: 'recusado' };
+            }
+        }
+
+        // 5. Se for sessão nova, registra no BackupManager com o hash já calculado
+        if (modo === 'novo') {
+            await _deps.iniciarSessaoBackup(file.name, {
+                hash: comparacao.hash,
+                numPaginas: novoDoc.numPages,
+                processoCnj: numeroCnjCapa,
+                ultimaPaginaHash: novaUltimaPaginaHash
+            });
+        }
+
+        // 6. Desmonta o documento antigo (incrementando _docEpoch) e assume o novoDoc
+        _desmontarDocumentoAtual();
+        _pdfDoc = novoDoc;
+        _currentPage = 1;
+        const activeEpoch = _docEpoch;
+
+        document.getElementById('total-page-display').textContent = _pdfDoc.numPages;
+
+        try {
+            _pageLabelsGlobais = await _pdfDoc.getPageLabels();
+        } catch (e) {
+            _pageLabelsGlobais = null;
+        }
+        if (activeEpoch !== _docEpoch) return { ok: false, motivo: 'substituido' };
+
+        _deps.habilitarFerramentas();
+
+        const wrapper = document.getElementById('pdf-wrapper');
+        wrapper.innerHTML = '';
+        wrapper.style.display = 'flex';
+        document.getElementById('pdf-placeholder').style.display = 'none';
+        document.getElementById('floating-page-panel').style.display = 'flex';
+
+        _pdfRenderObserver = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                const container = entry.target;
+                if (entry.isIntersecting) {
+                    if (container.dataset.loaded === 'false') {
+                        container.dataset.loaded = 'loading'; 
+                        container._scrollRaf = requestAnimationFrame(() => {
+                            renderizarPaginaElemento(parseInt(container.dataset.pageNumber, 10), container);
+                        });
+                    }
+                } else {
+                    if (container._scrollRaf && container.dataset.loaded === 'loading') {
+                        cancelAnimationFrame(container._scrollRaf);
+                        container._scrollRaf = null;
+                        container.dataset.loaded = 'false';
+                    }
+                }
+            });
+        }, { root: document.getElementById('pdf-container'), rootMargin: '800px 0px', threshold: 0 });
+
+        _pdfDestroyObserver = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                const container = entry.target;
+                if (entry.isIntersecting) {
+                    _activePages.add(container);
+                } else {
+                    _activePages.delete(container);
+                    if (container.dataset.loaded === 'true') {
+                        descarregarPaginaElemento(container);
+                        container.dataset.loaded = 'false';
+                    }
+                }
+            });
+        }, { root: document.getElementById('pdf-container'), rootMargin: '3000px 0px', threshold: 0 });
+
+        _pdfReadTracker = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    const pageNum = parseInt(entry.target.dataset.pageNumber, 10);
+                    _currentPage = pageNum;
+                    _deps.atualizarDisplayPaginador(pageNum);
+                }
+            });
+        }, { root: document.getElementById('pdf-container'), rootMargin: '-15% 0px -80% 0px', threshold: 0 });
+
+        const viewportCSS = firstPage.getViewport({ scale: 1.5 });
+        const fragment = document.createDocumentFragment();
+
+        for (let i = 1; i <= _pdfDoc.numPages; i++) {
+            const pageContainer = document.createElement('div');
+            pageContainer.className = 'pdf-page-container';
+            pageContainer.dataset.pageNumber = i;
+            pageContainer.dataset.loaded = 'false';
+            pageContainer.style.cssText = `
+                width: ${viewportCSS.width}px;
+                height: ${viewportCSS.height}px;
+                position: relative;
+                margin-bottom: 24px;
+                background-color: var(--pdf-bg-color);
+                box-shadow: var(--shadow-md);
+            `;
+            fragment.appendChild(pageContainer);
+            
+            _pdfRenderObserver.observe(pageContainer);
+            _pdfDestroyObserver.observe(pageContainer);
+            _pdfReadTracker.observe(pageContainer);
+        }
+        
+        wrapper.appendChild(fragment);
+
+        if (numeroCnjCapa && typeof _deps.onProcessoIdentificado === 'function') {
+            _deps.onProcessoIdentificado(numeroCnjCapa);
+        }
+
+        // Primeiro parâmetro: false quando 'novo' (retrocompatível com checagens booleanas legadas)
+        await _deps.onPdfCarregado(modo === 'novo' ? false : modo, {
+            modo,
+            numPaginas: _pdfDoc.numPages,
+            numeroCnj: numeroCnjCapa,
+            hash: comparacao.hash,
+            ultimaPaginaHash: novaUltimaPaginaHash
+        });
+
+        return {
+            ok: true,
+            numPaginas: _pdfDoc.numPages,
+            numeroCnj: numeroCnjCapa
+        };
     }
 
     async function renderizarPaginaElemento(num, container) {
         if (!_pdfDoc) return;
+        const epoch = _docEpoch;
 
-        if (container._renderTask) container._renderTask.cancel();
+        if (container._renderTask) {
+            try { container._renderTask.cancel(); } catch (e) {}
+            container._renderTask = null;
+        }
         container.innerHTML = '';
 
-        const page = await _pdfDoc.getPage(num);
-        container._pdfPageRef = page; // Salva referência para GC granular
+        let page;
+        try {
+            page = await _pdfDoc.getPage(num);
+        } catch (err) {
+            if (epoch === _docEpoch) container.dataset.loaded = 'false';
+            return;
+        }
+        if (epoch !== _docEpoch || !_pdfDoc) {
+            if (page && typeof page.cleanup === 'function') {
+                try { page.cleanup(); } catch (e) {}
+            }
+            return;
+        }
+
+        container._pdfPageRef = page;
         const dpr = window.devicePixelRatio || 1;
         const scale = 1.5;
         const viewport = page.getViewport({ scale: scale });
@@ -480,14 +659,18 @@ window.PdfEngine = (function () {
 
         try {
             await container._renderTask.promise;
+            if (epoch !== _docEpoch || !_pdfDoc) return;
             
             const textContent = await page.getTextContent();
+            if (epoch !== _docEpoch || !_pdfDoc) return;
+
             const tl = new pdfjsLib.TextLayer({
                 textContentSource: textContent,
                 container: textLayer,
                 viewport: viewport
             });
             await tl.render();
+            if (epoch !== _docEpoch || !_pdfDoc) return;
 
             const highlightLayerDiv = document.createElement('div');
             highlightLayerDiv.className = 'highlightLayer';
@@ -498,11 +681,13 @@ window.PdfEngine = (function () {
 
             if (!_pageMetadataCache.has(num)) {
                 extrairMetadadosDaPagina(num, textContent).then(() => {
-                    _deps.atualizarDisplayPaginador(num);
+                    if (epoch === _docEpoch) _deps.atualizarDisplayPaginador(num);
                 });
             }
 
             const annotationData = await page.getAnnotations();
+            if (epoch !== _docEpoch || !_pdfDoc) return;
+
             if (annotationData && annotationData.length > 0 && container.contains(textLayer)) {
                 const annotationLayerDiv = document.createElement('div');
                 annotationLayerDiv.className = 'annotationLayer';
@@ -525,15 +710,16 @@ window.PdfEngine = (function () {
                 });
             }
             
-            // NOVO: Apenas após TODO o canvas e texto serem renderizados, marcamos como true.
-            container.dataset.loaded = 'true'; 
-
+            if (epoch === _docEpoch) {
+                container.dataset.loaded = 'true';
+            }
         } catch (err) {
-            if (err.name !== 'RenderingCancelledException') {
+            if (err.name !== 'RenderingCancelledException' && epoch === _docEpoch) {
                 console.error('Erro ao renderizar página PDF:', err);
             }
-            // NOVO: Se a renderização for cancelada ou falhar, volta ao estado vazio
-            container.dataset.loaded = 'false';
+            if (epoch === _docEpoch) {
+                container.dataset.loaded = 'false';
+            }
         } finally {
             container._renderTask = null;
         }
@@ -676,7 +862,7 @@ window.PdfEngine = (function () {
     function sincronizarHighlightsGerais() {
         document.querySelectorAll('.pdf-page-container').forEach(container => {
             if (container.dataset.loaded === 'true') {
-                const pageNum = parseInt(container.dataset.pageNumber);
+                const pageNum = parseInt(container.dataset.pageNumber, 10);
                 const highlightLayerDiv = container.querySelector('.highlightLayer');
                 if (highlightLayerDiv) {
                     _renderizarHighlightsDaPagina(pageNum, highlightLayerDiv);
@@ -685,72 +871,50 @@ window.PdfEngine = (function () {
         });
     }
 
-    /* ================================================
-       OTIMIZAÇÃO DE MEMÓRIA (GARBAGE COLLECTION) E RECUPERAÇÃO
-       ================================================ */
     function descarregarPaginaElemento(container) {
         if (container._renderTask) {
-            container._renderTask.cancel();
+            try { container._renderTask.cancel(); } catch (e) {}
             container._renderTask = null;
         }
         container.innerHTML = '';
         
-        // Limpeza granular O(1) de cache na API do PDF.js 
-        // (Libera Memória VRAM e Bitmap sem destruir o Parser Global)
         if (container._pdfPageRef && typeof container._pdfPageRef.cleanup === 'function') {
-            try { container._pdfPageRef.cleanup(); } catch(e){}
+            try { container._pdfPageRef.cleanup(); } catch (e) {}
             container._pdfPageRef = null;
         }
     }
 
     function forcarReRenderizacaoVisiveis() {
         if (!_pdfDoc) return;
-        // Travessia assintótica de O(N=4000) reduzida para O(K=~15)
         _activePages.forEach(container => {
             const canvas = container.querySelector('canvas');
-            // Se o navegador ceifou o contexto do Canvas na suspensão da aba
             if (!canvas || canvas.width === 0) {
                 descarregarPaginaElemento(container);
-                renderizarPaginaElemento(parseInt(container.dataset.pageNumber), container);
+                renderizarPaginaElemento(parseInt(container.dataset.pageNumber, 10), container);
                 container.dataset.loaded = 'true';
             }
         });
     }
 
     function encerrar() {
-        if (_pdfRenderObserver) {
-            _pdfRenderObserver.disconnect();
-            _pdfRenderObserver = null;
-        }
-        if (_pdfDestroyObserver) {
-            _pdfDestroyObserver.disconnect();
-            _pdfDestroyObserver = null;
-        }
-        if (_pdfReadTracker) {
-            _pdfReadTracker.disconnect();
-            _pdfReadTracker = null;
-        }
-        _activePages.clear();
-        _pdfDoc = null;
-        _pageLabelsGlobais = null;
-        _pageMetadataCache.clear();
+        _desmontarDocumentoAtual();
         _currentPage = 1;
     }
 
     return {
-            init,
-            carregarPDF,
-            sincronizarHighlightsGerais,
-            obterRotuloPagina,
-            getDisplayLabel,
-            extrairMetadadosDaPagina,
-            extrairTextoPorRegiao,
-            obterLimiteRodape,
-            resolverPagina,
-            goToPage: jurisLinkService.goTo,
-            getPdfDoc: () => _pdfDoc,
-            getCurrentPage: () => _currentPage,
-            forcarReRenderizacaoVisiveis,
-            encerrar
-        };
-    })();
+        init,
+        carregarPDF,
+        sincronizarHighlightsGerais,
+        obterRotuloPagina,
+        getDisplayLabel,
+        extrairMetadadosDaPagina,
+        extrairTextoPorRegiao,
+        obterLimiteRodape,
+        resolverPagina,
+        goToPage: (pageNum, opcoes) => jurisLinkService.goTo(pageNum, opcoes),
+        getPdfDoc: () => _pdfDoc,
+        getCurrentPage: () => _currentPage,
+        forcarReRenderizacaoVisiveis,
+        encerrar
+    };
+})();

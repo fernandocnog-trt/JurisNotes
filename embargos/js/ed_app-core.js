@@ -761,10 +761,11 @@ document.addEventListener("DOMContentLoaded", () => {
             exibirToast: exibirToast,
             atualizarDisplayPaginador: atualizarDisplayPaginador,
             validarPdf: (buffer) => BackupManager.validarPdf(buffer),
-            iniciarSessaoBackup: (name, buffer) => BackupManager.iniciarSessao(name, buffer),
+            compararPdf: (buffer) => BackupManager.compararPdf(buffer),
+            resolverDivergenciaPdf: resolverDivergenciaPdf,
+            iniciarSessaoBackup: (name, opcoesOuBuffer) => BackupManager.iniciarSessao(name, opcoesOuBuffer),
             habilitarFerramentas: habilitarFerramentasDeTrabalho,
             onProcessoIdentificado: (numeroCurto) => {
-                // Atualiza o DOM (Interface)
                 const tagProcesso = document.getElementById('tag-numero-processo');
                 if (tagProcesso) {
                     tagProcesso.textContent = numeroCurto;
@@ -772,17 +773,14 @@ document.addEventListener("DOMContentLoaded", () => {
                     tagProcesso.title = 'Clique para copiar';
                     tagProcesso.classList.add('tag-clicavel-copia');
 
-                    // Clone profundo para prevenir vazamento de memória com listeners acumulados
                     const novaTag = tagProcesso.cloneNode(true);
                     tagProcesso.parentNode.replaceChild(novaTag, tagProcesso);
 
-                    // Evento de clique com Fallback de Clipboard
                     novaTag.addEventListener('click', async () => {
                         try {
                             if (navigator.clipboard && window.isSecureContext) {
                                 await navigator.clipboard.writeText(numeroCurto);
                             } else {
-                                // Fallback para ambientes sem contexto seguro (ex: file://)
                                 const textArea = document.createElement("textarea");
                                 textArea.value = numeroCurto;
                                 textArea.style.position = "fixed";
@@ -801,43 +799,88 @@ document.addEventListener("DOMContentLoaded", () => {
                         }
                     });
                 }
-                // Define o nome de backup padrão ED SEM o sufixo arbitrário "_backup"
                 window._nomeArquivoSugerido = `ED_${numeroCurto}.json`;
             },
-            onPdfCarregado: async (isRetomada) => {
-                if (isRetomada) {
+            onPdfCarregado: async (modoOuFlag, info = {}) => {
+                const modo = info.modo || (modoOuFlag === 'substituicao' ? 'substituicao' : (modoOuFlag ? 'retomada' : 'novo'));
+
+                if (modo === 'substituicao') {
+                    BackupManager.confirmarAtualizacaoPdf({
+                        numPaginas: info.numPaginas,
+                        processoCnj: info.numeroCnj,
+                        ultimaPaginaHash: info.ultimaPaginaHash
+                    });
+                    if (typeof salvarBackupAutomatico === 'function') {
+                        await salvarBackupAutomatico();
+                    }
+                    return;
+                }
+
+                if (modo === 'retomada') {
                     modoRetomada = false;
+                    const confirmouNovoPdf = BackupManager.confirmarAtualizacaoPdf({
+                        numPaginas: info.numPaginas,
+                        processoCnj: info.numeroCnj,
+                        ultimaPaginaHash: info.ultimaPaginaHash
+                    });
+
+                    // Se era um backup legado (sem hash/numPaginas) ou primeira validação completa, promove os metadados
+                    const promoveuLegado = BackupManager.registrarMetadadosPdf({
+                        hash: info.hash,
+                        numPaginas: info.numPaginas,
+                        processoCnj: info.numeroCnj,
+                        ultimaPaginaHash: info.ultimaPaginaHash
+                    });
+
+                    if ((confirmouNovoPdf || promoveuLegado) && typeof salvarBackupAutomatico === 'function') {
+                        await salvarBackupAutomatico();
+                    }
+
                     trocarAba('leitura');
-                    exibirToast('PDF validado e carregado. Sessão retomada com sucesso. ✓');
+                    exibirToast(
+                        confirmouNovoPdf
+                            ? 'PDF atualizado (Diligência) e vinculado ao backup com sucesso! ✓'
+                            : 'PDF validado e carregado. Sessão retomada com sucesso. ✓',
+                        'sucesso'
+                    );
                     
                     if (_sessaoPossuiAudio && typeof window.AudioManager?.prepararRetomada === 'function') {
                         window.AudioManager.prepararRetomada();
                     }
-                } else {
-                    trocarAba('leitura');
-                    console.log("[JURIS LOG] PDF renderizado. Exibindo modal de backup.");
-                    document.getElementById('backup-modal-backdrop').style.display = 'block';
-                    document.getElementById('modal-ativar-backup').style.display = 'flex';
+                    return;
+                }
 
-                    if (window.PjeParser && window.PdfEngine && PdfEngine.getPdfDoc()) {
-                        exibirToast('Analisando sumário do processo em segundo plano...', 'aviso');
-                        PjeParser.mapearAtalhos(PdfEngine.getPdfDoc())
-                            .then(async (atalhos) => {
-                                if (atalhos.sentenca) {
-                                    window.ShortcutManager.setState({
-                                        acordao: atalhos.sentenca || null // O Parser acha a "Sentença", nós mapeamos para "Acórdão" no ED.
-                                    });
-                                    window.ShortcutManager.toggleVisibility(true);
-                                    if (typeof salvarBackupAutomatico === 'function') {
-                                        await salvarBackupAutomatico();
-                                    }
-                                    exibirToast('Atalho do Acórdão Embargado preenchido automaticamente!', 'sucesso');
-                                } else {
-                                    exibirToast('Análise concluída: Sumário padrão não encontrado.', 'aviso');
+                // Ramo 'novo'
+                BackupManager.registrarMetadadosPdf({
+                    hash: info.hash,
+                    numPaginas: info.numPaginas,
+                    processoCnj: info.numeroCnj,
+                    ultimaPaginaHash: info.ultimaPaginaHash
+                });
+
+                trocarAba('leitura');
+                console.log("[JURIS LOG] PDF renderizado. Exibindo modal de backup.");
+                document.getElementById('backup-modal-backdrop').style.display = 'block';
+                document.getElementById('modal-ativar-backup').style.display = 'flex';
+
+                if (window.PjeParser && window.PdfEngine && PdfEngine.getPdfDoc()) {
+                    exibirToast('Analisando sumário do processo em segundo plano...', 'aviso');
+                    PjeParser.mapearAtalhos(PdfEngine.getPdfDoc())
+                        .then(async (atalhos) => {
+                            if (atalhos.sentenca) {
+                                window.ShortcutManager.setState({
+                                    acordao: atalhos.sentenca || null
+                                });
+                                window.ShortcutManager.toggleVisibility(true);
+                                if (typeof salvarBackupAutomatico === 'function') {
+                                    await salvarBackupAutomatico();
                                 }
-                            })
-                            .catch(e => console.warn('[Juris Notes] Erro não-bloqueante no Parser PJe:', e));
-                    }
+                                exibirToast('Atalho do Acórdão Embargado preenchido automaticamente!', 'sucesso');
+                            } else {
+                                exibirToast('Análise concluída: Sumário padrão não encontrado.', 'aviso');
+                            }
+                        })
+                        .catch(e => console.warn('[Juris Notes] Erro não-bloqueante no Parser PJe:', e));
                 }
             }
         });
@@ -1019,11 +1062,19 @@ function atualizarStatusBackup(texto, ativa = false) {
 }
 
 function habilitarFerramentasDeTrabalho() {
-    ['btn-ferramenta-recorte', 'btn-ferramenta-texto', 'btn-novo-topico', 'btn-encerrar-sessao', 'btn-ferramenta-audio', 'btn-balanca-justica', 'btn-ferramenta-extrator', 'btn-visao-estruturada', 'btn-visao-minuta', 'btn-atualizar-pdf']
+    const temPdfCarregado = Boolean(window.PdfEngine && PdfEngine.getPdfDoc());
+
+    ['btn-ferramenta-recorte', 'btn-ferramenta-texto', 'btn-novo-topico', 'btn-encerrar-sessao', 'btn-ferramenta-audio', 'btn-balanca-justica', 'btn-ferramenta-extrator', 'btn-visao-estruturada', 'btn-visao-minuta']
         .forEach(id => {
             const btn = document.getElementById(id);
             if (btn) btn.disabled = false;
         });
+
+    // O botão de Hot-Swap de PDF só fica habilitado quando já existe um PDF carregado na sessão
+    const btnAtualizarPdf = document.getElementById('btn-atualizar-pdf');
+    if (btnAtualizarPdf) {
+        btnAtualizarPdf.disabled = !temPdfCarregado;
+    }
     
     if (window.ShortcutManager && document.getElementById('tab-leitura').classList.contains('active')) {
         window.ShortcutManager.toggleVisibility(true);
@@ -1085,6 +1136,8 @@ function encerrarSessao() {
     document.getElementById('btn-exportar-topico').style.display = 'none';
     document.getElementById('current-page-display').textContent  = '1';
     document.getElementById('pdf-upload').value = '';
+    const updateUploadEl = document.getElementById('pdf-update-upload');
+    if (updateUploadEl) updateUploadEl.value = '';
 
     // NOVO: Limpeza de Estado do Número do Processo
     const tagProcesso = document.getElementById('tag-numero-processo');
@@ -1186,18 +1239,31 @@ async function novoProcesso(event) {
 
     const file = event.target.files[0];
     if (!file) return;
-    if (file.type !== 'application/pdf') {
+    const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name || '');
+    if (!isPdf) {
         exibirToast('Selecione um arquivo PDF válido.', 'erro');
+        event.target.value = '';
         return;
     }
     
     window._nomeArquivoSugerido = file.name.replace(/\.[^/.]+$/, "").toLowerCase() + ".json";
 
     if (window.PdfEngine) {
+        const modoCarga = modoRetomada ? 'retomada' : 'novo';
         await window.SplashScreenManager.showWithYield("Processando arquivo PDF...");
-        console.log("[JURIS LOG] Iniciando leitura do PDF:", file.name);
-        await PdfEngine.carregarPDF(file, modoRetomada);
-        window.SplashScreenManager.hide();
+        try {
+            console.log("[JURIS LOG] Iniciando leitura do PDF:", file.name);
+            const resultado = await PdfEngine.carregarPDF(file, { modo: modoCarga });
+            if (!resultado || !resultado.ok) {
+                BackupManager.descartarAtualizacaoPdf();
+            }
+        } catch (err) {
+            console.error("[JURIS LOG] Falha ao carregar PDF:", err);
+            BackupManager.descartarAtualizacaoPdf();
+            exibirToast('Erro inesperado ao processar o PDF.', 'erro');
+        } finally {
+            window.SplashScreenManager.hide();
+        }
     }
 }
 
@@ -2694,3 +2760,243 @@ document.addEventListener("DOMContentLoaded", () => {
         };
     }
 });
+
+/* ================================================
+   GOVERNANÇA DE ATUALIZAÇÃO DE PDF (RETORNO DE DILIGÊNCIA & HOT-SWAP - ED)
+   ================================================ */
+
+/**
+ * Calcula a maior página física referenciada em todas as anotações, grifos,
+ * alfinetes de extração da IA e atalhos flutuantes da sessão.
+ * @returns {number} Maior página referenciada (0 se nenhuma)
+ */
+function _calcularMaiorPaginaReferenciada() {
+    let maior = 0;
+    const registrar = (p) => {
+        const num = parseInt(p, 10);
+        if (!isNaN(num) && num > maior) maior = num;
+    };
+
+    if (Array.isArray(topicos)) {
+        topicos.forEach(topico => {
+            const inspecionarItens = (itens) => {
+                if (!Array.isArray(itens)) return;
+                itens.forEach(item => {
+                    if (!item) return;
+                    registrar(item.paginaFisica);
+                    if (Array.isArray(item.highlightRects)) {
+                        item.highlightRects.forEach(r => registrar(r?.page));
+                    }
+                    if (Array.isArray(item.itensCorrelacionados)) {
+                        inspecionarItens(item.itensCorrelacionados);
+                    }
+                });
+            };
+            inspecionarItens(topico.anotacoes);
+
+            if (Array.isArray(topico.marcosExtracao)) {
+                topico.marcosExtracao.forEach(m => registrar(m?.pagina));
+            }
+        });
+    }
+
+    if (window.ShortcutManager && typeof window.ShortcutManager.getState === 'function') {
+        const atalhos = window.ShortcutManager.getState() || {};
+        Object.values(atalhos).forEach(val => {
+            if (typeof val === 'number') registrar(val);
+            else if (val && typeof val === 'object') registrar(val.page);
+        });
+    }
+
+    return maior;
+}
+
+/**
+ * Decide de forma assistida se um PDF divergente (Retomada ou Hot-Swap) pode ser aceito.
+ * Executa validações de piso de páginas, identidade CNJ da capa e impressão digital
+ * da antiga última página (detecção de Page Shift no meio do processo).
+ */
+async function resolverDivergenciaPdf({
+    hash,
+    coincide,
+    numPaginas,
+    nomeArquivo,
+    numeroCnj,
+    novaUltimaPaginaHash,
+    inspecionarHashPagina,
+    modo
+}) {
+    const meta = BackupManager.getMetadadosPdf();
+    const maiorPaginaRef = _calcularMaiorPaginaReferenciada();
+    const paginasAnteriores = meta.pdfNumPaginas || 0;
+    const pisoMinimoPaginas = Math.max(maiorPaginaRef, paginasAnteriores);
+
+    // Oculta a Splash Screen antes de qualquer diálogo modal para dar contexto visual ao assistente
+    if (window.SplashScreenManager) {
+        window.SplashScreenManager.hide();
+    }
+    if (window.RenderCycle && typeof window.RenderCycle.awaitNextFrame === 'function') {
+        await window.RenderCycle.awaitNextFrame();
+    }
+
+    // 1. BLOQUEIO RÍGIDO: O novo PDF tem menos páginas do que o processo anterior ou do que as anotações feitas
+    if (pisoMinimoPaginas > 0 && numPaginas < pisoMinimoPaginas) {
+        const detalhePiso = paginasAnteriores > 0
+            ? `o PDF anterior possuía ${paginasAnteriores} página(s)`
+            : `existem anotações/atalhos ancorados até a folha ${maiorPaginaRef}`;
+
+        exibirToast(`Bloqueado: o PDF selecionado tem apenas ${numPaginas} pág(s), menos que o mínimo exigido (${pisoMinimoPaginas}).`, 'erro');
+        alert(
+            "⛔ ATUALIZAÇÃO DE PDF BLOQUEADA POR SEGURANÇA ⛔\n\n" +
+            `O arquivo selecionado ("${nomeArquivo}") possui apenas ${numPaginas} página(s), mas ${detalhePiso}.\n\n` +
+            "Para proteger suas marcações contra perda de referência, o Juris Notes não permite substituir o processo por um PDF menor.\n\n" +
+            "Selecione o PDF integral e atualizado do processo."
+        );
+        return false;
+    }
+
+    // 2. Caso o usuário tenha acionado o botão de Hot-Swap com exatamente o mesmo PDF já aberto
+    if (coincide && modo === 'substituicao') {
+        const recarregarMesmo = confirm(
+            "ℹ️ MESMO ARQUIVO PDF DETECTADO\n\n" +
+            "O arquivo selecionado possui exatamente a mesma assinatura digital (SHA-256) do PDF que já está na sessão.\n\n" +
+            "Deseja recarregá-lo mesmo assim?"
+        );
+        if (recarregarMesmo && window.SplashScreenManager) {
+            await window.SplashScreenManager.showWithYield("Recarregando PDF...");
+        }
+        return recarregarMesmo;
+    }
+
+    // 3. Verificação matemática de Page Shift (compara a antiga última página N dentro do novo PDF)
+    let alertaPageShift = "";
+    if (paginasAnteriores > 0 && meta.ultimaPaginaHash && typeof inspecionarHashPagina === 'function') {
+        try {
+            const hashMesmaPaginaNoNovoPdf = await inspecionarHashPagina(paginasAnteriores);
+            if (hashMesmaPaginaNoNovoPdf && hashMesmaPaginaNoNovoPdf !== meta.ultimaPaginaHash) {
+                alertaPageShift =
+                    "\n🚨 ALERTA DE DESLOCAMENTO DE PÁGINAS (PAGE SHIFT):\n" +
+                    `O conteúdo da página ${paginasAnteriores} (que era a última página do PDF anterior) MUDOU neste novo arquivo!\n` +
+                    "Isso indica que páginas foram inseridas ou removidas NO MEIO do processo, o que tirará seus grifos do lugar.\n";
+            } else if (hashMesmaPaginaNoNovoPdf && hashMesmaPaginaNoNovoPdf === meta.ultimaPaginaHash) {
+                alertaPageShift =
+                    `\n✅ Verificação de Integridade: A página ${paginasAnteriores} permanece idêntica (novas folhas anexadas ao final).\n`;
+            }
+        } catch (e) {
+            console.warn("[Juris Notes ED] Não foi possível comparar o hash da última página antiga:", e);
+        }
+    }
+
+    // 4. Verificação de identidade do processo (CNJ da capa e nome do arquivo)
+    let alertaIdentidade = "";
+    if (meta.processoCnj && numeroCnj && meta.processoCnj !== numeroCnj) {
+        alertaIdentidade =
+            "\n⚠️ ATENÇÃO — NÚMERO DO PROCESSO DIVERGENTE NA CAPA:\n" +
+            `• Processo registrado no Backup: ${meta.processoCnj}\n` +
+            `• Processo identificado no novo PDF: ${numeroCnj}\n` +
+            "Verifique se você não selecionou o PDF de outro processo por engano!\n";
+    } else if (!meta.processoCnj && meta.processoId) {
+        const novoId = String(nomeArquivo || '').replace(/\.[^/.]+$/, '').toLowerCase();
+        if (novoId && meta.processoId !== novoId) {
+            alertaIdentidade =
+                `\n• Arquivo original: ${meta.processoId}.pdf\n` +
+                `• Novo arquivo: ${nomeArquivo}\n`;
+        }
+    }
+
+    // 5. Resumo quantitativo de páginas (Antes -> Agora)
+    let resumoPaginas = "";
+    if (paginasAnteriores > 0) {
+        const delta = numPaginas - paginasAnteriores;
+        const deltaTexto = delta > 0 ? `+${delta} nova(s) página(s)` : "mesma quantidade de páginas";
+        resumoPaginas = `\n📄 Páginas: Antes ${paginasAnteriores} págs. ➔ Agora ${numPaginas} págs. (${deltaTexto}).`;
+    } else {
+        resumoPaginas = `\n📄 Total do novo PDF: ${numPaginas} página(s)` +
+                        (maiorPaginaRef > 0 ? ` (última folha anotada: pág. ${maiorPaginaRef}).` : ".");
+    }
+
+    const tituloModal = modo === 'substituicao'
+        ? "⚠️ ATUALIZAR PDF DA SESSÃO ATUAL (RETORNO DE DILIGÊNCIA) ⚠️"
+        : "⚠️ PDF ATUALIZADO DETECTADO (RETORNO DE DILIGÊNCIA) ⚠️";
+
+    const msgConfirmacao =
+        `${tituloModal}\n` +
+        resumoPaginas +
+        alertaIdentidade +
+        alertaPageShift +
+        "\n\nREGRA VITAL: O Juris Notes preserva todas as suas anotações quando os novos documentos (ex: Retorno de Diligência) são juntados EXCLUSIVAMENTE AO FINAL do processo.\n\n" +
+        "Deseja aceitar este novo PDF e atualizar a assinatura digital da sessão?";
+
+    if (confirm(msgConfirmacao)) {
+        BackupManager.prepararAtualizacaoPdf({
+            hash,
+            numPaginas,
+            processoCnj: numeroCnj,
+            ultimaPaginaHash: novaUltimaPaginaHash
+        });
+        if (window.SplashScreenManager) {
+            await window.SplashScreenManager.showWithYield("Sincronizando novo PDF...");
+        }
+        return true;
+    }
+
+    BackupManager.descartarAtualizacaoPdf();
+    return false;
+}
+
+/**
+ * Substitui o PDF durante uma sessão ativa (Hot-Swap) mantendo todas as anotações
+ * e restaurando silenciosamente a página de leitura atual.
+ */
+window.substituirPdfSessaoAtiva = async function(event) {
+    const inputEl = event.target;
+    const file = inputEl?.files?.[0];
+    if (!file) return;
+
+    if (!window.PdfEngine || !PdfEngine.getPdfDoc()) {
+        exibirToast('Carregue o PDF do processo antes de usar a atualização.', 'aviso');
+        inputEl.value = '';
+        return;
+    }
+
+    const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name || '');
+    if (!isPdf) {
+        exibirToast('Selecione um arquivo PDF válido (.pdf).', 'erro');
+        inputEl.value = '';
+        return;
+    }
+
+    // Fecha popups ou overlays abertos antes de iniciar a transição
+    if (typeof modoRecorteAtivo !== 'undefined' && modoRecorteAtivo && typeof desativarOverlayRecorte === 'function') {
+        desativarOverlayRecorte();
+    }
+    if (typeof fecharTudoWizard === 'function') fecharTudoWizard();
+    if (typeof fecharPopupClassificacao === 'function') fecharPopupClassificacao();
+
+    const paginaAnterior = PdfEngine.getCurrentPage() || 1;
+
+    await window.SplashScreenManager.showWithYield("Inspecionando novo PDF...");
+
+    try {
+        const resultado = await PdfEngine.carregarPDF(file, { modo: 'substituicao' });
+
+        if (resultado && resultado.ok) {
+            if (!document.getElementById('tab-leitura').classList.contains('active')) {
+                trocarAba('leitura');
+            }
+            await window.RenderCycle.awaitNextFrame();
+            PdfEngine.goToPage(paginaAnterior, { silencioso: true });
+            exibirToast(`PDF atualizado com sucesso (${resultado.numPaginas} págs.)! Sessão e leitura mantidas.`, 'sucesso');
+        } else if (resultado && resultado.motivo === 'recusado') {
+            BackupManager.descartarAtualizacaoPdf();
+            exibirToast('Atualização de PDF cancelada. O documento anterior foi mantido intacto.', 'info');
+        }
+    } catch (err) {
+        console.error('[Juris Notes ED] Erro durante Hot-Swap de PDF:', err);
+        BackupManager.descartarAtualizacaoPdf();
+        exibirToast('Falha ao atualizar o PDF. O documento anterior foi preservado.', 'erro');
+    } finally {
+        window.SplashScreenManager.hide();
+        inputEl.value = '';
+    }
+};

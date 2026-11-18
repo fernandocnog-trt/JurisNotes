@@ -1,28 +1,21 @@
 /* ================================================
-   backup-manager.js — v2.1
-   Gerenciador de Sessão e Integridade de Backup
-
-   Padrão de módulo IIFE: estado privado inacessível
-   externamente; app.js consome apenas window.BackupManager.*
-   DEVE ser carregado ANTES de app.js no HTML.
+   ed_backup-manager.js — v7.2
+   Gerenciador de Sessão e Integridade de Backup (ED)
    ================================================ */
 window.BackupManager = (function () {
     'use strict';
 
     /* ── Estado Privado ──────────────────────────────── */
-    let _processoId  = null;   // Nome-base canônico do arquivo (sem extensão, minúsculas)
-    let _pdfHash     = null;   // Hash SHA-256 hex do binário do PDF (o "cadeado")
-    let _fileHandle  = null;   // FileSystemFileHandle do .json de backup ativo
+    let _processoId       = null;
+    let _processoCnj      = null;
+    let _pdfHash          = null;
+    let _pdfNumPaginas    = null;
+    let _ultimaPaginaHash = null;
+    let _historicoPdf     = [];
+    let _pendingUpdate    = null;
+    let _fileHandle       = null;
 
     /* ── Utilitários Privados ────────────────────────── */
-
-    /**
-     * Calcula o hash SHA-256 de um ArrayBuffer.
-     * Usa SubtleCrypto (API nativa do Chromium — sem dependências externas).
-     * Não detacha nem consome o buffer; pode ser reusado após a chamada.
-     * @param {ArrayBuffer} buffer
-     * @returns {Promise<string>} Hash em hexadecimal (64 caracteres)
-     */
     async function _calcularHash(buffer) {
         const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
         return Array.from(new Uint8Array(hashBuffer))
@@ -30,27 +23,14 @@ window.BackupManager = (function () {
             .join('');
     }
 
-    /**
-     * Extrai o identificador canônico do processo a partir do nome do arquivo.
-     * Remove a extensão e normaliza para minúsculas, eliminando falsos-negativos
-     * causados por variações de casing entre sistemas operacionais.
-     *
-     * Exemplos:
-     *   "Processo_0001597-85.2024.5.23.0005.pdf" → "processo_0001597-85.2024.5.23.0005"
-     *   "Processo_0001597-85.2024.5.23.0005.json" → "processo_0001597-85.2024.5.23.0005"
-     *
-     * @param {string} nomeArquivo
-     * @returns {string}
-     */
     function _extrairId(nomeArquivo) {
-        return nomeArquivo.replace(/\.[^/.]+$/, '').toLowerCase();
+        return String(nomeArquivo || '').replace(/\.[^/.]+$/, '').toLowerCase();
     }
 
-    /**
-     * Serializa o payload completo do backup (metadata + dados).
-     * @param {Array} topicos  Array topicos[] do estado global de app.js
-     * @returns {string} JSON formatado com 2 espaços de indentação
-     */
+    function _gerarUUID() {
+        return 'id-' + Math.random().toString(36).substr(2, 9) + '-' + Date.now().toString(36);
+    }
+
     function _empacotar(topicos) {
         const possuiAudio = topicos.some(t =>
             t.anotacoes.some(a =>
@@ -62,29 +42,20 @@ window.BackupManager = (function () {
         return JSON.stringify({
             metadata: {
                 processoId:        _processoId,
+                processoCnj:       _processoCnj,
                 pdfHash:           _pdfHash,
+                pdfNumPaginas:     _pdfNumPaginas,
+                ultimaPaginaHash:  _ultimaPaginaHash,
+                historicoPdf:      _historicoPdf,
                 possuiAudio:       possuiAudio,
                 balancaHtml:       window.BalancaManager ? window.BalancaManager.getHtmlState() : null,
-                versaoApp:         '7.1', // ATUALIZADO: Adição do salvamento de Tarefas (ED)
+                versaoApp:         '7.2',
                 ultimaAtualizacao: Date.now(),
                 atalhosPdf:        atalhosCapturados,
                 tarefas:           window.TaskManager ? window.TaskManager.getTarefasState() : []
             },
             dados: topicos
         }, null, 2);
-    }
-
-    /**
-     * Parser retrocompatível: suporta o formato legado v1.0 (array puro)
-     * e o formato atual v2.x (objeto com metadata + dados).
-     * Garante que backups criados antes desta versão continuem funcionando.
-     * Lança um erro descritivo se o conteúdo não for reconhecido.
-     *
-     * @param {string} textoJson  Conteúdo bruto do arquivo .json
-     * @returns {{ metadata: object, dados: Array }}
-     */
-    function _gerarUUID() {
-        return 'id-' + Math.random().toString(36).substr(2, 9) + '-' + Date.now().toString(36);
     }
 
     function _desempacotar(textoJson) {
@@ -262,36 +233,44 @@ window.BackupManager = (function () {
     /* ── API Pública ─────────────────────────────────── */
 
     /**
-     * Registra uma nova sessão a partir do PDF selecionado.
-     * Calcula o hash SHA-256 do binário — este hash é o "cadeado" que
-     * será gravado no JSON e verificado em toda retomada futura.
-     *
-     * @param {string}      nomeArquivo  Nome original do arquivo (ex: "Processo_0001.pdf")
-     * @param {ArrayBuffer} arrayBuffer  Binário completo do PDF (do FileReader)
+     * Inicia uma nova sessão. Suporta tanto a assinatura explícita por objeto
+     * iniciarSessao(nomeArquivo, { hash, buffer, numPaginas, processoCnj, ultimaPaginaHash })
+     * quanto a assinatura legada iniciarSessao(nomeArquivo, arrayBuffer).
      */
-    async function iniciarSessao(nomeArquivo, arrayBuffer) {
+    async function iniciarSessao(nomeArquivo, opcoesOuBuffer) {
         _processoId = _extrairId(nomeArquivo);
-        _pdfHash    = await _calcularHash(arrayBuffer);
-        _fileHandle = null; // Preenchido por setFileHandle() após showSaveFilePicker()
+
+        if (opcoesOuBuffer && typeof opcoesOuBuffer === 'object' && !(opcoesOuBuffer instanceof ArrayBuffer) && !ArrayBuffer.isView(opcoesOuBuffer)) {
+            const { hash, buffer, numPaginas = null, processoCnj = null, ultimaPaginaHash = null } = opcoesOuBuffer;
+            _pdfHash          = hash || (buffer ? await _calcularHash(buffer) : null);
+            _pdfNumPaginas    = Number.isInteger(numPaginas) ? numPaginas : null;
+            _processoCnj      = processoCnj || null;
+            _ultimaPaginaHash = ultimaPaginaHash || null;
+        } else {
+            _pdfHash          = opcoesOuBuffer ? await _calcularHash(opcoesOuBuffer) : null;
+            _pdfNumPaginas    = null;
+            _processoCnj      = null;
+            _ultimaPaginaHash = null;
+        }
+
+        _historicoPdf  = [];
+        _pendingUpdate = null;
+        _fileHandle    = null;
     }
 
-    /**
-     * Lê, valida e desempacota um arquivo de backup JSON.
-     * Popula _processoId e _pdfHash a partir do metadata encontrado.
-     * Lança um erro (para a UI tratar) se o arquivo não for um backup válido.
-     *
-     * @param {FileSystemFileHandle} handle  Handle obtido por showOpenFilePicker()
-     * @returns {Promise<{ metadata: object, dados: Array }>}
-     */
     async function carregarJson(handle) {
         const arquivo = await handle.getFile();
         const texto   = await arquivo.text();
-        const pacote  = _desempacotar(texto); // Lança erro se estrutura inválida
+        const pacote  = _desempacotar(texto);
 
-        // Restaura metadados no estado privado
-        _processoId  = pacote.metadata.processoId;
-        _pdfHash     = pacote.metadata.pdfHash;
-        _fileHandle  = handle;
+        _processoId       = pacote.metadata.processoId || null;
+        _processoCnj      = pacote.metadata.processoCnj || null;
+        _pdfHash          = pacote.metadata.pdfHash || null;
+        _pdfNumPaginas    = Number.isInteger(pacote.metadata.pdfNumPaginas) ? pacote.metadata.pdfNumPaginas : null;
+        _ultimaPaginaHash = pacote.metadata.ultimaPaginaHash || null;
+        _historicoPdf     = Array.isArray(pacote.metadata.historicoPdf) ? pacote.metadata.historicoPdf : [];
+        _pendingUpdate    = null;
+        _fileHandle       = handle;
 
         if (window.ShortcutManager) {
             if (pacote.metadata.atalhosPdf) {
@@ -305,7 +284,6 @@ window.BackupManager = (function () {
             window.BalancaManager.restoreHtmlState(pacote.metadata.balancaHtml || null);
         }
 
-        // Restaura as tarefas na interface (Lida com backups legados via fallback para [])
         if (window.TaskManager) {
             window.TaskManager.setTarefasState(pacote.metadata.tarefas || []);
         }
@@ -313,29 +291,100 @@ window.BackupManager = (function () {
         return pacote;
     }
 
-    /**
-     * Valida se o PDF apresentado corresponde ao hash registrado no backup.
-     * Se não há hash gravado (backup legado v1.0), aceita qualquer PDF
-     * em modo de confiança — o UI deve informar o usuário desta diferença.
-     *
-     * @param {ArrayBuffer} arrayBuffer  Binário do PDF a validar
-     * @returns {Promise<boolean>}
-     */
-    async function validarPdf(arrayBuffer) {
-        if (!_pdfHash) {
-            // Backup legado: hash não registrado — modo de confiança
-            return true;
-        }
+    async function compararPdf(arrayBuffer) {
         const hashCalculado = await _calcularHash(arrayBuffer);
-        return hashCalculado === _pdfHash;
+        if (!_pdfHash) {
+            return { coincide: true, hash: hashCalculado, isLegado: true };
+        }
+        return {
+            coincide: hashCalculado === _pdfHash,
+            hash: hashCalculado,
+            isLegado: false
+        };
+    }
+
+    async function validarPdf(arrayBuffer) {
+        const { coincide } = await compararPdf(arrayBuffer);
+        return coincide;
+    }
+
+    function prepararAtualizacaoPdf({ hash, numPaginas = null, processoCnj = null, ultimaPaginaHash = null } = {}) {
+        if (!hash) return;
+        _pendingUpdate = {
+            hash,
+            numPaginas: Number.isInteger(numPaginas) ? numPaginas : null,
+            processoCnj: processoCnj || null,
+            ultimaPaginaHash: ultimaPaginaHash || null
+        };
+    }
+
+    function confirmarAtualizacaoPdf({ numPaginas = null, processoCnj = null, ultimaPaginaHash = null } = {}) {
+        if (!_pendingUpdate || !_pendingUpdate.hash) {
+            return false;
+        }
+
+        const paginasFinais = Number.isInteger(numPaginas)
+            ? numPaginas
+            : (_pendingUpdate.numPaginas ?? _pdfNumPaginas);
+        const cnjFinal = processoCnj || _pendingUpdate.processoCnj || _processoCnj;
+        const ultHashFinal = ultimaPaginaHash || _pendingUpdate.ultimaPaginaHash || _ultimaPaginaHash;
+
+        if (_pdfHash && _pdfHash !== _pendingUpdate.hash) {
+            _historicoPdf.push({
+                hashAnterior: _pdfHash,
+                hashNovo: _pendingUpdate.hash,
+                paginasAntes: _pdfNumPaginas,
+                paginasDepois: paginasFinais,
+                data: Date.now()
+            });
+        }
+
+        _pdfHash          = _pendingUpdate.hash;
+        _pdfNumPaginas    = paginasFinais;
+        _processoCnj      = cnjFinal;
+        _ultimaPaginaHash = ultHashFinal;
+        _pendingUpdate    = null;
+        return true;
+    }
+
+    function descartarAtualizacaoPdf() {
+        _pendingUpdate = null;
     }
 
     /**
-     * Serializa topicos[] e grava no arquivo de backup ativo.
-     * Silencioso em caso de sucesso; lança erro para a UI tratar falhas.
-     *
-     * @param {Array} topicos  Array topicos[] do estado global de app.js
+     * Registra ou promove metadados ausentes (ex: quando um backup legado v1.0 sem hash é aberto).
+     * Retorna true se algum metadado estrutural novo (como hash antes ausente) foi promovido.
      */
+    function registrarMetadadosPdf({ hash = null, numPaginas = null, processoCnj = null, ultimaPaginaHash = null } = {}) {
+        let promoveuEstado = false;
+        if (!_pdfHash && hash) {
+            _pdfHash = hash;
+            promoveuEstado = true;
+        }
+        if (Number.isInteger(numPaginas) && _pdfNumPaginas !== numPaginas) {
+            if (!_pdfNumPaginas) promoveuEstado = true;
+            _pdfNumPaginas = numPaginas;
+        }
+        if (processoCnj && !_processoCnj) {
+            _processoCnj = processoCnj;
+            promoveuEstado = true;
+        }
+        if (ultimaPaginaHash && _ultimaPaginaHash !== ultimaPaginaHash) {
+            if (!_ultimaPaginaHash) promoveuEstado = true;
+            _ultimaPaginaHash = ultimaPaginaHash;
+        }
+        return promoveuEstado;
+    }
+
+    async function atualizarHashPdf(arrayBufferOuHash, numPaginas = null, processoCnj = null, ultimaPaginaHash = null) {
+        if (!arrayBufferOuHash) return;
+        const hash = (typeof arrayBufferOuHash === 'string' && arrayBufferOuHash.length === 64)
+            ? arrayBufferOuHash
+            : await _calcularHash(arrayBufferOuHash);
+        prepararAtualizacaoPdf({ hash, numPaginas, processoCnj, ultimaPaginaHash });
+        confirmarAtualizacaoPdf({ numPaginas, processoCnj, ultimaPaginaHash });
+    }
+
     async function salvar(topicos) {
         if (!_fileHandle) {
             console.warn('BackupManager.salvar(): nenhum arquivo de backup ativo.');
@@ -346,35 +395,45 @@ window.BackupManager = (function () {
         await writable.close();
     }
 
-    /**
-     * Encerra a sessão, zerando completamente o estado privado.
-     * Chamado por encerrarSessao() e novoProcesso() em app.js.
-     */
     function encerrar() {
-        _processoId = null;
-        _pdfHash    = null;
-        _fileHandle = null;
+        _processoId       = null;
+        _processoCnj      = null;
+        _pdfHash          = null;
+        _pdfNumPaginas    = null;
+        _ultimaPaginaHash = null;
+        _historicoPdf     = [];
+        _pendingUpdate    = null;
+        _fileHandle       = null;
     }
 
-    /* ── Getters e Setter ────────────────────────────── */
-    function getProcessoId()       { return _processoId; }
+    function getProcessoId()   { return _processoId; }
+    function getMetadadosPdf() {
+        return {
+            processoId:       _processoId,
+            processoCnj:      _processoCnj,
+            pdfHash:          _pdfHash,
+            pdfNumPaginas:    _pdfNumPaginas,
+            ultimaPaginaHash: _ultimaPaginaHash,
+            historicoPdf:     [..._historicoPdf]
+        };
+    }
     function isAtivo()             { return _fileHandle !== null; }
-
-    /**
-     * Registra o FileSystemFileHandle obtido por showSaveFilePicker().
-     * Separado de iniciarSessao() pois o diálogo pode ser cancelado pelo usuário.
-     * @param {FileSystemFileHandle} handle
-     */
     function setFileHandle(handle) { _fileHandle = handle; }
 
-    /* ── Exportação da API ───────────────────────────── */
     return {
         iniciarSessao,
         carregarJson,
+        compararPdf,
         validarPdf,
+        prepararAtualizacaoPdf,
+        confirmarAtualizacaoPdf,
+        descartarAtualizacaoPdf,
+        registrarMetadadosPdf,
+        atualizarHashPdf,
         salvar,
         encerrar,
         getProcessoId,
+        getMetadadosPdf,
         isAtivo,
         setFileHandle
     };
