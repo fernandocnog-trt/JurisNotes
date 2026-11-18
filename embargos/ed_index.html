@@ -39,7 +39,7 @@
 <link rel="stylesheet" href="ed_juris-core.css?v=2.0.2">
 
 <!-- 2. Ferramentas Globais, PDF, Áudio e Modais (Ferramentas de Entrada) -->
-<link rel="stylesheet" href="ed_juris-reader-tools.css?v=3.0.3">
+<link rel="stylesheet" href="ed_juris-reader-tools.css?v=3.0.4">
 
 <!-- 3. Fichário, Timeline, Fases Metodológicas e Acervo (Síntese e Saída) -->
 <link rel="stylesheet" href="ed_juris-timeline-cards.css?v=3.2.1">
@@ -171,6 +171,23 @@
                         <line x1="12" y1="4" x2="12" y2="20"></line>
                     </svg>
                 </button>
+
+                <!-- BOTÃO HOT-SWAP (RETORNO DE DILIGÊNCIA) -->
+                <button type="button" class="icon-btn" id="btn-atualizar-pdf"
+                        onclick="document.getElementById('pdf-update-upload').click()"
+                        title="Atualizar PDF (Retorno de Diligência)&#10;Substitui o PDF mantendo todas as anotações"
+                        aria-label="Atualizar PDF do processo mantendo anotações"
+                        disabled>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                        <polyline points="14 2 14 8 20 8"></polyline>
+                        <path d="M9 15a3 3 0 0 1 5.12-2.12L15.5 14"></path>
+                        <polyline points="15.5 10.5 15.5 14 12 14"></polyline>
+                        <path d="M15 15a3 3 0 0 1-5.12 2.12L8.5 16"></path>
+                        <polyline points="8.5 19.5 8.5 16 12 16"></polyline>
+                    </svg>
+                </button>
+                <input type="file" id="pdf-update-upload" accept="application/pdf,.pdf" style="display:none;" onchange="substituirPdfSessaoAtiva(event)">
                 
                 <button class="icon-btn" id="btn-encerrar-sessao" onclick="encerrarSessao()" title="Encerrar Sessão" disabled>
                     <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -442,7 +459,7 @@
                     { html: 'ed_modais.html', js: null, id: 'modal-gerador-contexto' },
                     // ATENÇÃO: Uso de '../' para voltar à raiz a partir da pasta do módulo ED
                     { html: '../ferramentas/juris-relatorio.template.html', js: '../ferramentas/juris-relatorio.js', id: 'modal-juris-relatorio' },
-                    { html: '../ferramentas/juris-prompts.template.html?v=2.1.0', js: '../ferramentas/juris-prompts.js?v=2.1.0', id: 'modal-juris-prompts' }
+                    { html: '../ferramentas/juris-prompts.template.html?v=2.1.0', js: '../ferramentas/juris-prompts.js?v=2.1.1', id: 'modal-juris-prompts' }
                 ];
 
                 for (const asset of assets) {
@@ -461,7 +478,7 @@
                 // PASSO 2: Fila ordenada de scripts locais da aplicação ED
                 const scriptsParaCarregar = [
                     "js/ed_store.js",
-                    "js/ed_backup-manager.js",
+                    "js/ed_backup-manager.js?v=3.2.2",
                     "js/ed_topics-manager.js?v=3.2.1",
                     "js/ed_document-views.js",
                     "js/ed_balanca-manager.js",
@@ -470,10 +487,10 @@
                     "js/ed_annotation-actions.js",
                     "js/ed_juris-editor.js",
                     "js/ed_export-manager.js",
-                    "js/ed_pdf-engine.js",
+                    "js/ed_pdf-engine.js?v=3.2.2",
                     "js/ed_pje-parser.js",
                     "js/ed_recommendation-service.js",
-                    "js/ed_app-core.js",
+                    "js/ed_app-core.js?v=3.2.2",
                     "js/ed_acervo-controller.js"
                 ];
 
@@ -499,11 +516,27 @@
                     const TOOL_MODAL_CONFIGS = [
                         {
                             id: 'modal-juris-relatorio',
-                            getController: () => window.JurisRelatorioManager
+                            getController: () => window.JurisRelatorioManager,
+                            closeOnBackdrop: true
+                        },
+                        {
+                            id: 'modal-jp-gen',
+                            getController: () => window.PromptUIController,
+                            close: (ctrl) => ctrl.closeGenModal(),
+                            closeOnBackdrop: true
+                        },
+                        {
+                            id: 'modal-jp-form',
+                            getController: () => window.PromptUIController,
+                            close: (ctrl) => ctrl.closeAddModal(),
+                            // Impede perda acidental do rascunho caso o usuário clique fora do formulário
+                            closeOnBackdrop: false
                         },
                         {
                             id: 'modal-juris-prompts',
-                            getController: () => window.PromptUIController
+                            getController: () => window.PromptUIController,
+                            close: (ctrl) => ctrl.fecharModalPrincipal(),
+                            closeOnBackdrop: true
                         }
                     ];
 
@@ -573,14 +606,27 @@
                     /**
                      * Fecha de forma segura um modal ativo delegando ao próprio controller
                      * ou acionando seu botão interno de fechamento, sem corromper estados internos.
+                     * @param {Object} config - Configuração do modal em TOOL_MODAL_CONFIGS
+                     * @param {'backdrop'|'escape'} [source='escape'] - Origem do acionamento
                      */
-                    const closeToolSafely = ({ id, getController }) => {
+                    const closeToolSafely = (config, source = 'escape') => {
+                        const { id, getController, close, closeOnBackdrop = true } = config;
                         const el = document.getElementById(id);
                         if (!isModalOpen(el)) return false;
 
+                        // Se o acionamento veio de clique no fundo e o modal bloqueia isso (ex: formulário), ignora
+                        if (source === 'backdrop' && !closeOnBackdrop) {
+                            return false;
+                        }
+
                         const ctrl = getController();
                         if (ctrl) {
-                            const closeMethod = ['fecharModal', 'fechar', 'close', 'hide'].find(
+                            if (typeof close === 'function') {
+                                close(ctrl);
+                                syncBackdropState();
+                                return true;
+                            }
+                            const closeMethod = ['fecharModal', 'fecharModalPrincipal', 'fechar', 'close', 'hide'].find(
                                 (fn) => typeof ctrl[fn] === 'function'
                             );
                             if (closeMethod) {
@@ -631,9 +677,9 @@
                         containerObserver.observe(containerDinamico, { childList: true });
                     }
 
-                    // 2. Clique no backdrop fecha apenas o painel que estiver aberto
+                    // 2. Clique no backdrop fecha apenas o painel que estiver aberto (respeitando closeOnBackdrop)
                     backdrop.addEventListener('click', () => {
-                        TOOL_MODAL_CONFIGS.forEach(closeToolSafely);
+                        TOOL_MODAL_CONFIGS.forEach((config) => closeToolSafely(config, 'backdrop'));
                     });
 
                     // 3. Integração com tecla Escape (respeitando se o JurisPrompt 5000 estiver ativo por cima)
@@ -643,7 +689,7 @@
                         if (jurisPromptEl && jurisPromptEl.classList.contains('is-active')) return;
 
                         for (const config of TOOL_MODAL_CONFIGS) {
-                            if (closeToolSafely(config)) {
+                            if (closeToolSafely(config, 'escape')) {
                                 event.stopPropagation();
                                 break;
                             }
