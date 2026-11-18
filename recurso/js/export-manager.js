@@ -448,13 +448,24 @@ window.ExportManager = (function () {
         let bufferTeses = '';
 
         if (topico.diretrizesPorTese) {
+            const tesesAncoradas = window.ThesisGuard
+                ? ThesisGuard.mapearTesesAncoradas(topico)
+                : new Set(
+                    (topico.anotacoes || [])
+                        .filter(a => a && !(a.tipo && a.tipo.startsWith('checkpoint')))
+                        .map(a => (a.tese && a.tese.trim() !== '') ? a.tese.trim() : CHAVE_TESE_SEM_NOME)
+                );
+
             for (const [nomeTese, diretrizes] of Object.entries(topico.diretrizesPorTese)) {
+                const chaveNormalizada = nomeTese.trim() || CHAVE_TESE_SEM_NOME;
+                if (!tesesAncoradas.has(chaveNormalizada)) continue;
+
                 if (diretrizes && diretrizes.length > 0) {
                     const diretrizesValidas = diretrizes.filter(dir => dir.intencao !== 'nota');
 
                     if (diretrizesValidas.length > 0) {
                         bufferTeses += `<tese_alvo>\n`;
-                        bufferTeses += `[NOME DA TESE]: ${_escapeXmlAttr(nomeTese)}\n`;
+                        bufferTeses += `[NOME DA TESE]: ${_escapeXmlAttr(chaveNormalizada)}\n`;
                         diretrizesValidas.forEach(dir => {
                             bufferTeses += `[${(dir.intencao || 'PREMISSA').toUpperCase()} — DIRETRIZ VINCULANTE DA TESE]: ${_safeMD(dir.texto, '\n')}\n`;
                         });
@@ -490,7 +501,9 @@ window.ExportManager = (function () {
             const numIdeia = index + 1;
             const refCitacao = _formatarCitacaoOficial(an.pjeId, an.pagina);
             // Unificado com CHAVE_TESE_SEM_NOME ("Tese Não Nomeada") para casar 1:1 com <direcionamentos_por_tese>
-            const tituloIdeia = (an.tese && an.tese.trim() !== '') ? an.tese : CHAVE_TESE_SEM_NOME;
+            const tituloIdeia = window.ThesisGuard
+                ? ThesisGuard.obterChaveTese(an)
+                : ((an.tese && an.tese.trim() !== '') ? an.tese.trim() : CHAVE_TESE_SEM_NOME);
             const estatutoMestre = _obterEstatutoEpistemologico(an);
 
             mdMatriz += `<analise_da_prova>\n`;

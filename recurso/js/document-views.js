@@ -167,13 +167,18 @@ window.OutlineViewManager = (function() {
         }
         
         let ultimaTese = null;
+        const tesesDiretrizesEmitidas = new Set();
         topico.anotacoes.forEach(an => {
-            const teseAtual = (an.tese && an.tese.trim() !== '') ? an.tese : "Tese Não Nomeada";
+            if (an && an.tipo && an.tipo.startsWith('checkpoint')) return;
+            const teseAtual = window.ThesisGuard
+                ? ThesisGuard.obterChaveTese(an)
+                : ((an.tese && an.tese.trim() !== '') ? an.tese.trim() : 'Tese Não Nomeada');
             if (teseAtual !== ultimaTese) {
                 html += `<div style="margin-top: 20px; margin-bottom: 10px; padding-bottom: 4px; border-bottom: 1px dashed #cbd5e1;">
                     <span style="font-weight: 800; color: #6a1b9a; font-size: 0.95rem;">⚖️ Tese: ${TopicsManager.escaparHTML(teseAtual)}</span>
                 </div>`;
-                if (topico.diretrizesPorTese && topico.diretrizesPorTese[teseAtual]) {
+                if (!tesesDiretrizesEmitidas.has(teseAtual) && topico.diretrizesPorTese && topico.diretrizesPorTese[teseAtual]) {
+                    tesesDiretrizesEmitidas.add(teseAtual);
                     const dirTeseVisiveis = topico.diretrizesPorTese[teseAtual].filter(d => d.intencao !== 'nota');
                     dirTeseVisiveis.forEach(dir => {
                         const intencaoKey = dir.intencao || 'premissa';
@@ -349,13 +354,20 @@ window.MinutaViewManager = (function() {
         }
         
         let ultimaTese = null;
+        const tesesDiretrizesEmitidas = new Set();
         topico.anotacoes.forEach(an => {
-            const teseAtual = (an.tese && an.tese.trim() !== '') ? an.tese : "Tese Não Nomeada";
+            if (an && an.tipo && an.tipo.startsWith('checkpoint')) return;
+            const teseAtual = window.ThesisGuard
+                ? ThesisGuard.obterChaveTese(an)
+                : ((an.tese && an.tese.trim() !== '') ? an.tese.trim() : 'Tese Não Nomeada');
             if (teseAtual !== ultimaTese) {
-                topico.diretrizesPorTese?.[teseAtual]?.forEach(dir => {
-                    const nodeHtml = _processarNo(dir);
-                    if(nodeHtml) { html += nodeHtml; nodesEncontrados = true; }
-                });
+                if (!tesesDiretrizesEmitidas.has(teseAtual)) {
+                    tesesDiretrizesEmitidas.add(teseAtual);
+                    topico.diretrizesPorTese?.[teseAtual]?.forEach(dir => {
+                        const nodeHtml = _processarNo(dir);
+                        if(nodeHtml) { html += nodeHtml; nodesEncontrados = true; }
+                    });
+                }
                 ultimaTese = teseAtual;
             }
             an.subAnotacoes?.forEach(sub => {
@@ -440,10 +452,17 @@ window.MinutaViewManager = (function() {
         }
         
         let ultimaTese = null;
+        const tesesDiretrizesEmitidas = new Set();
         topico.anotacoes.forEach(an => {
-            const teseAtual = (an.tese && an.tese.trim() !== '') ? an.tese : "Tese Não Nomeada";
+            if (an && an.tipo && an.tipo.startsWith('checkpoint')) return;
+            const teseAtual = window.ThesisGuard
+                ? ThesisGuard.obterChaveTese(an)
+                : ((an.tese && an.tese.trim() !== '') ? an.tese.trim() : 'Tese Não Nomeada');
             if (teseAtual !== ultimaTese) {
-                topico.diretrizesPorTese?.[teseAtual]?.forEach(dir => { md += _processarNoMd(dir); });
+                if (!tesesDiretrizesEmitidas.has(teseAtual)) {
+                    tesesDiretrizesEmitidas.add(teseAtual);
+                    topico.diretrizesPorTese?.[teseAtual]?.forEach(dir => { md += _processarNoMd(dir); });
+                }
                 ultimaTese = teseAtual;
             }
             an.subAnotacoes?.forEach(sub => { md += _processarNoMd(sub); });

@@ -261,6 +261,39 @@ window.BackupManager = (function () {
             }
         });
 
+        // MUDANÇA ARQUITETURAL: Higienização de Chaves de Tese e Teses Fantasmas (v7.4)
+        // Normaliza espaços nas pontas de `an.tese` e `diretrizesPorTese` já no carregamento do JSON,
+        // garantindo visibilidade imediata dos nós de tese antes mesmo da primeira mutação.
+        pacote.dados.forEach(topico => {
+            if (Array.isArray(topico.anotacoes)) {
+                topico.anotacoes.forEach(an => {
+                    if (an && typeof an.tese === 'string') {
+                        const teseLimpa = an.tese.trim();
+                        if (teseLimpa === '') delete an.tese;
+                        else an.tese = teseLimpa;
+                    }
+                    if (Array.isArray(an.itensCorrelacionados)) {
+                        an.itensCorrelacionados.forEach(corr => {
+                            if (corr) {
+                                delete corr.tese;
+                                delete corr.teseClassificacao;
+                            }
+                        });
+                    }
+                });
+            }
+            if (topico.diretrizesPorTese && typeof topico.diretrizesPorTese === 'object') {
+                const mapaLimpo = {};
+                for (const [k, nos] of Object.entries(topico.diretrizesPorTese)) {
+                    if (!Array.isArray(nos) || nos.length === 0) continue;
+                    const chaveLimpa = k.trim() || 'Tese Não Nomeada';
+                    if (!mapaLimpo[chaveLimpa]) mapaLimpo[chaveLimpa] = [];
+                    mapaLimpo[chaveLimpa].push(...nos);
+                }
+                topico.diretrizesPorTese = mapaLimpo;
+            }
+        });
+
         return pacote;
     }
 

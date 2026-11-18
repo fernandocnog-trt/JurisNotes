@@ -115,7 +115,11 @@ function definirIntencaoSubAnotacao(intencaoStr) {
     
     requestAnimationFrame(() => {
         // Busca o card baseando-se no viewSource e no localIndex recém-renderizados
-        const cardsDestaFonte = document.querySelectorAll(`[data-source="${_menuSubAnotacaoCtx.viewSource}"] .sub-annotation-card`);
+        const viewSource = String(_menuSubAnotacaoCtx.viewSource);
+        const seletorSourceSeguro = (typeof CSS !== 'undefined' && typeof CSS.escape === 'function')
+            ? CSS.escape(viewSource)
+            : viewSource.replace(/["\\]/g, '\\$&');
+        const cardsDestaFonte = document.querySelectorAll(`[data-source="${seletorSourceSeguro}"] .sub-annotation-card`);
         const cardEditado = cardsDestaFonte[_menuSubAnotacaoCtx.localIndex];
         
         if (cardEditado) {
@@ -493,10 +497,13 @@ function excluirAnotacao() {
     // Validação de impacto estrutural
     const temCorrelacionados = cardAlvo.itensCorrelacionados && cardAlvo.itensCorrelacionados.length > 0;
     const temSub = cardAlvo.subAnotacoes && cardAlvo.subAnotacoes.length > 0;
+    let ctxAntes = null;
 
     if (temCorrelacionados) {
         const msg = '⚠️ ATENÇÃO: Esta prova é um Card Mestre e agrupa outros itens.\n\nDeseja excluir apenas esta prova principal e PROMOVER a próxima do grupo para assumir o seu lugar?';
         if (!confirm(msg)) return;
+
+        ctxAntes = window.ThesisGuard ? ThesisGuard.capturarEstadoAntes(topico) : null;
 
         // Clone profundo para evitar mutação cruzada (Garante a integridade do grupo)
         const cloneProfundo = structuredClone(cardAlvo);
@@ -524,6 +531,8 @@ function excluirAnotacao() {
         }
         if (!confirm(msg)) return;
 
+        ctxAntes = window.ThesisGuard ? ThesisGuard.capturarEstadoAntes(topico) : null;
+
         // 1. Mutação DIRETA na memória global
         topico.anotacoes.splice(index, 1);
 
@@ -538,6 +547,7 @@ function excluirAnotacao() {
     // A SOLUÇÃO DO BUG: Execução INCONDICIONAL
     // Fora de qualquer bloco "if". A tela repinta instantaneamente e reorganiza os números.
     renderizarTopicos(); 
+    if (window.ThesisGuard) ThesisGuard.verificarAposMutacao(topico, ctxAntes);
     salvarBackupAutomatico();
     if (window.sincronizarHighlightsGerais) window.sincronizarHighlightsGerais();
     
@@ -1207,25 +1217,88 @@ function fecharModalTese() {
     _ideiaContextoTese = null;
 }
 
-function salvarTese() {
+window.salvarTese = function() {
     if (!_ideiaContextoTese) return;
-    _autoTeseRequestId++; // Cancela respostas tardias caso o usuário salve manualmente antes da IA responder
+    _autoTeseRequestId++;
 
     const topico = topicos.find(t => t.id === _ideiaContextoTese.topicoId);
-    if (!topico || !topico.anotacoes[_ideiaContextoTese.index]) return;
-    
+    if (!topico || !topico.anotacoes[_ideiaContextoTese.index]) {
+        fecharModalTese();
+        return;
+    }
+
+    const CHAVE_SEM_TESE = window.ThesisGuard ? ThesisGuard.CHAVE_SEM_TESE : 'Tese Não Nomeada';
+    const ctxAntes = window.ThesisGuard ? ThesisGuard.capturarEstadoAntes(topico) : null;
+    const idxAlvo = _ideiaContextoTese.index;
+    const cardAlvo = topico.anotacoes[idxAlvo];
+    const chaveAntiga = window.ThesisGuard
+        ? ThesisGuard.obterChaveTese(cardAlvo)
+        : ((cardAlvo.tese && cardAlvo.tese.trim()) || CHAVE_SEM_TESE);
+
     const textoTese = document.getElementById('input-texto-tese').value.trim();
-    const classificacao = document.getElementById('btn-classificacao-tese').dataset.classificacao;
-    
-    topico.anotacoes[_ideiaContextoTese.index].tese = textoTese;
-    topico.anotacoes[_ideiaContextoTese.index].teseClassificacao = classificacao;
-    
-    renderizarTopicos(); 
-    salvarBackupAutomatico();
-    
-    exibirToast('Tese recursal atualizada com sucesso!', 'sucesso');
+    const btnClass = document.getElementById('btn-classificacao-tese');
+    const classificacao = (btnClass && btnClass.dataset.classificacao) ? btnClass.dataset.classificacao : 'neutro';
+
+    const indicesBlocoContiguo = [idxAlvo];
+    if (chaveAntiga !== CHAVE_SEM_TESE) {
+        for (let i = idxAlvo - 1; i >= 0; i--) {
+            const item = topico.anotacoes[i];
+            if (window.JurisIndexUtils && window.JurisIndexUtils.ehCheckpoint(item)) continue;
+            if ((window.ThesisGuard ? ThesisGuard.obterChaveTese(item) : (item.tese || '').trim()) === chaveAntiga) {
+                indicesBlocoContiguo.push(i);
+            } else break;
+        }
+        for (let i = idxAlvo + 1; i < topico.anotacoes.length; i++) {
+            const item = topico.anotacoes[i];
+            if (window.JurisIndexUtils && window.JurisIndexUtils.ehCheckpoint(item)) continue;
+            if ((window.ThesisGuard ? ThesisGuard.obterChaveTese(item) : (item.tese || '').trim()) === chaveAntiga) {
+                indicesBlocoContiguo.push(i);
+            } else break;
+        }
+    }
+
+    indicesBlocoContiguo.forEach(i => {
+        if (textoTese === '') {
+            delete topico.anotacoes[i].tese;
+            delete topico.anotacoes[i].teseClassificacao;
+        } else {
+            topico.anotacoes[i].tese = textoTese;
+            topico.anotacoes[i].teseClassificacao = classificacao;
+        }
+    });
+
+    const chaveNova = window.ThesisGuard
+        ? ThesisGuard.obterChaveTese(cardAlvo)
+        : (textoTese || CHAVE_SEM_TESE);
+
     fecharModalTese();
-}
+
+    let abriuDialogoHomonima = false;
+    if (textoTese !== '' && chaveAntiga !== chaveNova && topico.diretrizesPorTese && Array.isArray(topico.diretrizesPorTese[chaveAntiga]) && topico.diretrizesPorTese[chaveAntiga].length > 0) {
+        const ancorasRestantes = window.ThesisGuard ? ThesisGuard.mapearTesesAncoradas(topico) : new Map();
+
+        if (!ancorasRestantes.has(chaveAntiga)) {
+            if (!Array.isArray(topico.diretrizesPorTese[chaveNova])) {
+                topico.diretrizesPorTese[chaveNova] = [];
+            }
+            ThesisGuard.mesclarNosComSeguranca(
+                topico.diretrizesPorTese[chaveNova],
+                topico.diretrizesPorTese[chaveAntiga]
+            );
+            delete topico.diretrizesPorTese[chaveAntiga];
+        } else if (window.ThesisGuard) {
+            abriuDialogoHomonima = ThesisGuard.perguntarDestinoRenomeacaoHomonima(topico, chaveAntiga, chaveNova, ctxAntes);
+        }
+    }
+
+    renderizarTopicos();
+    exibirToast(textoTese ? 'Tese salva com sucesso!' : 'Tese removida.');
+
+    if (!abriuDialogoHomonima && window.ThesisGuard) {
+        ThesisGuard.verificarAposMutacao(topico, ctxAntes);
+    }
+    salvarBackupAutomatico();
+};
 
 /* --- MODAL DE SMART MOVE (REORDENAÇÃO INTELIGENTE) --- */
 let _smartMoveCtx = null;
@@ -1292,11 +1365,13 @@ function confirmarSmartMove() {
     }
 
     // 2. Extração da Prova da sua Origem Original (Operação Isolada)
+    const ctxAntes = window.ThesisGuard ? ThesisGuard.capturarEstadoAntes(topico) : null;
     let itemMovido;
     let arrayReduziu = false;
 
     if (_smartMoveCtx.correlacionadoIndex !== null) {
         itemMovido = topico.anotacoes[_smartMoveCtx.parentIndex].itensCorrelacionados.splice(_smartMoveCtx.correlacionadoIndex, 1)[0];
+        if (window.ThesisGuard) ThesisGuard.limparTeseFantasmaDeCard(itemMovido);
     } else {
         const cardOriginal = topico.anotacoes[_smartMoveCtx.parentIndex];
 
@@ -1308,7 +1383,8 @@ function confirmarSmartMove() {
 
             itemMovido = structuredClone(cardOriginal);
             itemMovido.itensCorrelacionados = [];
-            itemMovido.tese = ""; 
+            if (window.ThesisGuard) ThesisGuard.limparTeseFantasmaDeCard(itemMovido);
+            else itemMovido.tese = "";
 
             topico.anotacoes[_smartMoveCtx.parentIndex] = novoMainCard;
             arrayReduziu = false;
@@ -1346,12 +1422,14 @@ function confirmarSmartMove() {
     } else {
         const cardDestino = topico.anotacoes[destinoIdx];
         if (!cardDestino.itensCorrelacionados) cardDestino.itensCorrelacionados = [];
+        if (window.ThesisGuard) ThesisGuard.limparTeseFantasmaDeCard(itemMovido);
         cardDestino.itensCorrelacionados.push(itemMovido);
         const numVisualDestino = window.JurisIndexUtils.realParaVisual(topico.anotacoes, destinoIdx);
         exibirToast(`Prova agrupada à Ideia ${numVisualDestino}.`, 'sucesso');
     }
 
     renderizarTopicos(); 
+    if (window.ThesisGuard) ThesisGuard.verificarAposMutacao(topico, ctxAntes);
     salvarBackupAutomatico(); 
     if (window.sincronizarHighlightsGerais) window.sincronizarHighlightsGerais();
     fecharModalSmartMove();
