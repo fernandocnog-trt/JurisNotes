@@ -80,6 +80,10 @@
         background-color: #94a3b8;
     }
 
+    /* 4. Grupo de Card + Ramificação */
+    .jp-card-group {
+        margin-bottom: 0.75rem;
+    }
     .jp-card { 
         background-color: #ffffff; 
         color: #1e293b; 
@@ -89,13 +93,31 @@
         display: flex; 
         justify-content: space-between; 
         align-items: center; 
-        margin-bottom: 0.75rem;
         gap: 1rem;
-        transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        position: relative;
+        z-index: 2;
+        transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
     }
     .jp-card:hover {
         border-color: #cbd5e0;
         box-shadow: 0 2px 6px rgba(15, 23, 42, 0.04);
+    }
+    .jp-card-group.is-expanded > .jp-card {
+        border-color: var(--theme-primary, #ffc107);
+        box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
+    }
+    /* Especificidade >= (0,3,0) e (0,4,0) para preservar a faixa verde mesmo com a ramificação aberta */
+    .jp-card-group > .jp-card.was-copied,
+    .jp-card-group > .jp-card.just-copied-flash {
+        border-color: #86efac;
+        background-color: #f0fdf4;
+        box-shadow: inset 4px 0 0 #16a34a;
+    }
+    .jp-card-group.is-expanded > .jp-card.was-copied,
+    .jp-card-group.is-expanded > .jp-card.just-copied-flash {
+        border-color: var(--theme-primary, #ffc107);
+        background-color: #f0fdf4;
+        box-shadow: inset 4px 0 0 #16a34a, 0 2px 8px rgba(15, 23, 42, 0.06);
     }
     /* Flex child com min-width: 0 impede que títulos longos empurrem os botões de ação */
     .jp-card-info { 
@@ -127,6 +149,16 @@
         font-weight: 600;
         flex-shrink: 0;
     }
+    .jp-badge-shared {
+        background: #f8fafc;
+        color: #64748b;
+        border: 1px solid #e2e8f0;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-size: 0.68rem;
+        font-weight: 600;
+        flex-shrink: 0;
+    }
     .jp-badge-match {
         background: #f1f5f9;
         color: #475569;
@@ -141,6 +173,7 @@
         display: flex; 
         gap: 5px; 
         flex-shrink: 0; 
+        align-items: center;
     }
     .jp-icon-btn { 
         background: none; 
@@ -151,6 +184,7 @@
         display: flex; 
         align-items: center; 
         justify-content: center; 
+        transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
     }
     .jp-icon-btn svg { 
         width: 18px; 
@@ -178,26 +212,314 @@
         stroke: var(--theme-primary, #ffc107);
     }
 
+    /* Botão 2 (NOVO): Ramificação de Subprompts */
+    .jp-icon-btn.jp-branch {
+        gap: 4px;
+        padding: 6px 8px;
+        font-size: 0.72rem;
+        font-weight: 700;
+        color: #475569;
+    }
+    .jp-icon-btn.jp-branch:hover {
+        background-color: var(--theme-light-bg, rgba(251, 192, 45, 0.12));
+        border-color: var(--theme-light-border, rgba(251, 192, 45, 0.4));
+    }
+    .jp-icon-btn.jp-branch:hover svg {
+        stroke: var(--theme-hover, #f57f17);
+    }
+    .jp-icon-btn.jp-branch.is-active {
+        background-color: var(--theme-primary, #ffc107);
+        color: var(--theme-text-on-primary, #000);
+        border-color: var(--theme-hover, #f57f17);
+    }
+    .jp-icon-btn.jp-branch.is-active svg {
+        stroke: var(--theme-text-on-primary, #000);
+    }
+    .jp-icon-btn.jp-branch.is-empty {
+        opacity: 0.35;
+    }
+    .jp-icon-btn.jp-branch.is-empty:hover {
+        opacity: 0.9;
+    }
+    .jp-branch-count {
+        line-height: 1;
+    }
+
+    /* Botões 3, 4 e 5: Gerar, Editar e Excluir */
     .jp-play:hover svg { stroke: var(--theme-text-on-primary, #000); fill: var(--theme-primary, #ffc107); }
+    .jp-play.is-direct-copy:hover svg { stroke: #15803d; fill: #22c55e; }
     .jp-edit:hover svg { stroke: #0284c7; }
     .jp-del:hover svg { stroke: var(--semantic-danger, #ef4444); }
-    
+
+    /* 5. Árvore de Ramificação (Subprompts em Sequência) */
+    .jp-branch-container {
+        display: none;
+        margin-left: 1.6rem;
+        padding-left: 1.4rem;
+        padding-top: 0.4rem;
+        flex-direction: column;
+        position: relative;
+    }
+    .jp-card-group.is-expanded > .jp-branch-container {
+        display: flex;
+    }
+    .jp-card-group.just-animated > .jp-branch-container {
+        animation: jpBranchReveal 0.16s ease-out;
+    }
+    @keyframes jpBranchReveal {
+        from { opacity: 0; transform: translateY(-4px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Cabeçalho da Rotina Expandida (Status + Botão Reiniciar) */
+    .jp-branch-toolbar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 2px 4px 6px 0;
+        font-size: 0.74rem;
+        color: #64748b;
+        position: relative;
+    }
+    .jp-branch-toolbar::before {
+        content: '';
+        position: absolute;
+        left: -1.4rem;
+        top: -0.4rem;
+        bottom: 0;
+        width: 2px;
+        background-color: var(--theme-primary, #ffc107);
+    }
+    .jp-btn-reset-routine {
+        background: #ffffff;
+        border: 1px solid #cbd5e0;
+        color: #475569;
+        border-radius: 12px;
+        padding: 2px 8px;
+        font-size: 0.7rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.15s ease;
+    }
+    .jp-btn-reset-routine:hover {
+        border-color: var(--theme-primary, #ffc107);
+        color: #0f172a;
+        background: var(--theme-light-bg, #fef9c3);
+    }
+
+    /* Subcard Individual com Tronco Vertical (::before) e Cotovelo Horizontal (::after) */
+    .jp-subcard {
+        position: relative;
+        background-color: #f8fafc;
+        border: 1px solid #cbd5e0;
+        border-radius: 8px;
+        padding: 0.65rem 1rem;
+        margin-bottom: 0.5rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 0.75rem;
+        transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+    .jp-subcard:last-child {
+        margin-bottom: 0;
+    }
+    /* Segmento vertical do tronco (alinhado de forma imutável pela borda de 1px) */
+    .jp-subcard::before {
+        content: '';
+        position: absolute;
+        left: calc(-1.4rem - 1px);
+        top: -0.55rem;
+        bottom: -0.55rem;
+        width: 2px;
+        background-color: var(--theme-primary, #ffc107);
+        pointer-events: none;
+    }
+    /* No último subprompt, o tronco para exatamente na metade (formando o canto └─) */
+    .jp-subcard:last-child::before {
+        bottom: auto;
+        height: calc(50% + 0.55rem);
+    }
+    /* Conector horizontal ligando o tronco ao card */
+    .jp-subcard::after {
+        content: '';
+        position: absolute;
+        left: calc(-1.4rem - 1px);
+        top: 50%;
+        width: calc(1.4rem + 1px);
+        height: 2px;
+        background-color: var(--theme-primary, #ffc107);
+        pointer-events: none;
+    }
+    .jp-subcard:hover {
+        background-color: #ffffff;
+        border-color: #94a3b8;
+        box-shadow: 0 2px 5px rgba(15, 23, 42, 0.05);
+    }
+    /* Estados de Progresso da Rotina (box-shadow inset preserva 1px de border para não mover pseudo-elementos) */
+    .jp-subcard.is-next-step {
+        border-color: var(--theme-primary, #ffc107);
+        background-color: #ffffff;
+        box-shadow: inset 4px 0 0 var(--theme-primary, #ffc107), 0 0 0 2px var(--theme-light-border, rgba(251, 192, 45, 0.35));
+    }
+    .jp-subcard.was-copied {
+        border-color: #86efac;
+        background-color: #f0fdf4;
+        box-shadow: inset 4px 0 0 #16a34a;
+    }
+
+    .jp-subcard-step {
+        background-color: #e2e8f0;
+        color: #334155;
+        font-size: 0.72rem;
+        font-weight: 800;
+        min-width: 22px;
+        height: 22px;
+        border-radius: 50%;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        transition: background-color 0.2s, color 0.2s;
+    }
+    .jp-subcard.is-next-step .jp-subcard-step {
+        background-color: var(--theme-primary, #ffc107);
+        color: var(--theme-text-on-primary, #000);
+    }
+    .jp-subcard.was-copied .jp-subcard-step {
+        background-color: #16a34a;
+        color: #ffffff;
+    }
+    .jp-subcard-title {
+        font-size: 0.92rem;
+        font-weight: 600;
+        color: #334155;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .jp-next-pill {
+        font-size: 0.65rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        padding: 2px 6px;
+        border-radius: 4px;
+        background: var(--theme-light-bg, rgba(251, 192, 45, 0.15));
+        color: #1e293b;
+        border: 1px solid var(--theme-light-border, rgba(251, 192, 45, 0.4));
+        flex-shrink: 0;
+        display: none;
+    }
+    .jp-subcard.is-next-step .jp-next-pill {
+        display: inline-block;
+    }
+
+    /* Chavinha 1-Click no Cabeçalho do Acervo */
+    .jp-direct-toggle-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        background: #ffffff;
+        border: 1px solid #cbd5e0;
+        padding: 4px 10px;
+        border-radius: 20px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        color: #334155;
+        cursor: pointer;
+        user-select: none;
+    }
+    .jp-direct-toggle-chip input {
+        accent-color: var(--trt-blue, #1a3a5c);
+        cursor: pointer;
+    }
+
+    /* 6. Formulário e Construtor de Subprompts */
     .jp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; }
     @media (max-width: 768px) { .jp-grid { grid-template-columns: 1fr; } }
     .jp-form-group { margin-bottom: 1.25rem; }
     .jp-form-group label { display: block; margin-bottom: 0.5rem; font-size: 0.85rem; font-weight: 600; color: #64748b; text-transform: uppercase; }
     .jp-input { width: 100%; padding: 0.75rem; background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 1rem; font-family: inherit; }
-    .jp-builder-area { background-color: #f8fafc; padding: 1.5rem; border-radius: 8px; border: 1px dashed #e2e8f0; }
+    .jp-builder-area { background-color: #f8fafc; padding: 1.25rem; border-radius: 8px; border: 1px dashed #cbd5e0; }
     .jp-field-card { background: #ffffff; border: 1px solid #e2e8f0; padding: 1rem; border-radius: 8px; margin-bottom: 1rem; }
-    .jp-btn-add { background-color: var(--theme-primary, #ffc107); color: var(--theme-text-on-primary, #000); padding: 0.5rem 1rem; border-radius: 6px; border: none; font-weight: bold; cursor: pointer; display: flex; align-items: center; gap: 5px; transition: background-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease; }
+    .jp-btn-add { background-color: var(--theme-primary, #ffc107); color: var(--theme-text-on-primary, #000); padding: 0.5rem 1rem; border-radius: 6px; border: none; font-weight: bold; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; transition: background-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease; }
+
+    .jp-subprompt-selector-box {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin-bottom: 0.75rem;
+    }
+    .jp-subprompt-selector-row {
+        display: flex;
+        gap: 8px;
+        align-items: stretch;
+    }
+    .jp-subprompt-selector-row select {
+        flex: 1;
+        min-width: 0;
+    }
+    .jp-subprompts-builder-list {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        max-height: 220px;
+        overflow-y: auto;
+    }
+    .jp-subprompt-builder-item {
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 6px;
+        padding: 0.5rem 0.75rem;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        font-size: 0.85rem;
+    }
+    .jp-subprompt-builder-actions {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        flex-shrink: 0;
+    }
+    .jp-mini-btn {
+        background: #f1f5f9;
+        border: 1px solid #cbd5e0;
+        border-radius: 4px;
+        width: 24px;
+        height: 24px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        font-size: 0.75rem;
+        color: #334155;
+    }
+    .jp-mini-btn:hover:not(:disabled) {
+        background: #e2e8f0;
+    }
+    .jp-mini-btn:disabled {
+        opacity: 0.35;
+        cursor: not-allowed;
+    }
+    .jp-mini-btn.danger:hover {
+        background: #fee2e2;
+        color: #dc2626;
+        border-color: #fca5a5;
+    }
 </style>
 
 <!-- MODAL 1: LISTAGEM PRINCIPAL -->
 <div class="modal-backdrop-modern" id="backdrop-juris-prompts" onclick="PromptUIController.fecharModalPrincipal()"></div>
-<div class="doc-modal" id="modal-juris-prompts" style="display: none; z-index: var(--z-outline-modal, 1000); max-width: 800px; width: 95%;">
-    <div class="jp-builder-area" style="display: flex; justify-content: space-between; align-items: center;">
+<div class="doc-modal" id="modal-juris-prompts" style="display: none; z-index: var(--z-outline-modal, 1000); max-width: 820px; width: 95%;">
+    <div class="jp-builder-area" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; border-style: solid; border-radius: 8px 8px 0 0;">
         <label style="color: #1e293b; font-weight:bold; margin: 0;"><span style="color:var(--theme-primary, #ffc107);">✦</span> Acervo de Prompts Especiais</label>
-        <div style="display: flex; gap: 10px; align-items: center;">
+        <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+            <label class="jp-direct-toggle-chip" title="Quando marcado, prompts sem campos extras são copiados imediatamente em 1 clique sem abrir o painel intermediário (Segure Shift ao clicar em Gerar para forçar a abertura do painel)">
+                <input type="checkbox" id="jp-header-direct-copy-toggle" data-jp-direct-toggle="true" checked>
+                <span>⚡ Cópia 1-Click</span>
+            </label>
             <button class="jp-btn-add" onclick="PromptUIController.openAddModal()">+ Novo Modelo</button>
             <button class="doc-modal__close-btn" onclick="PromptUIController.fecharModalPrincipal()">✕</button>
         </div>
@@ -222,7 +544,7 @@
 
 <!-- MODAL 2: CRIAR/EDITAR -->
 <div class="modal-backdrop-modern jp-elevated-backdrop" id="backdrop-jp-form" onclick="PromptUIController.closeAddModal()"></div>
-<div class="doc-modal jp-elevated-modal" id="modal-jp-form" role="dialog" aria-modal="true" style="display: none; max-width: 900px; width: 95%;">
+<div class="doc-modal jp-elevated-modal" id="modal-jp-form" role="dialog" aria-modal="true" style="display: none; max-width: 960px; width: 95%;">
     <div class="doc-modal__header">
         <h3 class="doc-modal__title" id="jp-form-title">Novo Modelo</h3>
         <button class="doc-modal__close-btn" onclick="PromptUIController.closeAddModal()">✕</button>
@@ -237,15 +559,46 @@
                 </div>
                 <div class="jp-form-group">
                     <label>Teor do Prompt Base (Obrigatório)</label>
-                    <textarea id="jp-content-input" class="jp-input" style="min-height: 250px;" required></textarea>
+                    <textarea id="jp-content-input" class="jp-input" style="min-height: 280px;" required></textarea>
                 </div>
             </div>
-            <div class="jp-builder-area">
-                <label style="color: #1e293b; font-weight:bold;"><span style="color:#ffc107;">✦</span> Acervo de Prompts Especiais</label>
-                <p style="font-size: 0.8rem; color: #64748b; margin-bottom: 1rem;">Crie campos específicos para preencher ao gerar o texto.</p>
-                <div id="jp-builder-container"></div>
-                <button type="button" class="jp-btn-add" style="background:#fff; border: 1px dashed #cbd5e0; color:#1e293b;" onclick="PromptUIController.addField('text')">+ Texto</button>
-                <button type="button" class="jp-btn-add" style="background:#fff; border: 1px dashed #cbd5e0; color:#1e293b; margin-top:5px;" onclick="PromptUIController.addField('checkbox')">+ Múltipla Escolha</button>
+            <div style="display: flex; flex-direction: column; gap: 1.25rem;">
+                <!-- Bloco 1: Campos Dinâmicos -->
+                <div class="jp-builder-area">
+                    <label style="color: #1e293b; font-weight:bold;"><span style="color:var(--theme-primary, #ffc107);">✦</span> Campos Dinâmicos do Prompt</label>
+                    <p style="font-size: 0.8rem; color: #64748b; margin-bottom: 1rem;">Crie campos específicos para preencher ao gerar o texto.</p>
+                    <div id="jp-builder-container"></div>
+                    <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                        <button type="button" class="jp-btn-add" style="background:#fff; border: 1px dashed #cbd5e0; color:#1e293b;" onclick="PromptUIController.addField('text')">+ Texto</button>
+                        <button type="button" class="jp-btn-add" style="background:#fff; border: 1px dashed #cbd5e0; color:#1e293b;" onclick="PromptUIController.addField('checkbox')">+ Múltipla Escolha</button>
+                    </div>
+                </div>
+
+                <!-- Bloco 2: Ramificação de Subprompts -->
+                <div class="jp-builder-area">
+                    <label style="color: #1e293b; font-weight:bold; display:flex; align-items:center; gap:6px;">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="6" y1="3" x2="6" y2="15"></line>
+                            <circle cx="18" cy="6" r="3"></circle>
+                            <circle cx="6" cy="18" r="3"></circle>
+                            <path d="M18 9a9 9 0 0 1-9 9"></path>
+                        </svg>
+                        Ramificação de Subprompts (Sequência)
+                    </label>
+                    <p style="font-size: 0.8rem; color: #64748b; margin-bottom: 0.75rem;">Vincule prompts já salvos para executá-los em sequência após este modelo.</p>
+                    
+                    <div class="jp-subprompt-selector-box">
+                        <input type="text" id="jp-subprompt-filter" class="jp-input" style="padding: 0.45rem 0.65rem; font-size: 0.82rem;" placeholder="🔍 Filtrar lista de prompts disponíveis...">
+                        <div class="jp-subprompt-selector-row">
+                            <select id="jp-subprompt-select" class="jp-input" style="padding: 0.55rem; font-size: 0.88rem;">
+                                <option value="">Selecione um prompt salvo...</option>
+                            </select>
+                            <button type="button" class="jp-btn-add" onclick="PromptUIController.addSubPromptFromSelect()">+ Vincular</button>
+                        </div>
+                    </div>
+
+                    <div id="jp-subprompts-builder-list" class="jp-subprompts-builder-list"></div>
+                </div>
             </div>
         </div>
         <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; border-top: 1px solid #e2e8f0; padding-top: 15px;">
