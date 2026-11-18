@@ -2388,7 +2388,7 @@ window.TopicsManager = (function () {
         // 2. Óbices (Teses do AI) e Provas
         let ultimaTese = null;
         topico.anotacoes.forEach(an => {
-            const teseAtual = an.tese || "Provas sem agrupamento";
+            const teseAtual = (an.tese && an.tese.trim() !== '') ? an.tese : "Óbice Não Nomeado";
             
             if (teseAtual !== ultimaTese) {
                 if (topico.diretrizesPorObice && topico.diretrizesPorObice[teseAtual]) {

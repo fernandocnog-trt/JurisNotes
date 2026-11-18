@@ -128,7 +128,7 @@ window.OutlineViewManager = (function() {
 
         let ultimaTese = null;
         topico.anotacoes.forEach(an => {
-            const teseAtual = an.tese || "Provas sem agrupamento";
+            const teseAtual = (an.tese && an.tese.trim() !== '') ? an.tese : "Óbice Não Nomeado";
             if (teseAtual !== ultimaTese) {
                 html += `<div style="margin-top: 20px; margin-bottom: 10px; padding-bottom: 4px; border-bottom: 1px dashed #cbd5e1;"><span style="font-weight: 800; color: #6a1b9a; font-size: 0.95rem;">⚖️ Óbice / Tese: ${TopicsManager.escaparHTML(teseAtual)}</span></div>`;
                 
@@ -178,32 +178,37 @@ window.OutlineViewManager = (function() {
     }
 
     function copiarComoMarkdown() {
-        const topico = topicos.find(t => t.id === TopicsManager.getActiveTabId());
-        if (!topico) return;
-        let md = `# TÓPICO: ${topico.nome.toUpperCase()}\\n\\n`;
-        if (topico.alegacoes) md += `## RAZÕES RECURSAIS\\n${topico.alegacoes}\\n\\n`;
-        if (topico.fundamentos) md += `## FUNDAMENTOS DA SENTENÇA\\n${topico.fundamentos}\\n\\n`;
-        if (topico.veredito) md += `## VEREDITO PRETENDIDO\\n${topico.veredito}\\n\\n`;
-        if (topico.diretrizesGlobais?.length > 0) {
-            const globaisVisiveis = topico.diretrizesGlobais.filter(d => d.intencao !== 'nota');
-            if (globaisVisiveis.length > 0) {
-                md += `## DIRETRIZES GLOBAIS\\n`;
-                globaisVisiveis.forEach(d => md += `- [${(d.intencao || 'diretriz').toUpperCase()}]: ${d.texto}\\n`);
-                md += `\\n`;
-            }
+        if (!window.ExportManager || typeof window.ExportManager.obterDadosDoTopicoAtivo !== 'function') {
+            exibirToast('Módulo de exportação indisponível.', 'erro');
+            return;
         }
-        md += `## MATRIZ PROBATÓRIA E ÓBICES (TESES)\\n`;
-        let ultimaTese = null;
-        topico.anotacoes.forEach((an, i) => {
-            const tese = an.tese || "Geral";
-            if (tese !== ultimaTese) { md += `\\n### ÓBICE / TESE: ${tese}\\n`; ultimaTese = tese; }
-            md += `\\n* PROVA ${i + 1}: ${an.documento || an.polo || 'Elemento'}${an.pagina ? ` (fl. ${an.pagina})` : ''}\\n`;
-            if (an.tipo === 'texto') md += `  > "${an.conteudo}"\\n`;
-            if (an.subAnotacoes) an.subAnotacoes.forEach(sub => {
-                if (sub.intencao !== 'nota') md += `  - [${(sub.intencao || 'nó').toUpperCase()}]: ${sub.texto}\\n`;
-            });
+
+        const dados = window.ExportManager.obterDadosDoTopicoAtivo({
+            modo: 'minuta',
+            incluirNomesImagens: false,
+            permitirSemAnotacoes: true
         });
-        navigator.clipboard.writeText(md.trim()).then(() => exibirToast('Markdown copiado para IA!', 'sucesso'));
+
+        if (!dados || !dados.markdown) {
+            exibirToast('O tópico está vazio ou sem dados para exportar.', 'aviso');
+            return;
+        }
+
+        const activeId = TopicsManager.getActiveTabId();
+        const topico = topicos.find(t => t.id === activeId);
+        let payload = dados.markdown;
+
+        if (typeof window.ExportManager.gerarLembreteFinalHierarquia === 'function') {
+            payload += window.ExportManager.gerarLembreteFinalHierarquia(topico);
+        }
+
+        if (window.QuickRedactManager && typeof window.QuickRedactManager.sanitizarString === 'function') {
+            payload = window.QuickRedactManager.sanitizarString(payload);
+        }
+
+        navigator.clipboard.writeText(payload.trim()).then(() => {
+            exibirToast('Estrutura Markdown copiada para IA (com hierarquia epistemológica e LGPD)!', 'sucesso');
+        });
     }
 
     function copiarTrechoElemento(idElemento) {
@@ -281,7 +286,7 @@ window.MinutaViewManager = (function() {
 
         let ultimaTese = null;
         topico.anotacoes.forEach(an => {
-            const teseAtual = an.tese || "Provas sem agrupamento de tese";
+            const teseAtual = (an.tese && an.tese.trim() !== '') ? an.tese : "Óbice Não Nomeado";
             if (teseAtual !== ultimaTese) {
                 topico.diretrizesPorObice?.[teseAtual]?.forEach(dir => {
                     const nodeHtml = _processarNo(dir);
@@ -374,7 +379,7 @@ window.MinutaViewManager = (function() {
 
         let ultimaTese = null;
         topico.anotacoes.forEach(an => {
-            const teseAtual = an.tese || "Provas sem agrupamento de tese";
+            const teseAtual = (an.tese && an.tese.trim() !== '') ? an.tese : "Óbice Não Nomeado";
             if (teseAtual !== ultimaTese) {
                 topico.diretrizesPorObice?.[teseAtual]?.forEach(dir => { md += _processarNoMd(dir); });
                 ultimaTese = teseAtual;
