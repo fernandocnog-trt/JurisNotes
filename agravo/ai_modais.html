@@ -1014,3 +1014,63 @@
 
 <!-- BACKDROP TRANSLÚCIDO COMPARTILHADO (JURIS RELATÓRIO E JURIS PROMPTS) -->
 <div id="shared-tools-backdrop" class="backdrop-seguro" style="display: none;" aria-hidden="true"></div>
+
+<!-- =========================================================
+     MODAL: GUARDIÃO DE NÓS DE IDEIA DE ÓBICE/TESE (THESIS GUARD - AI)
+     ========================================================= -->
+<div id="redirecionar-nos-tese-backdrop" class="backdrop-seguro modal-backdrop-modern jp-elevated-backdrop" style="display: none; position: fixed; inset: 0; background: rgba(15, 37, 61, 0.55); backdrop-filter: blur(3px); z-index: 5000;"></div>
+
+<div id="modal-redirecionar-nos-tese" class="crop-wizard-popup fechavel-por-esc" role="dialog" aria-modal="true" aria-labelledby="titulo-modal-redirecionar-tese" style="display: none; width: 600px; max-width: 94vw; z-index: 5001; flex-direction: column; gap: 14px;">
+    <div class="wizard-header" style="border-bottom: 1px solid var(--border-color); padding-bottom: 10px; display: flex; justify-content: space-between; align-items: center;">
+        <div style="display: flex; align-items: center; gap: 8px; color: #6a1b9a; font-weight: 800; font-size: 1rem;" id="titulo-modal-redirecionar-tese">
+            <span>⚖️ Direcionar Nós de Ideias do Cartão de Óbice/Tese</span>
+        </div>
+        <span style="font-size: 0.75rem; background: #f3e5f5; color: #6a1b9a; padding: 3px 10px; border-radius: 12px; font-weight: 700;" id="badge-qtd-nos-orfaos">0 nó(s)</span>
+    </div>
+
+    <div style="font-size: 0.85rem; color: #334155; line-height: 1.5;" id="descricao-modal-redirecionar-tese">
+        O grupo de ideias que sustentava o Cartão de Óbice/Tese <strong id="nome-tese-orfa-display" style="color: #6a1b9a;">""</strong> deixou de existir. Escolha para qual Grupo de Ideias (já com a numeração atualizada) deseja enviar estes Nós de Ideias:
+    </div>
+
+    <!-- Pré-visualização dos Nós de Ideia afetados -->
+    <div id="lista-preview-nos-orfaos" class="orphan-nodes-preview-box"></div>
+
+    <!-- Seletor de Grupo de Ideias ou Ação de Destino -->
+    <div style="display: flex; flex-direction: column; gap: 6px;">
+        <label for="select-destino-nos-tese" style="font-size: 0.78rem; font-weight: 700; color: var(--trt-blue); text-transform: uppercase;">
+            Destino dos Nós de Ideias:
+        </label>
+        <select id="select-destino-nos-tese" class="topic-select" onchange="ThesisGuard.aoTrocarDestinoUI(this.value)"></select>
+    </div>
+
+    <!-- Opções exibidas quando o Grupo de Destino escolhido NÃO possui Tese/Óbice nomeado -->
+    <div id="box-opcoes-grupo-sem-tese" class="orphan-thesis-hint-box" style="display: none;">
+        <div style="font-size: 0.8rem; font-weight: 700; color: #92400e; margin-bottom: 6px;">
+            ⚠️ O Grupo de Ideias selecionado ainda não possui um Óbice/Tese nomeado:
+        </div>
+        <label for="input-novo-titulo-tese-herdar" style="font-size: 0.76rem; color: #475569; display: block; margin-bottom: 4px;">
+            Título do Óbice/Tese a ser vinculado neste grupo (deixe em branco para manter como "Óbice Não Nomeado"):
+        </label>
+        <input type="text" id="input-novo-titulo-tese-herdar" class="login-input" placeholder="Título do óbice/tese para o grupo escolhido...">
+    </div>
+
+    <!-- Aviso caso haja mais de uma tese afetada na mesma operação -->
+    <div id="aviso-multiplos-orfaos-rollback" style="display: none; font-size: 0.75rem; color: #64748b; font-style: italic;">
+        ℹ️ Nota: Clicar em "Desfazer Alteração" restaurará o tópico inteiro ao estado anterior à movimentação.
+    </div>
+
+    <!-- Rodapé de Ações Transacionais -->
+    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 4px; padding-top: 12px; border-top: 1px solid var(--border-color);">
+        <div style="display: flex; gap: 8px;">
+            <button type="button" id="btn-desfazer-mutacao-tese" class="chip-btn chip-cancelar" style="width: auto; padding: 8px 12px; font-size: 0.8rem; color: var(--trt-blue); border-color: #cbd5e1;" onclick="ThesisGuard.desfazerOperacao()" title="Cancela a alteração e restaura o grupo como estava (Atalho: ESC)">
+                ↩️ Desfazer Alteração
+            </button>
+            <button type="button" id="btn-excluir-nos-orfaos" class="chip-btn chip-re" style="width: auto; padding: 8px 12px; font-size: 0.8rem;" onclick="ThesisGuard.descartarNosOrfaos()">
+                🗑️ Excluir Nós
+            </button>
+        </div>
+        <button type="button" class="chip-btn chip-autora" id="btn-confirmar-redirecionamento-tese" style="width: auto; padding: 8px 18px;" onclick="ThesisGuard.confirmarRedirecionamento()">
+            ✔ Confirmar Direcionamento
+        </button>
+    </div>
+</div>
