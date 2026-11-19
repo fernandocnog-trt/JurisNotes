@@ -147,13 +147,30 @@ window.OutlineViewManager = (function() {
         }
 
         let ultimaTese = null;
+        const tesesDiretrizesEmitidas = new Set();
 
         topico.anotacoes.forEach(an => {
-            const teseAtual = (an.tese && an.tese.trim() !== '') ? an.tese.trim() : "Tese Não Nomeada";
+            if (an && an.tipo && an.tipo.startsWith('checkpoint')) return;
+            const teseAtual = window.ThesisGuard
+                ? ThesisGuard.obterChaveTese(an)
+                : ((an.tese && an.tese.trim() !== '') ? an.tese.trim() : 'Tese Não Nomeada');
             if (teseAtual !== ultimaTese) {
                 html += `<div style="margin-top: 20px; margin-bottom: 10px; padding-bottom: 4px; border-bottom: 1px dashed #cbd5e1;">
                     <span style="font-weight: 800; color: #6a1b9a; font-size: 0.95rem;">📑 Grupo: ${TopicsManager.escaparHTML(teseAtual)}</span>
                 </div>`;
+                if (!tesesDiretrizesEmitidas.has(teseAtual) && topico.diretrizesPorTese && topico.diretrizesPorTese[teseAtual]) {
+                    tesesDiretrizesEmitidas.add(teseAtual);
+                    const dirTeseVisiveis = topico.diretrizesPorTese[teseAtual].filter(d => d.intencao !== 'nota');
+                    dirTeseVisiveis.forEach(dir => {
+                        const intencaoKey = dir.intencao || 'premissa';
+                        const rotulo = _obterRotuloIntencao(intencaoKey);
+                        html += `
+                        <div class="outline-sub-item" style="margin-left: 12px; margin-bottom: 6px;">
+                            <span class="outline-intent-chip intent-${intencaoKey}">${rotulo}</span>
+                            <span class="outline-content-text">${_render(dir.texto)}</span>
+                        </div>`;
+                    });
+                }
                 ultimaTese = teseAtual;
             }
 
@@ -329,15 +346,31 @@ window.MinutaViewManager = (function() {
         }
 
         let ultimaTese = null;
+        const viciosDiretrizesEmitidos = new Set();
+        const tesesDiretrizesEmitidas = new Set();
+
         topico.anotacoes.forEach(an => {
-            const teseAtual = (an.tese && an.tese.trim() !== '') ? an.tese.trim() : "Tese Não Nomeada";
+            if (an && an.tipo && an.tipo.startsWith('checkpoint')) return;
+            const teseAtual = window.ThesisGuard
+                ? ThesisGuard.obterChaveTese(an)
+                : ((an.tese && an.tese.trim() !== '') ? an.tese.trim() : 'Tese Não Nomeada');
             const vicioRaw = an.vicio || topico.vicio || 'omissao';
             
             if (teseAtual !== ultimaTese) {
-                topico.diretrizesPorVicio?.[vicioRaw]?.forEach(dir => {
-                    const nodeHtml = _processarNo(dir);
-                    if(nodeHtml) { html += nodeHtml; nodesEncontrados = true; }
-                });
+                if (!viciosDiretrizesEmitidos.has(vicioRaw)) {
+                    viciosDiretrizesEmitidos.add(vicioRaw);
+                    topico.diretrizesPorVicio?.[vicioRaw]?.forEach(dir => {
+                        const nodeHtml = _processarNo(dir);
+                        if(nodeHtml) { html += nodeHtml; nodesEncontrados = true; }
+                    });
+                }
+                if (!tesesDiretrizesEmitidas.has(teseAtual)) {
+                    tesesDiretrizesEmitidas.add(teseAtual);
+                    topico.diretrizesPorTese?.[teseAtual]?.forEach(dir => {
+                        const nodeHtml = _processarNo(dir);
+                        if(nodeHtml) { html += nodeHtml; nodesEncontrados = true; }
+                    });
+                }
                 ultimaTese = teseAtual;
             }
 
@@ -426,12 +459,25 @@ window.MinutaViewManager = (function() {
         }
 
         let ultimaTese = null;
+        const viciosDiretrizesEmitidos = new Set();
+        const tesesDiretrizesEmitidas = new Set();
+
         topico.anotacoes.forEach(an => {
-            const teseAtual = (an.tese && an.tese.trim() !== '') ? an.tese.trim() : "Tese Não Nomeada";
+            if (an && an.tipo && an.tipo.startsWith('checkpoint')) return;
+            const teseAtual = window.ThesisGuard
+                ? ThesisGuard.obterChaveTese(an)
+                : ((an.tese && an.tese.trim() !== '') ? an.tese.trim() : 'Tese Não Nomeada');
             const vicioRaw = an.vicio || topico.vicio || 'omissao';
             
             if (teseAtual !== ultimaTese) {
-                topico.diretrizesPorVicio?.[vicioRaw]?.forEach(dir => { md += _processarNoMd(dir); });
+                if (!viciosDiretrizesEmitidos.has(vicioRaw)) {
+                    viciosDiretrizesEmitidos.add(vicioRaw);
+                    topico.diretrizesPorVicio?.[vicioRaw]?.forEach(dir => { md += _processarNoMd(dir); });
+                }
+                if (!tesesDiretrizesEmitidas.has(teseAtual)) {
+                    tesesDiretrizesEmitidas.add(teseAtual);
+                    topico.diretrizesPorTese?.[teseAtual]?.forEach(dir => { md += _processarNoMd(dir); });
+                }
                 ultimaTese = teseAtual;
             }
             

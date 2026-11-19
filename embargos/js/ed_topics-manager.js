@@ -421,7 +421,8 @@ window.TopicsManager = (function () {
         
         return `<button class="btn-revisao-nota ${isRevisada ? 'revisada' : 'pendente'}" 
                 title="${isRevisada ? 'Nota revisada. Clique para desmarcar.' : 'Nota pendente. Clique para marcar como revisada.'}" 
-                onclick="toggleRevisaoNotaOculta('${topicoId}', ${safeParentIdx}, '${safeViewSource}', ${localIndex}, event)">
+                data-view-source="${escaparHTML(viewSource)}"
+                onclick="toggleRevisaoNotaOculta('${topicoId}', ${safeParentIdx}, this.dataset.viewSource, ${localIndex}, event)">
                 ${isRevisada ? svgRevisada : svgPendente}
                 </button>`;
     }
@@ -927,13 +928,11 @@ window.TopicsManager = (function () {
         const isRevisada = sub.revisada === true;
         const itemWrapperClass = intencao === 'nota' ? `sub-annotation-item is-nota-interna ${isRevisada ? 'is-revisada' : 'is-pendente'}` : 'sub-annotation-item';
         
-        // Normaliza para String não-vazia e escapa aspas simples para uso seguro em handlers inline
+        // Normaliza para String não-vazia e utiliza dataset para evitar quebra por aspas em handlers inline
         const viewSourceNorm = String(ctx.viewSource ?? '') || 'main';
-        const safeViewSourceJS = viewSourceNorm.replace(/'/g, "\\'");
+        const safeParentIdx = ctx.parentIndex === null ? 'null' : ctx.parentIndex;
 
-        const clickSubMenu = ctx.parentIndex === null 
-            ? `abrirMenuSubAnotacao('${ctx.topicoId}', null, '${safeViewSourceJS}', ${sub.localIndex}, event)`
-            : `abrirMenuSubAnotacao('${ctx.topicoId}', ${ctx.parentIndex}, '${safeViewSourceJS}', ${sub.localIndex}, event)`;
+        const clickSubMenu = `abrirMenuSubAnotacao('${ctx.topicoId}', ${safeParentIdx}, this.dataset.viewSource, ${sub.localIndex}, event)`;
 
         const classBorda = ctx.bordaClass ? ` ${ctx.bordaClass}` : '';
         const classFase = ctx.bordaFaseClass ? ` ${ctx.bordaFaseClass}` : '';
@@ -944,6 +943,7 @@ window.TopicsManager = (function () {
                 <div class="sub-annotation-card${classFase}${classBorda}"${styleAttr}>
                     <div class="${badgeClass}"
                          title="Opções deste nó/diretriz"
+                         data-view-source="${escaparHTML(viewSourceNorm)}"
                          onclick="${clickSubMenu}">
                         ${label}
                     </div>
@@ -1441,8 +1441,8 @@ window.TopicsManager = (function () {
                 </div>`;
         }
 
-        // CORREÇÃO ARQUITETURAL 2: Sanitização JS-Safe para atributos inline (previne quebra de sintaxe)
-        const chaveParaGravarJS = isGlobal ? '' : String(chaveCruaSegura).replace(/'/g, "\\'");
+        // CORREÇÃO ARQUITETURAL 2: Atributo data-tese evita interpolação de strings com aspas no onclick
+        const chaveDataAttr = isGlobal ? '' : escaparHTML(chaveCruaSegura);
 
         return `
             <div class="timeline-item-master ${alignClass} nivel-hierarquico ${wrapperClass}" id="${wrapperId}">
@@ -1459,8 +1459,7 @@ window.TopicsManager = (function () {
                                 ${htmlTesesMapeadas}
                             </div>
                             <div class="card-actions-bar" style="margin-top: 0; padding-top: 0; border-top: none;">
-                                <!-- Botão atualizado injetando chaveParaGravarJS -->
-                                <button title="Adicionar Diretriz" onclick="adicionarDiretrizEstrutural('${isGlobal ? 'global' : 'vicio'}', '${topicoId}', '${chaveParaGravarJS}', event)">
+                                <button title="Adicionar Diretriz" data-tese="${chaveDataAttr}" onclick="adicionarDiretrizEstrutural('${isGlobal ? 'global' : 'vicio'}', '${topicoId}', this.dataset.tese, event)">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
                                 </button>
                             </div>
@@ -1869,17 +1868,18 @@ window.TopicsManager = (function () {
 
         topicoAtivo.anotacoes.forEach((anotacao, index) => {
             const isTesePreenchida = Boolean(anotacao.tese && anotacao.tese.trim() !== '');
-            const chaveTeseCrua = isTesePreenchida ? anotacao.tese.trim() : "Tese Não Nomeada";
+            const teseAtual = window.ThesisGuard
+                ? ThesisGuard.obterChaveTese(anotacao)
+                : (isTesePreenchida ? anotacao.tese.trim() : 'Tese Não Nomeada');
             const vicioRaw = anotacao.vicio || topicoAtivo.vicio || 'omissao';
             const vicioFormatado = window.JurisUtils.formatarVicioED(vicioRaw);
 
-            if (!_ehCheckpoint(anotacao) && chaveTeseCrua !== ultimaTeseRenderizada) {
+            if (!_ehCheckpoint(anotacao) && teseAtual !== ultimaTeseRenderizada) {
                 const diretrizesDoVicio = (topicoAtivo.diretrizesPorVicio && topicoAtivo.diretrizesPorVicio[vicioRaw])
                                           ? topicoAtivo.diretrizesPorVicio[vicioRaw]
                                           : [];
 
                 if (isTesePreenchida || diretrizesDoVicio.length > 0) {
-                    const tituloExibicao = isTesePreenchida ? anotacao.tese.trim() : "Tese Não Nomeada";
                     // Fallback seguro caso JurisUtils falhe
                     const vicioSeguroUI = vicioFormatado || 'Vício Não Identificado';
 
@@ -1888,13 +1888,13 @@ window.TopicsManager = (function () {
                         vicioSeguroUI,
                         diretrizesDoVicio,
                         activeTabId,
-                        [tituloExibicao],
+                        [teseAtual],
                         index,
                         renderContext,
                         vicioRaw // <-- CORREÇÃO ARQUITETURAL 3: Passagem da chave crua do estado global
                     );
                 }
-                ultimaTeseRenderizada = chaveTeseCrua;
+                ultimaTeseRenderizada = teseAtual;
             }
             
             const htmlGerado = criarCard(anotacao, index, topicoAtivo.anotacoes, renderContext);
@@ -2529,7 +2529,9 @@ window.TopicsManager = (function () {
         // 2. Varre Vícios e Provas
         let ultimaTese = null;
         topico.anotacoes.forEach(an => {
-            const teseAtual = (an.tese && an.tese.trim() !== '') ? an.tese.trim() : "Tese Não Nomeada";
+            const teseAtual = window.ThesisGuard
+                ? ThesisGuard.obterChaveTese(an)
+                : ((an.tese && an.tese.trim() !== '') ? an.tese.trim() : 'Tese Não Nomeada');
             const vicioRaw = an.vicio || topico.vicio || 'omissao';
             
             // Subnós de Vício (ED) e eventual Diretriz por Tese
@@ -3246,11 +3248,14 @@ window.TopicsManager = (function () {
 
         const diretrizesPorTeseNovo = {};
         if (topicoAtual.diretrizesPorTese && anotacoesTransferidas.length > 0) {
+            const resolverChaveTese = (an) => window.ThesisGuard
+                ? ThesisGuard.obterChaveTese(an)
+                : ((an.tese && an.tese.trim() !== '') ? an.tese.trim() : 'Tese Não Nomeada');
             const tesesTransferidas = new Set(
-                anotacoesTransferidas.map(a => a.tese || "Tese Não Nomeada")
+                anotacoesTransferidas.map(resolverChaveTese)
             );
             const tesesRestantes = new Set(
-                anotacoesRestantes.filter(a => !_ehCheckpoint(a)).map(a => a.tese || "Tese Não Nomeada")
+                anotacoesRestantes.filter(a => !_ehCheckpoint(a)).map(resolverChaveTese)
             );
 
             tesesTransferidas.forEach(chaveTese => {
@@ -3720,14 +3725,16 @@ window.TopicsManager = (function () {
         const cartoesSemTese = [];
 
         cartoesTransferidos.forEach(card => {
-            const chaveTeseCrua = card.tese || "Tese Não Nomeada";
+            const teseAtual = window.ThesisGuard
+                ? ThesisGuard.obterChaveTese(card)
+                : ((card.tese && card.tese.trim() !== '') ? card.tese.trim() : 'Tese Não Nomeada');
             const isTesePreenchida = Boolean(card.tese && card.tese.trim() !== '');
 
             if (isTesePreenchida) {
-                if (!gruposTeseNomeada.has(chaveTeseCrua)) {
-                    gruposTeseNomeada.set(chaveTeseCrua, []);
+                if (!gruposTeseNomeada.has(teseAtual)) {
+                    gruposTeseNomeada.set(teseAtual, []);
                 }
-                gruposTeseNomeada.get(chaveTeseCrua).push(card);
+                gruposTeseNomeada.get(teseAtual).push(card);
             } else {
                 cartoesSemTese.push(card);
             }
@@ -3741,7 +3748,10 @@ window.TopicsManager = (function () {
 
             for (let i = 0; i < arrDestino.length; i++) {
                 const item = arrDestino[i];
-                if (!_ehCheckpoint(item) && (item.tese || "Tese Não Nomeada") === chaveTeseCrua) {
+                const teseItem = window.ThesisGuard
+                    ? ThesisGuard.obterChaveTese(item)
+                    : ((item && item.tese && item.tese.trim() !== '') ? item.tese.trim() : 'Tese Não Nomeada');
+                if (!_ehCheckpoint(item) && teseItem === chaveTeseCrua) {
                     if (primeiroIdxTese === -1) primeiroIdxTese = i;
                     ultimoIdxTese = i;
                 }
@@ -3849,9 +3859,12 @@ window.TopicsManager = (function () {
             if (cartoesTransferidos.length === 0) return;
 
             const assinaturaDiretriz = (d) => `${d.intencao || 'premissa'}|${(d.texto || '').trim()}`;
-            const tesesMovidas = new Set(cartoesTransferidos.map(a => a.tese || "Tese Não Nomeada"));
+            const resolverChaveTese = (an) => window.ThesisGuard
+                ? ThesisGuard.obterChaveTese(an)
+                : ((an.tese && an.tese.trim() !== '') ? an.tese.trim() : 'Tese Não Nomeada');
+            const tesesMovidas = new Set(cartoesTransferidos.map(resolverChaveTese));
             const tesesFicaramOrigem = new Set(
-                nextOrigemAnotacoes.filter(a => !_ehCheckpoint(a)).map(a => a.tese || "Tese Não Nomeada")
+                nextOrigemAnotacoes.filter(a => !_ehCheckpoint(a)).map(resolverChaveTese)
             );
 
             const todasNovasDiretrizes = [];

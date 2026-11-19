@@ -386,25 +386,38 @@ window.ExportManager = (function () {
             }
         }
 
-        // CORREÇÃO: BUFFER CONDICIONAL E MAPEAMENTO DE VÍCIO
+        // CORREÇÃO: BUFFER CONDICIONAL E MAPEAMENTO DE VÍCIO E TESE ANCORADOS
+        const anotacoesValidas = (topico.anotacoes || []).filter(
+            an => an && !(an.tipo && an.tipo.startsWith('checkpoint'))
+        );
+
         let bufferVicios = '';
         if (topico.diretrizesPorVicio && Object.keys(topico.diretrizesPorVicio).length > 0) {
+            const viciosAncorados = new Set(
+                anotacoesValidas.map(an => String(an.vicio || topico.vicio || 'omissao').trim())
+            );
+            if (anotacoesValidas.length === 0 && topico.vicio) {
+                viciosAncorados.add(String(topico.vicio).trim());
+            }
+
             Object.keys(topico.diretrizesPorVicio).forEach(nomeVicio => {
+                const chaveVicioLimpa = String(nomeVicio).trim();
+                if (!viciosAncorados.has(chaveVicioLimpa)) return;
+
                 const diretrizes = topico.diretrizesPorVicio[nomeVicio];
                 if (diretrizes && diretrizes.length > 0) {
                     const diretrizesValidas = diretrizes.filter(dir => dir.intencao !== 'nota');
                     if (diretrizesValidas.length > 0) {
-                        
-                        // [NOVO] MAPEAMENTO ESTRUTURAL PARA A IA: Sincronia perfeita com a UI
-                        const tesesVinculadas = topico.anotacoes
-                            .filter(an => (an.vicio || topico.vicio) === nomeVicio && an.tese && an.tese.trim() !== '')
-                            .map(an => an.tese.trim());
+                        // MAPEAMENTO ESTRUTURAL PARA A IA: Sincronia perfeita com a UI
+                        const tesesVinculadas = anotacoesValidas
+                            .filter(an => String(an.vicio || topico.vicio || 'omissao').trim() === chaveVicioLimpa && an.tese && an.tese.trim() !== '')
+                            .map(an => window.ThesisGuard ? ThesisGuard.obterChaveTese(an) : an.tese.trim());
                         
                         const tesesUnicas = [...new Set(tesesVinculadas)];
                         const stringTeses = tesesUnicas.length > 0 ? tesesUnicas.join(' | ') : 'Aguardando definição do usuário na Matriz.';
 
                         bufferVicios += `<vicio_alvo>\n`;
-                        bufferVicios += `[NOME DO VÍCIO]: ${_escapeXmlAttr(nomeVicio)}\n`;
+                        bufferVicios += `[NOME DO VÍCIO]: ${_escapeXmlAttr(chaveVicioLimpa)}\n`;
                         bufferVicios += `[TESES RECURSAIS ENVOLVIDAS]: ${_escapeXmlAttr(stringTeses)}\n`;
                         
                         diretrizesValidas.forEach(dir => {
@@ -414,6 +427,31 @@ window.ExportManager = (function () {
                     }
                 }
             });
+        }
+
+        if (topico.diretrizesPorTese && Object.keys(topico.diretrizesPorTese).length > 0) {
+            const tesesAncoradas = window.ThesisGuard
+                ? ThesisGuard.mapearTesesAncoradas(topico)
+                : new Set(
+                    anotacoesValidas.map(a => (a.tese && a.tese.trim() !== '') ? a.tese.trim() : CHAVE_TESE_SEM_NOME)
+                );
+
+            for (const [nomeTese, diretrizes] of Object.entries(topico.diretrizesPorTese)) {
+                const chaveNormalizada = nomeTese.trim() || CHAVE_TESE_SEM_NOME;
+                if (!tesesAncoradas.has(chaveNormalizada)) continue;
+
+                if (diretrizes && diretrizes.length > 0) {
+                    const diretrizesValidas = diretrizes.filter(dir => dir.intencao !== 'nota');
+                    if (diretrizesValidas.length > 0) {
+                        bufferVicios += `<tese_alvo>\n`;
+                        bufferVicios += `[NOME DA TESE]: ${_escapeXmlAttr(chaveNormalizada)}\n`;
+                        diretrizesValidas.forEach(dir => {
+                            bufferVicios += `[${(dir.intencao || 'PREMISSA').toUpperCase()} — DIRETRIZ VINCULANTE DA TESE]: ${_safeMD(dir.texto, '\n')}\n`;
+                        });
+                        bufferVicios += `</tese_alvo>\n\n`;
+                    }
+                }
+            }
         }
         
         if (bufferVicios.trim() !== '') {
@@ -448,7 +486,9 @@ window.ExportManager = (function () {
                     return;
                 }
 
-                const teseAtual = (an.tese && an.tese.trim() !== '') ? an.tese.trim() : CHAVE_TESE_SEM_NOME;
+                const teseAtual = window.ThesisGuard
+                    ? ThesisGuard.obterChaveTese(an)
+                    : ((an.tese && an.tese.trim() !== '') ? an.tese.trim() : CHAVE_TESE_SEM_NOME);
                 const vicioAtual = an.vicio || topico.vicio || 'Nao Especificado';
 
                 // Lógica Cirúrgica: Fechar grupo anterior e abrir novo grupo se houver quebra
