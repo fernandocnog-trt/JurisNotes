@@ -380,13 +380,24 @@ window.ExportManager = (function () {
         const diretrizesPorTeseOuVicio = topico.diretrizesPorObice || topico.diretrizesPorTese || topico.diretrizesPorVicio || {};
         
         if (Object.keys(diretrizesPorTeseOuVicio).length > 0) {
+            const tesesAncoradas = window.ThesisGuard
+                ? ThesisGuard.mapearTesesAncoradas(topico)
+                : new Set(
+                    (topico.anotacoes || [])
+                        .filter(a => a && !(a.tipo && a.tipo.startsWith('checkpoint')))
+                        .map(a => (a.tese && a.tese.trim() !== '') ? a.tese.trim() : CHAVE_OBICE_SEM_NOME)
+                );
+
             Object.keys(diretrizesPorTeseOuVicio).forEach(nomePressuposto => {
+                const chaveNormalizada = nomePressuposto.trim() || CHAVE_OBICE_SEM_NOME;
+                if (!tesesAncoradas.has(chaveNormalizada)) return;
+
                 const diretrizes = diretrizesPorTeseOuVicio[nomePressuposto];
                 if (diretrizes && diretrizes.length > 0) {
                     const diretrizesValidas = diretrizes.filter(dir => dir.intencao !== 'nota');
                     if (diretrizesValidas.length > 0) {
                         bufferPressupostos += `  <pressuposto_alvo>\n`;
-                        bufferPressupostos += `    [NOME DO PRESSUPOSTO]: ${_escapeXmlAttr(nomePressuposto)}\n`;
+                        bufferPressupostos += `    [NOME DO PRESSUPOSTO]: ${_escapeXmlAttr(chaveNormalizada)}\n`;
                         diretrizesValidas.forEach(dir => {
                              bufferPressupostos += `    [${(dir.intencao || 'MÉTRICA DE VALIDAÇÃO').toUpperCase()} — DIRETRIZ VINCULANTE DO ÓBICE]: ${_safeMD(dir.texto, '\n    ')}\n`;
                         });
@@ -424,7 +435,9 @@ window.ExportManager = (function () {
                 const numIdeia = idx + 1;
                 const refCitacao = _formatarCitacaoOficial(an.pjeId, an.pagina);
                 // Unificado com CHAVE_OBICE_SEM_NOME ("Óbice Não Nomeado") para casar 1:1 com <direcionamentos_por_pressuposto>
-                const pressupostoContexto = (an.tese && an.tese.trim() !== '') ? an.tese : CHAVE_OBICE_SEM_NOME;
+                const pressupostoContexto = window.ThesisGuard
+                    ? ThesisGuard.obterChaveTese(an)
+                    : ((an.tese && an.tese.trim() !== '') ? an.tese.trim() : CHAVE_OBICE_SEM_NOME);
                 const estatutoMestre = _obterEstatutoEpistemologico(an);
 
                 md += `<analise_de_evidencia>\n`;

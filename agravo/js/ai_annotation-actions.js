@@ -108,7 +108,11 @@ function definirIntencaoSubAnotacao(intencaoStr) {
     salvarBackupAutomatico();
     
     requestAnimationFrame(() => {
-        const cardsDestaFonte = document.querySelectorAll(`[data-source="${_menuSubAnotacaoCtx.viewSource}"] .sub-annotation-card`);
+        const viewSourceStr = String(_menuSubAnotacaoCtx.viewSource ?? '');
+        const seletorSourceSeguro = (typeof CSS !== 'undefined' && typeof CSS.escape === 'function')
+            ? CSS.escape(viewSourceStr)
+            : viewSourceStr.replace(/["\\]/g, '\\$&');
+        const cardsDestaFonte = document.querySelectorAll(`[data-source="${seletorSourceSeguro}"] .sub-annotation-card`);
         const cardEditado = cardsDestaFonte[_menuSubAnotacaoCtx.localIndex];
         
         if (cardEditado) {
@@ -360,6 +364,7 @@ function excluirAnotacao() {
     const { topicoId, index } = _menuAnotacaoCtx;
     const topico = topicos.find(t => t.id === topicoId);
     const cardAlvo = topico.anotacoes[index];
+    const ctxAntes = window.ThesisGuard ? ThesisGuard.capturarEstadoAntes(topico) : null;
 
     // Validação de impacto estrutural
     const temCorrelacionados = cardAlvo.itensCorrelacionados && cardAlvo.itensCorrelacionados.length > 0;
@@ -375,6 +380,7 @@ function excluirAnotacao() {
         
         // O herdeiro assume a tese e a tutela dos irmãos restantes
         novoMainCard.tese = cloneProfundo.tese; 
+        novoMainCard.teseClassificacao = cloneProfundo.teseClassificacao;
         novoMainCard.itensCorrelacionados = cloneProfundo.itensCorrelacionados;
 
         // 1. Mutação DIRETA na memória global (Garante o funcionamento sem depender do Store)
@@ -409,6 +415,7 @@ function excluirAnotacao() {
     // A SOLUÇÃO DO BUG: Execução INCONDICIONAL
     // Fora de qualquer bloco "if". A tela repinta instantaneamente e reorganiza os números.
     renderizarTopicos(); 
+    if (window.ThesisGuard) ThesisGuard.verificarAposMutacao(topico, ctxAntes);
     salvarBackupAutomatico();
     if (window.sincronizarHighlightsGerais) window.sincronizarHighlightsGerais();
     
@@ -1272,20 +1279,86 @@ function salvarTese() {
     _autoTeseRequestId++; // Cancela respostas tardias caso o usuário salve manualmente antes da IA responder
 
     const topico = topicos.find(t => t.id === _ideiaContextoTese.topicoId);
-    if (!topico || !topico.anotacoes[_ideiaContextoTese.index]) return;
-    
+    if (!topico || !topico.anotacoes[_ideiaContextoTese.index]) {
+        fecharModalTese();
+        return;
+    }
+
+    const CHAVE_SEM_TESE = window.ThesisGuard ? ThesisGuard.CHAVE_SEM_TESE : 'Óbice Não Nomeado';
+    const ctxAntes = window.ThesisGuard ? ThesisGuard.capturarEstadoAntes(topico) : null;
+    const idxAlvo = _ideiaContextoTese.index;
+    const cardAlvo = topico.anotacoes[idxAlvo];
+    const chaveAntiga = window.ThesisGuard
+        ? ThesisGuard.obterChaveTese(cardAlvo)
+        : ((cardAlvo.tese && cardAlvo.tese.trim()) || CHAVE_SEM_TESE);
+
     const textoTese = document.getElementById('input-texto-tese').value.trim();
     const btnClass = document.getElementById('btn-classificacao-tese');
-    const classificacao = btnClass ? (btnClass.dataset.classificacao || 'neutro') : 'neutro';
-    
-    topico.anotacoes[_ideiaContextoTese.index].tese = textoTese;
-    topico.anotacoes[_ideiaContextoTese.index].teseClassificacao = classificacao;
-    
-    renderizarTopicos(); 
-    salvarBackupAutomatico();
-    
-    exibirToast('Tese recursal atualizada com sucesso!', 'sucesso');
+    const classificacao = (btnClass && btnClass.dataset.classificacao) ? btnClass.dataset.classificacao : 'neutro';
+
+    const indicesBlocoContiguo = [idxAlvo];
+    if (chaveAntiga !== CHAVE_SEM_TESE) {
+        for (let i = idxAlvo - 1; i >= 0; i--) {
+            const item = topico.anotacoes[i];
+            if (item && item.tipo && item.tipo.startsWith('checkpoint')) continue;
+            if ((window.ThesisGuard ? ThesisGuard.obterChaveTese(item) : ((item.tese || '').trim() || CHAVE_SEM_TESE)) === chaveAntiga) {
+                indicesBlocoContiguo.push(i);
+            } else break;
+        }
+        for (let i = idxAlvo + 1; i < topico.anotacoes.length; i++) {
+            const item = topico.anotacoes[i];
+            if (item && item.tipo && item.tipo.startsWith('checkpoint')) continue;
+            if ((window.ThesisGuard ? ThesisGuard.obterChaveTese(item) : ((item.tese || '').trim() || CHAVE_SEM_TESE)) === chaveAntiga) {
+                indicesBlocoContiguo.push(i);
+            } else break;
+        }
+    }
+
+    indicesBlocoContiguo.forEach(i => {
+        if (textoTese === '') {
+            delete topico.anotacoes[i].tese;
+            delete topico.anotacoes[i].teseClassificacao;
+        } else {
+            topico.anotacoes[i].tese = textoTese;
+            topico.anotacoes[i].teseClassificacao = classificacao;
+        }
+    });
+
+    const chaveNova = window.ThesisGuard
+        ? ThesisGuard.obterChaveTese(cardAlvo)
+        : (textoTese || CHAVE_SEM_TESE);
+
     fecharModalTese();
+
+    let abriuDialogoHomonima = false;
+    if (textoTese !== '' && chaveAntiga !== chaveNova && topico.diretrizesPorObice && Array.isArray(topico.diretrizesPorObice[chaveAntiga]) && topico.diretrizesPorObice[chaveAntiga].length > 0) {
+        const ancorasRestantes = window.ThesisGuard ? ThesisGuard.mapearTesesAncoradas(topico) : new Map();
+
+        if (!ancorasRestantes.has(chaveAntiga)) {
+            if (!Array.isArray(topico.diretrizesPorObice[chaveNova])) {
+                topico.diretrizesPorObice[chaveNova] = [];
+            }
+            if (window.ThesisGuard) {
+                ThesisGuard.mesclarNosComSeguranca(
+                    topico.diretrizesPorObice[chaveNova],
+                    topico.diretrizesPorObice[chaveAntiga]
+                );
+            } else {
+                topico.diretrizesPorObice[chaveNova].push(...topico.diretrizesPorObice[chaveAntiga]);
+            }
+            delete topico.diretrizesPorObice[chaveAntiga];
+        } else if (window.ThesisGuard) {
+            abriuDialogoHomonima = ThesisGuard.perguntarDestinoRenomeacaoHomonima(topico, chaveAntiga, chaveNova, ctxAntes);
+        }
+    }
+
+    renderizarTopicos();
+    exibirToast(textoTese ? 'Tese recursal atualizada com sucesso!' : 'Tese removida.', 'sucesso');
+
+    if (!abriuDialogoHomonima && window.ThesisGuard) {
+        ThesisGuard.verificarAposMutacao(topico, ctxAntes);
+    }
+    salvarBackupAutomatico();
 }
 
 /* --- MODAL DE SMART MOVE (REORDENAÇÃO INTELIGENTE) --- */
@@ -1352,12 +1425,14 @@ function confirmarSmartMove() {
     }
 
     // 2. Extração da Prova da sua Origem Original (Operação Isolada)
+    const ctxAntes = window.ThesisGuard ? ThesisGuard.capturarEstadoAntes(topico) : null;
     let itemMovido;
     let arrayReduziu = false;
 
     if (_smartMoveCtx.correlacionadoIndex !== null) {
         // Cenário A: Movendo um filho (mantém comportamento original atômico via splice)
         itemMovido = topico.anotacoes[_smartMoveCtx.parentIndex].itensCorrelacionados.splice(_smartMoveCtx.correlacionadoIndex, 1)[0];
+        if (window.ThesisGuard) ThesisGuard.limparTeseFantasmaDeCard(itemMovido);
     } else {
         // Cenário B: Movendo o Card Principal
         const cardOriginal = topico.anotacoes[_smartMoveCtx.parentIndex];
@@ -1371,13 +1446,14 @@ function confirmarSmartMove() {
             
             // Transferindo a "coroa" (herança de estado) para o novo líder
             novoMainCard.tese = cloneProfundo.tese;
+            novoMainCard.teseClassificacao = cloneProfundo.teseClassificacao;
             novoMainCard.itensCorrelacionados = cloneProfundo.itensCorrelacionados;
 
             // Preparando o card que vai viajar.
-            // Usamos defaults em vez de 'delete' para preservar a otimização da Hidden Class no V8
             itemMovido = structuredClone(cardOriginal);
             itemMovido.itensCorrelacionados = [];
-            itemMovido.tese = ""; 
+            if (window.ThesisGuard) ThesisGuard.limparTeseFantasmaDeCard(itemMovido);
+            else { delete itemMovido.tese; delete itemMovido.teseClassificacao; }
 
             // FASE 2: ESCRITA ATÔMICA (Commit no array oficial)
             topico.anotacoes[_smartMoveCtx.parentIndex] = novoMainCard;
@@ -1411,11 +1487,13 @@ function confirmarSmartMove() {
     } else {
         const cardDestino = topico.anotacoes[destinoIdx];
         if (!cardDestino.itensCorrelacionados) cardDestino.itensCorrelacionados = [];
+        if (window.ThesisGuard) ThesisGuard.limparTeseFantasmaDeCard(itemMovido);
         cardDestino.itensCorrelacionados.push(itemMovido);
         exibirToast(`Prova agrupada à Ideia ${destinoIdx + 1}.`, 'sucesso');
     }
 
     renderizarTopicos(); 
+    if (window.ThesisGuard) ThesisGuard.verificarAposMutacao(topico, ctxAntes);
     salvarBackupAutomatico(); 
     if (window.sincronizarHighlightsGerais) window.sincronizarHighlightsGerais();
     fecharModalSmartMove();

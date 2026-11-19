@@ -203,6 +203,41 @@ window.BackupManager = (function () {
             }
         });
 
+        // MUDANÇA ARQUITETURAL: Higienização de Chaves de Óbice/Tese e Teses Fantasmas (v7.4 - AI)
+        pacote.dados.forEach(topico => {
+            if (Array.isArray(topico.anotacoes)) {
+                topico.anotacoes.forEach(an => {
+                    if (an && typeof an.tese === 'string') {
+                        const teseLimpa = an.tese.trim();
+                        if (teseLimpa === '') delete an.tese;
+                        else an.tese = teseLimpa;
+                    }
+                    if (Array.isArray(an.itensCorrelacionados)) {
+                        an.itensCorrelacionados.forEach(corr => {
+                            if (corr) {
+                                delete corr.tese;
+                                delete corr.teseClassificacao;
+                            }
+                        });
+                    }
+                });
+            }
+            if (!topico.diretrizesPorObice && topico.diretrizesPorTese && typeof topico.diretrizesPorTese === 'object') {
+                topico.diretrizesPorObice = topico.diretrizesPorTese;
+                delete topico.diretrizesPorTese;
+            }
+            if (topico.diretrizesPorObice && typeof topico.diretrizesPorObice === 'object') {
+                const mapaLimpo = {};
+                for (const [k, nos] of Object.entries(topico.diretrizesPorObice)) {
+                    if (!Array.isArray(nos) || nos.length === 0) continue;
+                    const chaveLimpa = k.trim() || 'Óbice Não Nomeado';
+                    if (!mapaLimpo[chaveLimpa]) mapaLimpo[chaveLimpa] = [];
+                    mapaLimpo[chaveLimpa].push(...nos);
+                }
+                topico.diretrizesPorObice = mapaLimpo;
+            }
+        });
+
         return pacote;
     }
 

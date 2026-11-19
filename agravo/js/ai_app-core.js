@@ -789,6 +789,9 @@ document.addEventListener("DOMContentLoaded", () => {
                     if (_sessaoPossuiAudio && typeof window.AudioManager?.prepararRetomada === 'function') {
                         window.AudioManager.prepararRetomada();
                     }
+                    if (window.ThesisGuard && typeof ThesisGuard.inspecionarSessaoRestaurada === 'function') {
+                        ThesisGuard.inspecionarSessaoRestaurada(topicos);
+                    }
                 } else {
                     trocarAba('leitura');
                     console.log("[JURIS LOG] PDF renderizado. Exibindo modal de backup.");
@@ -1126,6 +1129,10 @@ async function retomarProcesso() {
 }
 
 async function salvarBackupAutomatico() {
+    if (window.ThesisGuard && typeof ThesisGuard.temDecisaoPendente === 'function' && ThesisGuard.temDecisaoPendente()) {
+        ThesisGuard.registrarSalvamentoAdiado();
+        return;
+    }
     if (!BackupManager.isAtivo()) return;
     try {
         await BackupManager.salvar(topicos);
@@ -1607,6 +1614,7 @@ document.addEventListener('keydown', function (e) {
                 if (modal.id === 'modal-tarefas' && window.TaskManager) TaskManager.fecharModal();
                 if (modal.id === 'modal-notas-ocultas' && window.TopicsManager) TopicsManager.fecharModalNotasOcultas();
                 if (modal.id === 'modal-editar-tese' && typeof fecharModalTese === 'function') fecharModalTese();
+                if (modal.id === 'modal-redirecionar-nos-tese' && window.ThesisGuard) ThesisGuard.desfazerOperacao();
             }
         });
     }

@@ -383,7 +383,8 @@ window.TopicsManager = (function () {
         
         return `<button class="btn-revisao-nota ${isRevisada ? 'revisada' : 'pendente'}" 
                 title="${isRevisada ? 'Nota revisada. Clique para desmarcar.' : 'Nota pendente. Clique para marcar como revisada.'}" 
-                onclick="toggleRevisaoNotaOculta('${topicoId}', ${safeParentIdx}, '${safeViewSource}', ${localIndex}, event)">
+                data-view-source="${escaparHTML(viewSource)}"
+                onclick="toggleRevisaoNotaOculta('${topicoId}', ${safeParentIdx}, this.dataset.viewSource, ${localIndex}, event)">
                 ${isRevisada ? svgRevisada : svgPendente}
                 </button>`;
     }
@@ -883,13 +884,12 @@ window.TopicsManager = (function () {
         const isRevisada = sub.revisada === true;
         const itemWrapperClass = intencao === 'nota' ? `sub-annotation-item is-nota-interna ${isRevisada ? 'is-revisada' : 'is-pendente'}` : 'sub-annotation-item';
         
-        // Normaliza para String não-vazia e escapa aspas simples para uso seguro em handlers inline
+        // Normaliza para String não-vazia e usa dataset para blindar contra aspas em títulos de óbice/tese
         const viewSourceNorm = String(ctx.viewSource ?? '') || 'main';
-        const safeViewSourceJS = viewSourceNorm.replace(/'/g, "\\'");
 
         const clickSubMenu = ctx.parentIndex === null 
-            ? `abrirMenuSubAnotacao('${ctx.topicoId}', null, '${safeViewSourceJS}', ${sub.localIndex}, event)`
-            : `abrirMenuSubAnotacao('${ctx.topicoId}', '${ctx.parentIndex}', '${safeViewSourceJS}', ${sub.localIndex}, event)`;
+            ? `abrirMenuSubAnotacao('${ctx.topicoId}', null, this.dataset.viewSource, ${sub.localIndex}, event)`
+            : `abrirMenuSubAnotacao('${ctx.topicoId}', '${ctx.parentIndex}', this.dataset.viewSource, ${sub.localIndex}, event)`;
 
         const classBorda = ctx.bordaClass ? ` ${ctx.bordaClass}` : '';
         const classFase = ctx.bordaFaseClass ? ` ${ctx.bordaFaseClass}` : '';
@@ -900,6 +900,7 @@ window.TopicsManager = (function () {
                         <div class="sub-annotation-card${classFase}${classBorda}"${styleAttr}>
                     <div class="${badgeClass}"
                          title="Opções deste nó/diretriz"
+                         data-view-source="${escaparHTML(viewSourceNorm)}"
                          onclick="${clickSubMenu}">
                         ${label}
                     </div>
@@ -1369,7 +1370,7 @@ window.TopicsManager = (function () {
         const tesesHtml = subCardsHTMLArray.join('');
 
         return `
-        <div class="timeline-item-master ${alignClass} nivel-hierarquico nivel-tese" id="timeline-wrapper-obice-${idObiceSeguro}">
+        <div class="timeline-item-master ${alignClass} nivel-hierarquico nivel-tese" id="timeline-wrapper-obice-${idObiceSeguro}" data-wrapper-uid="timeline-wrapper-obice-${idObiceSeguro}-${indexGlobal}">
             <div class="main-card-wrapper" data-cidx="main">
                 <div class="annotation-number-area">
                     <div class="timeline-icon-box" style="background-color: ${corTema}; color: ${corTextoTese};" title="Óbice de Admissibilidade">
@@ -1380,7 +1381,7 @@ window.TopicsManager = (function () {
                     <div class="card-header" style="justify-content: space-between; margin-bottom: 0;">
                         <div class="hierarquia-titulo" style="color: ${corTituloTese};">Óbice: ${escaparHTML(teseAtual)}</div>
                         <div class="card-actions-bar" style="margin-top: 0; padding-top: 0; border-top: none;">
-                            <button title="Adicionar Diretriz ao Óbice" onclick="_menuAnotacaoCtx={topicoId:'${tabId}', index:'${teseViewSource.replace(/'/g, "\\'")}'}; acionarNovoNoIdeia()">
+                            <button title="Adicionar Diretriz ao Óbice" data-view-source="${escaparHTML(teseViewSource)}" onclick="_menuAnotacaoCtx={topicoId:'${tabId}', index:this.dataset.viewSource}; acionarNovoNoIdeia()">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
                             </button>
                         </div>
@@ -1665,19 +1666,20 @@ window.TopicsManager = (function () {
         };
 
         topicoAtivo.anotacoes.forEach((an, index) => {
-            const chaveObiceCrua = an.tese || "Óbice Não Nomeado"; 
-            const diretrizes = (topicoAtivo.diretrizesPorObice && topicoAtivo.diretrizesPorObice[chaveObiceCrua]) 
-                                ? topicoAtivo.diretrizesPorObice[chaveObiceCrua] 
+            const teseAtual = window.ThesisGuard
+                ? ThesisGuard.obterChaveTese(an)
+                : ((an.tese && an.tese.trim() !== '') ? an.tese.trim() : 'Óbice Não Nomeado');
+            const diretrizes = (topicoAtivo.diretrizesPorObice && topicoAtivo.diretrizesPorObice[teseAtual]) 
+                                ? topicoAtivo.diretrizesPorObice[teseAtual] 
                                 : [];
             
             const isObicePreenchido = (an.tese && an.tese.trim() !== '');
 
-            if (chaveObiceCrua !== ultimaTeseRenderizada) {
+            if (teseAtual !== ultimaTeseRenderizada) {
                 if (isObicePreenchido || diretrizes.length > 0) {
-                    const tituloExibicao = isObicePreenchido ? an.tese : "Óbice Não Nomeado";
-                    cardsHTML += _gerarHtmlObiceGroup(tituloExibicao, diretrizes, activeTabId, _activeTopicoCor, index, renderContext);
+                    cardsHTML += _gerarHtmlObiceGroup(teseAtual, diretrizes, activeTabId, _activeTopicoCor, index, renderContext);
                 }
-                ultimaTeseRenderizada = chaveObiceCrua;
+                ultimaTeseRenderizada = teseAtual;
             }
             
             cardsHTML += criarCard(an, index, topicoAtivo.anotacoes, renderContext);
@@ -2388,7 +2390,9 @@ window.TopicsManager = (function () {
         // 2. Óbices (Teses do AI) e Provas
         let ultimaTese = null;
         topico.anotacoes.forEach(an => {
-            const teseAtual = (an.tese && an.tese.trim() !== '') ? an.tese : "Óbice Não Nomeado";
+            const teseAtual = window.ThesisGuard
+                ? ThesisGuard.obterChaveTese(an)
+                : ((an.tese && an.tese.trim() !== '') ? an.tese.trim() : 'Óbice Não Nomeado');
             
             if (teseAtual !== ultimaTese) {
                 if (topico.diretrizesPorObice && topico.diretrizesPorObice[teseAtual]) {

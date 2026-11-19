@@ -127,12 +127,17 @@ window.OutlineViewManager = (function() {
         if (topico.anotacoes.length === 0) html += `<p style="color: #94a3b8; font-style: italic; font-size: 0.85rem;">Nenhuma prova cadastrada.</p>`;
 
         let ultimaTese = null;
+        const tesesDiretrizesEmitidas = new Set();
         topico.anotacoes.forEach(an => {
-            const teseAtual = (an.tese && an.tese.trim() !== '') ? an.tese : "Óbice Não Nomeado";
+            if (an && an.tipo && an.tipo.startsWith('checkpoint')) return;
+            const teseAtual = window.ThesisGuard
+                ? ThesisGuard.obterChaveTese(an)
+                : ((an.tese && an.tese.trim() !== '') ? an.tese.trim() : 'Óbice Não Nomeado');
             if (teseAtual !== ultimaTese) {
                 html += `<div style="margin-top: 20px; margin-bottom: 10px; padding-bottom: 4px; border-bottom: 1px dashed #cbd5e1;"><span style="font-weight: 800; color: #6a1b9a; font-size: 0.95rem;">⚖️ Óbice / Tese: ${TopicsManager.escaparHTML(teseAtual)}</span></div>`;
                 
-                if (topico.diretrizesPorObice && topico.diretrizesPorObice[teseAtual]) {
+                if (!tesesDiretrizesEmitidas.has(teseAtual) && topico.diretrizesPorObice && topico.diretrizesPorObice[teseAtual]) {
+                    tesesDiretrizesEmitidas.add(teseAtual);
                     topico.diretrizesPorObice[teseAtual].filter(d => d.intencao !== 'nota').forEach(dir => {
                         const intKey = dir.intencao || 'premissa';
                         html += `<div class="outline-sub-item" style="margin-left: 12px; margin-bottom: 6px;"><span class="outline-intent-chip intent-${intKey}">${_obterRotuloIntencao(intKey)}</span><span class="outline-content-text">${_render(dir.texto)}</span></div>`;
@@ -285,13 +290,20 @@ window.MinutaViewManager = (function() {
         }
 
         let ultimaTese = null;
+        const tesesDiretrizesEmitidas = new Set();
         topico.anotacoes.forEach(an => {
-            const teseAtual = (an.tese && an.tese.trim() !== '') ? an.tese : "Óbice Não Nomeado";
+            if (an && an.tipo && an.tipo.startsWith('checkpoint')) return;
+            const teseAtual = window.ThesisGuard
+                ? ThesisGuard.obterChaveTese(an)
+                : ((an.tese && an.tese.trim() !== '') ? an.tese.trim() : 'Óbice Não Nomeado');
             if (teseAtual !== ultimaTese) {
-                topico.diretrizesPorObice?.[teseAtual]?.forEach(dir => {
-                    const nodeHtml = _processarNo(dir);
-                    if(nodeHtml) { html += nodeHtml; nodesEncontrados = true; }
-                });
+                if (!tesesDiretrizesEmitidas.has(teseAtual)) {
+                    tesesDiretrizesEmitidas.add(teseAtual);
+                    topico.diretrizesPorObice?.[teseAtual]?.forEach(dir => {
+                        const nodeHtml = _processarNo(dir);
+                        if(nodeHtml) { html += nodeHtml; nodesEncontrados = true; }
+                    });
+                }
                 ultimaTese = teseAtual;
             }
 
@@ -378,10 +390,17 @@ window.MinutaViewManager = (function() {
         }
 
         let ultimaTese = null;
+        const tesesDiretrizesEmitidas = new Set();
         topico.anotacoes.forEach(an => {
-            const teseAtual = (an.tese && an.tese.trim() !== '') ? an.tese : "Óbice Não Nomeado";
+            if (an && an.tipo && an.tipo.startsWith('checkpoint')) return;
+            const teseAtual = window.ThesisGuard
+                ? ThesisGuard.obterChaveTese(an)
+                : ((an.tese && an.tese.trim() !== '') ? an.tese.trim() : 'Óbice Não Nomeado');
             if (teseAtual !== ultimaTese) {
-                topico.diretrizesPorObice?.[teseAtual]?.forEach(dir => { md += _processarNoMd(dir); });
+                if (!tesesDiretrizesEmitidas.has(teseAtual)) {
+                    tesesDiretrizesEmitidas.add(teseAtual);
+                    topico.diretrizesPorObice?.[teseAtual]?.forEach(dir => { md += _processarNoMd(dir); });
+                }
                 ultimaTese = teseAtual;
             }
             an.subAnotacoes?.forEach(sub => { md += _processarNoMd(sub); });
