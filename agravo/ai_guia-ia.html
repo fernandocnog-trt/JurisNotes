@@ -4,68 +4,120 @@
     <meta charset="UTF-8">
     <style>
         body { font-family: 'Segoe UI', system-ui, sans-serif; color: #333; line-height: 1.6; padding: 24px; margin: 0; background: #fdfdfd; }
-        p.intro { font-size: 0.95rem; color: #555; margin-bottom: 24px; }
-        .guide-section { background: white; border: 1px solid #eee; border-left: 4px solid #ccc; padding: 16px; border-radius: 8px; margin-bottom: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.02); }
-        .guide-title { margin-top: 0; font-size: 1.05rem; display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-        .badge { font-size: 0.7rem; padding: 4px 10px; border-radius: 12px; color: white; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; }
-        .guide-section p { margin: 4px 0 0 0; font-size: 0.9rem; }
-        
-        /* Paleta de Cores Mapeada do Sistema Original */
-        .c-premissa { border-color: #7b1fa2; } .c-premissa .badge { background: #7b1fa2; }
-        .c-comando { border-color: #c62828; } .c-comando .badge { background: #c62828; }
-        .c-texto { border-color: #1565c0; } .c-texto .badge { background: #1565c0; }
-        .c-nota { border-color: #616161; } .c-nota .badge { background: #616161; }
-        .c-veredito { border-color: #e65100; } .c-veredito .badge { background: #e65100; }
-        .c-fund { border-color: #00695c; } .c-fund .badge { background: #00695c; }
-        .c-preli { border-color: #5d4037; } .c-preli .badge { background: #5d4037; }
-        .c-refuta { border-color: #8B4513; } .c-refuta .badge { background: #8B4513; }
-        
-        h3 { margin-top: 32px; font-size: 1.1rem; color: #1a3a5c; border-bottom: 2px solid #eee; padding-bottom: 8px; }
+        p.intro { font-size: 0.95rem; color: #555; margin-bottom: 20px; }
+        .guide-section { background: white; border: 1px solid #eee; border-left: 4px solid #ccc; padding: 14px 16px; border-radius: 8px; margin-bottom: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.02); }
+        .guide-title { margin-top: 0; font-size: 1.02rem; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+        .badge { font-size: 0.68rem; padding: 3px 9px; border-radius: 12px; color: white; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; }
+        .regime-tag { font-size: 0.7rem; padding: 2px 8px; border-radius: 10px; font-weight: 700; margin-left: auto; }
+        .r-literal { background: #e3f2fd; color: #0d47a1; }
+        .r-ordem   { background: #ffebee; color: #b71c1c; }
+        .r-livre   { background: #f3e5f5; color: #6a1b9a; }
+        .r-oculto  { background: #f1f5f9; color: #475569; }
+        .guide-section p { margin: 4px 0 0 0; font-size: 0.88rem; }
+
+        /* Paleta Oficial do Sistema */
+        .c-premissa  { border-color: #7b1fa2; } .c-premissa .badge  { background: #7b1fa2; }
+        .c-comando   { border-color: #c62828; } .c-comando .badge   { background: #c62828; }
+        .c-texto     { border-color: #1565c0; } .c-texto .badge     { background: #1565c0; }
+        .c-juris     { border-color: #00838F; } .c-juris .badge     { background: #00838F; }
+        .c-degrav    { border-color: #BF360C; } .c-degrav .badge    { background: #BF360C; }
+        .c-nota      { border-color: #616161; } .c-nota .badge      { background: #616161; }
+        .c-veredito  { border-color: #e65100; } .c-veredito .badge  { background: #e65100; }
+        .c-fund      { border-color: #00695c; } .c-fund .badge      { background: #00695c; }
+        .c-preli     { border-color: #5d4037; } .c-preli .badge     { background: #5d4037; }
+        .c-refuta    { border-color: #8B4513; } .c-refuta .badge    { background: #8B4513; }
+        .c-contexto  { border-color: #64748b; background: #f8fafc; }
+        .c-auditoria { border-color: #1a3a5c; background: #f0f4f8; }
+
+        h3 { margin-top: 28px; margin-bottom: 12px; font-size: 1.05rem; color: #1a3a5c; border-bottom: 2px solid #eee; padding-bottom: 6px; }
     </style>
 </head>
 <body>
-    <!-- NOVO AVISO NO TOPO DO GUIA -->
     <div class="guide-section" style="border-left-color: #2196F3; background: #e3f2fd;">
-        <h4 class="guide-title">📌 Painel Fixo (Relatório)</h4>
-        <p>O topo de cada aba possui campos fixos para <strong>Razões Recursais</strong> e <strong>Fundamentos da Origem</strong>. Eles ditam a abertura da minuta para a IA, separando o contexto histórico da análise de provas.</p>
+        <h4 class="guide-title">📌 Quadro Sinótico Inicial — Agravo de Instrumento (Protocolo JN-5.0)</h4>
+        <p>O topo de cada aba contém três campos estruturais: <strong>Decisão Denegatória / Origem</strong> (abertura — 1º), <strong>Razões do Agravo</strong> (abertura — 2º) e <strong>Veredito / Conclusão</strong> (fecho da admissibilidade).</p>
+        <p><strong>Quando preenchidos:</strong> funcionam como <strong>texto literal já revisado</strong> — a IA reproduz sem alterar a redação (mantendo as Razões do Agravo como pretensão do agravante e a Decisão Denegatória como relato de origem, nunca como convicção do Relator).<br>
+        <strong>Quando vazios:</strong> sinalizam <strong>liberdade delegada à IA</strong> para redigir aquele bloco. Se o <em>Veredito</em> ficar em aberto, a IA propõe o desfecho de admissibilidade (destrancamento ou manutenção do trancamento) e explica na Auditoria quais nós sustentaram a conclusão.</p>
     </div>
 
-    <p class="intro">Enquanto o Card Principal contém o Dado Bruto (a prova), o Nó de Ideia contém a sua cognição para guiar a Inteligência Artificial.</p>
-    
-    <div class="guide-section c-premissa">
-        <h4 class="guide-title"><span class="badge">Padrão</span> Premissa Lógica</h4>
-        <p><strong>Uso:</strong> Dar contexto jurídico. <em>Ex: "A reclamada possuía mais de 20 funcionários, logo..."</em><br><strong>Reação da IA:</strong> Anexa a dedução à prova. A IA usará sua premissa como verdade absoluta.</p>
+    <div class="guide-section c-contexto">
+        <h4 class="guide-title">📂 Cartões de Ideias (Peças, Certidões e Comprovantes dos Autos)</h4>
+        <p>Os cartões principais e correlacionados (Agravo de Instrumento, Contraminuta, Decisão Denegatória, Certidões de Intimação, Guias de Custas/Depósito, Apólices e Procurações) são <strong>contexto processual não vinculante</strong>. A IA os utiliza estritamente para delimitar o óbice, aferir dialeticidade, tempestividade, preparo e representação — nunca como convicção própria do Relator e sem julgar o mérito da causa principal.</p>
     </div>
-    <div class="guide-section c-comando">
-        <h4 class="guide-title"><span class="badge">Comando</span> Comando Direto</h4>
-        <p><strong>Uso:</strong> Instrução imperativa. <em>Ex: "Desconsidere este depoimento na minuta."</em><br><strong>Reação da IA:</strong> A IA aplica a ordem imediatamente durante a redação.</p>
-    </div>
+
+    <p class="intro">Enquanto o Cartão contém o contexto documental do processo, os <strong>Nós de Ideia</strong> expressam o convencimento do gabinete sobre a admissibilidade, divididos em regimes claros de rigidez e liberdade:</p>
+
+    <h3>1. Núcleo Literal — Redação Preservada (🔒)</h3>
+
     <div class="guide-section c-texto">
-        <h4 class="guide-title"><span class="badge">Texto Fixo</span> Texto Fixo</h4>
-        <p><strong>Uso:</strong> O arremate da prova.<br><strong>Reação da IA:</strong> Obriga a máquina a utilizar a redação exata fornecida (copia e cola).</p>
-    </div>
-    <div class="guide-section c-nota">
-        <h4 class="guide-title"><span class="badge">Nota Oculta</span> Nota Interna</h4>
-        <p><strong>Uso:</strong> Lembretes pessoais de valoração ou contradições.<br><strong>Reação da IA:</strong> Esta nota é <strong>completamente ocultada</strong>. A IA não terá acesso.</p>
-    </div>
-    <div class="guide-section c-veredito">
-        <h4 class="guide-title"><span class="badge">Decisão</span> Veredito / Conclusão</h4>
-        <p><strong>Uso:</strong> A decisão que o recurso deve receber.<br><strong>Reação da IA:</strong> A IA não tentará adivinhar o final — usará sua decisão como o ponto de chegada obrigatório.</p>
-    </div>
-    <div class="guide-section c-fund">
-        <h4 class="guide-title"><span class="badge">Legal</span> Fundamentação Legal</h4>
-        <p><strong>Uso:</strong> Colar uma Súmula ou artigo de lei aplicável.<br><strong>Reação da IA:</strong> Priorizará este argumento matemático acima de qualquer dedução lógica que ela própria faria.</p>
+        <h4 class="guide-title"><span class="badge">Texto Fixo</span> Texto Fixo <span class="regime-tag r-literal">🔒 Reprodução Literal</span></h4>
+        <p><strong>Uso:</strong> Trecho já acabado que deve constar exatamente como redigido na minuta do Agravo.<br>
+        <strong>Reação da IA:</strong> Insere a redação exata na minuta, sem parafrasear ou resumir.</p>
     </div>
 
-    <h3>Estrutura da Minuta (Novos Nós)</h3>
+    <div class="guide-section c-juris">
+        <h4 class="guide-title"><span class="badge">Jurisprudência</span> Jurisprudência Exata <span class="regime-tag r-literal">🔒 Literal + Móvel</span></h4>
+        <p><strong>Uso:</strong> Ementas, Súmulas (ex.: Súmula 422 do TST), OJs, Temas Repetitivos ou teses vinculantes sobre admissibilidade.<br>
+        <strong>Reação da IA:</strong> Preserva integralmente o teor literal citado, mas tem liberdade para posicioná-lo na melhor sequência e redigir parágrafos de transição. <em>Importante:</em> a IA é proibida de inventar julgados de memória fora deste nó.</p>
+    </div>
+
+    <div class="guide-section c-degrav">
+        <h4 class="guide-title"><span class="badge">Degravação</span> Degravação Curada <span class="regime-tag r-literal">🔒 Literal + Móvel</span></h4>
+        <p><strong>Uso:</strong> Transcrição exata de trecho falado em audiência relevante ao pressuposto processual.<br>
+        <strong>Reação da IA:</strong> Cita exatamente as palavras fornecidas, podendo escolher o momento ideal no voto e criar frases introdutórias/conclusivas.</p>
+    </div>
+
+    <h3>2. Ordens Operacionais e Conclusões Parciais (🎯)</h3>
+
+    <div class="guide-section c-comando">
+        <h4 class="guide-title"><span class="badge">Comando</span> Comando Direto <span class="regime-tag r-ordem">🎯 Ordem Executiva</span></h4>
+        <p><strong>Uso:</strong> Instrução imperativa de estrutura ou abordagem. <em>Ex.: "Não transcreva a guia; apenas indique data de pagamento e valor recolhido."</em><br>
+        <strong>Reação da IA:</strong> Cumpre a ordem integralmente durante a redação, sem transcrever o texto do comando na minuta.</p>
+    </div>
+
+    <div class="guide-section c-veredito">
+        <h4 class="guide-title"><span class="badge">Veredito Parcial</span> Veredito Parcial (Nó Local) <span class="regime-tag r-ordem">🎯 Conclusão Vinculante</span></h4>
+        <p><strong>Uso:</strong> Definir desfecho obrigatório de um pressuposto/óbice específico dentro do tópico (complementar ao campo Veredito do topo).<br>
+        <strong>Reação da IA:</strong> Adota o resultado definido de forma vinculante; em caso de conflito, o Veredito nunca é contrariado.</p>
+    </div>
+
+    <h3>3. Base de Desenvolvimento Livre — Fluidez e Coesão (✍️)</h3>
+
+    <div class="guide-section c-premissa">
+        <h4 class="guide-title"><span class="badge">Premissa</span> Premissa Lógica <span class="regime-tag r-livre">✍️ Desenvolvimento Livre</span></h4>
+        <p><strong>Uso:</strong> Ponto de partida e constatação jurídica do Relator sobre tempestividade, preparo, representação ou adequação.<br>
+        <strong>Reação da IA:</strong> Não copia literalmente — desenvolve a argumentação jurídica em linguagem de acórdão, cria conectores de coesão/coerência, ajusta frases e reordena pontos quando melhorar a fluidez.</p>
+    </div>
+
+    <div class="guide-section c-refuta">
+        <h4 class="guide-title"><span class="badge">Refutação</span> Refutação / Afastamento de Óbice <span class="regime-tag r-livre">✍️ Rebater Tese</span></h4>
+        <p><strong>Uso:</strong> Indicar por que o argumento do agravo (ou o fundamento da decisão denegatória) não se sustenta.<br>
+        <strong>Reação da IA:</strong> Desenvolve a redação livremente com coesão forense, direcionada especificamente a enfrentar o argumento vinculado na origem do nó.</p>
+    </div>
 
     <div class="guide-section c-preli">
-        <h4 class="guide-title"><span class="badge">Prejudicial</span> Filtro / Prejudicial</h4>
-        <p><strong>Uso:</strong> Questões temporais (prescrição) ou processuais (inépcia).<br><strong>Reação da IA:</strong> A IA redigirá e resolverá essa barreira antes de analisar as provas de mérito.</p>
+        <h4 class="guide-title"><span class="badge">Prejudicial</span> Filtro / Prejudicial (Óbice Extrínseco) <span class="regime-tag r-livre">✍️ Análise Prévia Livre</span></h4>
+        <p><strong>Uso:</strong> Questões prévias impeditivas do próprio agravo (intempestividade, ausência de dialeticidade, irregularidade de representação, deserção, preclusão ou erro grosseiro).<br>
+        <strong>Reação da IA:</strong> Posiciona automaticamente antes da análise dos demais pressupostos e desenvolve a fundamentação técnica com fluidez.</p>
     </div>
-    <div class="guide-section c-refuta">
-        <h4 class="guide-title"><span class="badge">Mérito</span> Refutação</h4>
-        <p><strong>Uso:</strong> Explicar por que o argumento da parte cai por terra.<br><strong>Reação da IA:</strong> Guiará o LLM a escrever os parágrafos de afastamento de teses.</p>
+
+    <div class="guide-section c-fund">
+        <h4 class="guide-title"><span class="badge">Lei Seca</span> Lei Seca (Lastro Normativo) <span class="regime-tag r-livre">✍️ Pano de Fundo</span></h4>
+        <p><strong>Uso:</strong> Artigos de lei e instruções normativas (CLT, CPC, CF, INs do TST) aplicáveis à admissibilidade. <em>(Para Súmulas, OJs ou ementas, utilize <strong>Jurisprudência Exata</strong>.)</em><br>
+        <strong>Reação da IA:</strong> Integra a norma organicamente à fundamentação, sem copiar mecanicamente o texto integral do artigo quando desnecessário.</p>
+    </div>
+
+    <h3>4. Controle Interno, Minuta Limpa e Auditoria</h3>
+
+    <div class="guide-section c-nota">
+        <h4 class="guide-title"><span class="badge">Nota Oculta</span> Nota Interna <span class="regime-tag r-oculto">🔒 Oculta da IA</span></h4>
+        <p><strong>Uso:</strong> Lembretes pessoais, conferências de prazos ou dúvidas de gabinete.<br>
+        <strong>Reação da IA:</strong> Completamente excluída da exportação — a IA nunca tem acesso a este nó.</p>
+    </div>
+
+    <div class="guide-section c-auditoria">
+        <h4 class="guide-title">🛡️ Minuta Limpa e Auditoria Crítica Pós-Minuta</h4>
+        <p>O corpo do acórdão gerado sai <strong>100% limpo</strong> (a IA é proibida de criar avisos como <code>[CONFERIR]</code> no meio do texto, preservando intactos apenas colchetes originais de citações e o marcador LGPD). Quando a <strong>Auditoria Crítica</strong> estiver marcada, a IA cria uma seção separada ao final apontando conflitos entre diretrizes, erros materiais de prazo/preparo/representação, vícios processuais (<em>extra petita</em>, falta de dialeticidade, inovação, prescrição), distinção entre pontos <em>não localizados nos recortes</em> vs. <em>contrariados pelos autos</em>, justificativa do Veredito delegado e eventuais normas invocadas fora dos nós (com o início do parágrafo para conferência rápida). Com a Auditoria desativada, ficam vedadas citações normativas externas aos Nós de Ideia.</p>
     </div>
 </body>
 </html>

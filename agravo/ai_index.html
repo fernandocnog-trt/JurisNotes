@@ -39,7 +39,7 @@
 <link rel="stylesheet" href="ai_juris-core.css?v=2.0.2">
 
 <!-- 2. Ferramentas Globais, PDF, Áudio e Modais (Ferramentas de Entrada) -->
-<link rel="stylesheet" href="ai_juris-reader-tools.css?v=3.0.3">
+<link rel="stylesheet" href="ai_juris-reader-tools.css?v=3.0.4">
 
 <!-- 3. Fichário, Timeline, Fases Metodológicas e Acervo (Síntese e Saída) -->
 <link rel="stylesheet" href="ai_juris-timeline-cards.css?v=3.2.0">
@@ -221,6 +221,14 @@
                     </svg>
                 </button>
 
+                <button class="icon-btn" id="btn-ferramenta-texto-composto" onmousedown="event.preventDefault()" onclick="acumularTrechoSelecionado()" title="Acumular Trecho (Aglutinar múltiplas seleções no mesmo cartão)" disabled style="position: relative;">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+                        <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+                    </svg>
+                    <span id="badge-trechos-compostos" class="multi-capture-badge" style="display: none;">0</span>
+                </button>
+
                 <button class="icon-btn" id="btn-ferramenta-recorte" onclick="iniciarRecorteWizard()" title="Ativar Modo Recorte de Imagem" disabled>
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle>
@@ -392,6 +400,28 @@
     <!-- 1. Bibliotecas Externas Estáticas (Fora do Bootstrapper p/ evitar bloqueios) -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/morphdom/2.7.4/morphdom-umd.min.js"></script>
 
+    <!-- Barra Flutuante de Captura Composta (filha direta de <body>, imune a .pdf-foco-ativo) -->
+    <div id="multi-capture-dock" class="multi-capture-dock" role="region" aria-label="Trechos acumulados para aglutinação" data-ignore-outside="true" style="display: none;">
+        <div class="multi-capture-info">
+            <span class="multi-capture-count" id="multi-capture-count">0 trechos</span>
+            <span class="multi-capture-preview" id="multi-capture-preview">Selecione a continuação no PDF...</span>
+        </div>
+        <div class="multi-capture-controls">
+            <button type="button" class="multi-capture-btn multi-capture-btn--add" onmousedown="event.preventDefault()" onclick="acumularTrechoSelecionado()" title="Adicionar a seleção atual à fila">
+                + Trecho
+            </button>
+            <button type="button" class="multi-capture-btn multi-capture-btn--undo" onmousedown="event.preventDefault()" onclick="desfazerUltimoTrechoComposto()" title="Remover o último trecho adicionado">
+                ↶
+            </button>
+            <button type="button" class="multi-capture-btn multi-capture-btn--finish" onmousedown="event.preventDefault()" onclick="concluirCapturaComposta()" title="Aglutinar trechos e abrir classificação">
+                Concluir ✓
+            </button>
+            <button type="button" class="multi-capture-btn multi-capture-btn--cancel" onmousedown="event.preventDefault()" onclick="cancelarCapturaComposta()" title="Descartar trechos acumulados">
+                ✕
+            </button>
+        </div>
+    </div>
+
     <!-- 2. Container para injeção dinâmica de Modais -->
     <div id="modais-dinamicos-container"></div>
 
@@ -428,14 +458,15 @@
                     "js/ai_document-views.js",
                     "js/ai_topics-manager.js",
                     "js/ai_balanca-manager.js",
-                    "js/ai_interaction-tools.js",
+                    "js/ai_interaction-tools.js?v=1.1.1",
                     "js/ai_audio-manager.js",
                     "js/ai_juris-editor.js",
                     "js/ai_annotation-actions.js",
                     "js/ai_export-manager.js",
-                    "js/ai_pdf-engine.js",
+                    "js/ai_pdf-engine.js?v=1.1.0",
                     "js/ai_pje-parser.js",
-                    "js/ai_app-core.js",
+                    "js/ai_text-capture-manager.js?v=1.0.1",
+                    "js/ai_app-core.js?v=1.2.0",
                     "js/ai_acervo-controller.js",
                     "js/ai_recommendation-service.js"
                 ];
