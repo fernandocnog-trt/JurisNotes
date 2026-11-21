@@ -764,10 +764,11 @@ function fecharPopupClassificacao() {
 }
 
 function exibirPopupClassificacao(tipo, conteudo) {
-    window.toggleModoFoco(true);
     if (topicos.length === 0) {
-        exibirToast('Crie pelo menos um Tópico Recursal.', 'aviso'); return;
+        exibirToast('Crie pelo menos um Tópico Recursal.', 'aviso');
+        return;
     }
+    window.toggleModoFoco(true);
     pendingTipo = tipo;
     pendingConteudo = conteudo;
 
