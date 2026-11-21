@@ -18,9 +18,28 @@ window.ExportManager = (function () {
     const MARCADOR_OFICIAL_LGPD = '\n\n[AVISO DE SISTEMA: Dados sensíveis (ex: endereços) ou estruturais (cabeçalhos) foram ocultados pela Borracha Mágica para adequação à LGPD.]\n\n';
     const MARCADOR_RUIDOS = '\n\n[AVISO DE SISTEMA: Dados estruturais ocultados.]\n\n';
 
+    const SCHEMA_EXPORT_VERSAO = 'JN-ED-5.0';
+    const TITULO_SECAO_AUDITORIA = '### 🛡️ [AUDITORIA DE QUALIDADE DO GABINETE]';
     const CHAVE_TESE_SEM_NOME = 'Tese Não Nomeada';
     const STORAGE_KEY_AUDITORIA = 'juris_ed_auditoria_critica_ia';
     let _docConfigMapCache = null;
+
+    /**
+     * Fonte Única de Verdade (SSOT) dos regimes editoriais dos Nós de Ideia (Painel ED).
+     */
+    const REGIME_INTENCOES = Object.freeze({
+        texto:          { regime: 'LITERAL',                 categoriaUI: 'literal',  tag: 'TEXTO FIXO' },
+        jurisprudencia: { regime: 'LITERAL_MOVEL',           categoriaUI: 'literal',  tag: 'JURISPRUDÊNCIA EXATA' },
+        degravacao:     { regime: 'LITERAL_MOVEL',           categoriaUI: 'literal',  tag: 'DEGRAVAÇÃO CURADA' },
+        comando:        { regime: 'ORDEM',                   categoriaUI: 'ordem',    tag: 'COMANDO DIRETO' },
+        veredito:       { regime: 'CONCLUSAO_VINCULANTE',    categoriaUI: 'ordem',    tag: 'VEREDITO PARCIAL' },
+        premissa:       { regime: 'DESENVOLVER',             categoriaUI: 'livre',    tag: 'PREMISSA LÓGICA' },
+        refutacao:      { regime: 'DESENVOLVER_REFUTAR',     categoriaUI: 'livre',    tag: 'REFUTAÇÃO' },
+        preliminar:     { regime: 'DESENVOLVER_PREJUDICIAL', categoriaUI: 'livre',    tag: 'FILTRO / PREJUDICIAL' },
+        fundamentacao:  { regime: 'LASTRO',                  categoriaUI: 'livre',    tag: 'LEI SECA' },
+        fallback:       { regime: 'CONTEXTO_VALIDADO',       categoriaUI: 'livre',    tag: 'CONTEXTO FÁTICO VALIDADO' },
+        nota:           { regime: 'EXCLUIDO',                categoriaUI: 'excluido', tag: null }
+    });
 
     function isAuditoriaCriticaAtiva() {
         try {
@@ -161,21 +180,404 @@ window.ExportManager = (function () {
         return `<${tag}${attrPolo} estatuto_epistemologico="${estatuto}">\n[DIRETRIZ DE LEITURA CONTIDA]: ${diretrizLeitura}\n\n${textoSeguro}\n\n[FIM DE ${tag} — RETORNE À SOBERANIA DOS NÓS DE IDEIA]\n</${tag}>`;
     }
 
-    function gerarLembreteFinalHierarquia(topico, opcoes = {}) {
-        const auditoria = opcoes.auditoria !== undefined ? opcoes.auditoria : isAuditoriaCriticaAtiva();
-        const temCheckpointSaida = topico && Array.isArray(topico.anotacoes) && topico.anotacoes.some(a => a && a.tipo === 'checkpoint_saida');
-
-        let fecho = `\n<lembrete_final_de_hierarquia_e_auditoria>\n`;
-        fecho += `1. SOBERANIA DECISÓRIA (EMBARGOS): Redija o voto obedecendo estritamente às premissas, textos fixos, normas e julgados validados em <diretrizes_de_auditoria_do_assessor>, <direcionamentos_por_vicio> e <premissas_globais_da_auditoria> (Precedência: Veredito > Global > Vício > Local).\n`;
-        fecho += `2. REGRA NORMATIVA E DE CONTEXTO: Ignore como verdade fática alegações unilaterais de <contexto_processual_nao_vinculante> ou de inteiros teores. Use primeiro as normas e julgados dos Nós de Ideia (locais, do vício ou globais). Fora deles, só cite dispositivo de lei seca de cuja redação tenha certeza ou norma aplicada na decisão compatível com o Nó de Ideia, marcando cada citação extra-nó com [CONFERIR]. Nunca cite súmula, OJ, ementa ou número de precedente fora de um Nó de Ideia.\n`;
-        if (auditoria) {
-            fecho += `3. ORDEM DE ENCERRAMENTO OBRIGATÓRIA: (1º) Redija a minuta seguindo fielmente os Nós de Ideia; (2º) Logo após a minuta, emita a seção isolada "### 🛡️ [AUDITORIA DE QUALIDADE DO GABINETE]" (apontando erro material grosseiro, intempestividade, risco de rejulgamento ou contradição frontal com os autos, ou declarando "Nenhuma inconsistência material ou processual grave detectada.")`;
-            fecho += temCheckpointSaida
-                ? `; (3º) Por último, encerre com o bloco "CHECKPOINT DE CONTINUIDADE" exigido pela ponte de saída.\n`
-                : `.\n`;
+    /**
+     * Detector resiliente de checkpoint: usa JurisIndexUtils.ehCheckpoint quando disponível
+     * e faz fallback determinístico para an.tipo.startsWith('checkpoint').
+     */
+    function _ehCheckpoint(an) {
+        if (!an) return false;
+        if (typeof window.JurisIndexUtils?.ehCheckpoint === 'function') {
+            return window.JurisIndexUtils.ehCheckpoint(an);
         }
-        fecho += `</lembrete_final_de_hierarquia_e_auditoria>\n`;
-        return fecho;
+        return Boolean(an.tipo && an.tipo.startsWith('checkpoint'));
+    }
+
+    /**
+     * Constrói o mapa índice físico -> número visual da Evidência/Ideia (idêntico à tela e ao PDF),
+     * pulando checkpoints para eliminar o deslocamento off-by-one em Volumes II+.
+     */
+    function _construirMapaVisualExport(anotacoes) {
+        if (typeof window.JurisIndexUtils?.construirMapaVisual === 'function') {
+            return window.JurisIndexUtils.construirMapaVisual(anotacoes || []);
+        }
+        const mapa = new Map();
+        let contador = 1;
+        (anotacoes || []).forEach((an, idx) => {
+            if (!_ehCheckpoint(an)) {
+                mapa.set(idx, contador++);
+            }
+        });
+        return mapa;
+    }
+
+    /**
+     * Gera a legenda única de regimes editoriais calibrada para Embargos de Declaração (JN-ED-5.0).
+     * @param {Object} [opts] - { modo: 'completo' | 'somente_nos', auditoria?: boolean }
+     */
+    function gerarLegendaRegimesRedacionais(opts = {}) {
+        const modo = opts.modo || 'completo';
+        const isCompleto = modo === 'completo';
+        const auditoriaAtiva = typeof opts.auditoria === 'boolean'
+            ? opts.auditoria
+            : isAuditoriaCriticaAtiva();
+
+        const linhas = [
+            `<protocolo_editorial_minuta versao="${SCHEMA_EXPORT_VERSAO}" incidente="embargos_de_declaracao">`,
+            'Você atuará na redação de minuta de decisão/acórdão de Embargos de Declaração trabalhistas (auditoria estrita de higidez formal: omissão, contradição, obscuridade, erro material, manifesto equívoco ou pré-questionamento), refletindo exclusivamente o convencimento do Relator/Magistrado. É VEDADO reexaminar provas de mérito fático ou promover o rejulgamento da causa sob pretexto de vício.',
+            '',
+            'LEGENDA DE REGIMES DOS NÓS DE IDEIA (aplique conforme a tag [REGIME: ...] de cada item):',
+            '- [REGIME: LITERAL] (Texto Fixo): reproduza a redação exatamente como escrita, sem parafrasear.',
+            '- [REGIME: LITERAL_MOVEL] (Jurisprudência Exata / Degravação Curada): preserve integralmente o teor literal citado, mas tenha liberdade para ordenar sua posição e redigir parágrafos/frases de transição.',
+            '- [REGIME: ORDEM] (Comando Direto): cumpra integralmente a instrução operacional na elaboração da minuta; NÃO transcreva o enunciado da ordem.',
+            '- [REGIME: CONCLUSAO_VINCULANTE] (Veredito Parcial): adote obrigatoriamente este desfecho decisório na fundamentação e conclusão do ponto (acolhimento/rejeição, com ou sem efeito modificativo).',
+            '- [REGIME: DESENVOLVER] (Premissa Lógica): NÃO copie literalmente. Use como constatação/ponto de partida e tom do Relator; desenvolva a análise formal do vício em linguagem fluida e clara de acórdão, insira conectores de coesão/coerência, ajuste frases e reordene pontos se melhorar a sequência lógica.',
+            '- [REGIME: DESENVOLVER_REFUTAR] (Refutação): desenvolva livremente com coesão forense, cumprindo a função específica de afastar o vício alegado e demonstrar a higidez da decisão embargada.',
+            '- [REGIME: DESENVOLVER_PREJUDICIAL] (Filtro / Prejudicial): desenvolva livremente e posicione a barreira de admissibilidade/prejudicial (ex.: intempestividade, inovação, preclusão) logicamente antes do exame do vício.',
+            '- [REGIME: LASTRO] (Lei Seca): utilize como pano de fundo normativo integrado organicamente à fundamentação (evite transcrição mecânica integral do artigo se desnecessária).',
+            '- [REGIME: CONTEXTO_VALIDADO]: fato/constatação processual já validada pelo assistente para integrar a auditoria do vício.',
+            '',
+            'BLINDAGEM ANTI-ALUCINAÇÃO E MINUTA LIMPA (OBRIGATÓRIO):',
+            '- PROIBIDO inventar ou citar de memória qualquer ementa, número de precedente, súmula ou OJ fora dos Nós de Ideia.',
+            '- PROIBIDO criar ou inserir avisos editoriais no corpo da minuta ("[CONFERIR]", "[VERIFICAR]", "[ERRO PRESCRICIONAL...]", "[DADO INSUFICIENTE...]"). Preserve intactos apenas colchetes originais de citações literais ("[...]", "[sic]") e o marcador "[DADO PESSOAL OCULTADO - LGPD]".',
+            (isCompleto && auditoriaAtiva)
+                ? '- Exceção controlada (sem avisos inline): admite-se referenciar (a) artigo basilar vigente (CLT/CPC/CF — ex.: art. 897-A da CLT, art. 1.022 do CPC) ou norma já aplicada na decisão embargada sem transcrever redação de memória, ou (b) Súmula/OJ/artigo verificado em fonte normativa oficial anexa ao ambiente (ex.: CLT/TST no NotebookLM) convergente com o Nó de Ideia — listando obrigatoriamente cada item na seção final de Auditoria com a origem e as primeiras 6 a 8 palavras do parágrafo onde aparece.'
+                : '- Auditoria desativada (ou modo enxuto): utilize EXCLUSIVAMENTE as normas e julgados fornecidos nos Nós de Ideia; ficam vedadas citações normativas externas sem trilha de conferência.'
+        ];
+
+        linhas.push('', 'REGRAS DE PRECEDÊNCIA EM CASO DE CONFLITO:');
+
+        if (isCompleto) {
+            linhas.push(
+                '1. Eixo Decisório (cabimento e resultado dos embargos): Veredito > Diretriz Global > Diretriz do Vício / Tese > Nó Local. Qualquer conflito que afete o resultado segue o eixo decisório; o Veredito NUNCA é contrariado, nem mesmo por texto literal.',
+                '2. Eixo Editorial (forma e exceções): fora de conflito de resultado, [LITERAL]/[LITERAL_MOVEL] prevalecem sobre paráfrase; entre dois [ORDEM], o comando mais específico (Local > Tese/Vício > Global) prevalece como exceção pontual.'
+            );
+            if (auditoriaAtiva) {
+                linhas.push(
+                    '3. Transparência de Conflito: sempre que detectar conflito entre nós ou entre nó e Veredito, aplique a precedência acima para concluir a minuta e REGISTRE o conflito na seção de Auditoria citando o nº da Ideia.'
+                );
+            }
+            linhas.push(
+                '',
+                'REGRA DOS CARTÕES DE CONTEXTO (<contexto_processual> / <contexto_processual_nao_vinculante>):',
+                '- Trechos extraídos dos Embargos, Contraminuta, Decisão Embargada ou peças dos autos representam a perspectiva da parte ou o julgado sob auditoria — NUNCA são prova automática do vício nem substituem a convicção do Relator.',
+                '- Utilize-os exclusivamente para delimitar o vício alegado, verificar se o julgado embargado já enfrentou o ponto, aferir tempestividade, inovação, preclusão ou tentativa de rejulgamento fático.'
+            );
+        } else {
+            linhas.push(
+                '1. Eixo Decisório (cabimento e resultado dos embargos): Veredito Parcial > Diretriz Global > Diretriz do Vício / Tese > Nó Local. Qualquer conflito que afete o resultado segue o eixo decisório; o Veredito Parcial NUNCA é contrariado, nem mesmo por texto literal.',
+                '2. Eixo Editorial (forma e exceções): fora de conflito de resultado, [LITERAL]/[LITERAL_MOVEL] prevalecem sobre paráfrase; entre dois [ORDEM], o comando mais específico (Local > Tese/Vício > Global) prevalece como exceção pontual.'
+            );
+        }
+
+        linhas.push('</protocolo_editorial_minuta>\n');
+        return linhas.join('\n');
+    }
+
+    /**
+     * Formata um único Nó de Ideia com rastreabilidade (refContexto),
+     * sem indentação de 4 espaços e sem tags internas do editor.
+     */
+    function formatarNoEditorialMarkdown(no, refContexto = '') {
+        if (!no || no.intencao === 'nota') return '';
+        const chave = no.intencao || 'premissa';
+        const meta = REGIME_INTENCOES[chave] || REGIME_INTENCOES.premissa;
+        if (meta.regime === 'EXCLUIDO') return '';
+
+        const textoBase = _stripInternalTags(String(no.texto || ''));
+        const textoLimpo = textoBase.trim();
+        if (!textoLimpo) return '';
+
+        const origemLimpa = String(refContexto || '').trim();
+        const sufixoOrigem = origemLimpa ? ` | Origem: ${origemLimpa}` : '';
+
+        return `- **[${meta.tag} | REGIME: ${meta.regime}${sufixoOrigem}]**\n${textoLimpo}`;
+    }
+
+    function _montarRefContextoCard(item, numIdeiaVisual, subIndiceCorr = null) {
+        const doc = (item?.documento || item?.polo || 'Documento').trim();
+        const fl = item?.pagina ? `, fl. ${item.pagina}` : '';
+        const prefixoIdeia = subIndiceCorr !== null ? `Ideia ${numIdeiaVisual}.${subIndiceCorr + 1}` : `Ideia ${numIdeiaVisual}`;
+        return `${prefixoIdeia} — ${doc}${fl}`;
+    }
+
+    function _rotearNoParaSecao(no, refContexto, filaPreliminares, filaVereditosLocais, bufferLocal) {
+        if (!no || no.intencao === 'nota') return;
+        const chave = no.intencao || 'premissa';
+        const meta = REGIME_INTENCOES[chave] || REGIME_INTENCOES.premissa;
+        if (meta.regime === 'EXCLUIDO') return;
+
+        if (chave === 'preliminar') {
+            filaPreliminares.push({ no, refContexto });
+            return;
+        }
+        if (chave === 'veredito') {
+            filaVereditosLocais.push({ no, refContexto });
+            return;
+        }
+
+        const formatado = formatarNoEditorialMarkdown(no, refContexto);
+        if (formatado) bufferLocal.push(formatado);
+    }
+
+    function _compilarBlocoPreliminares(filaPreliminares) {
+        if (!Array.isArray(filaPreliminares) || filaPreliminares.length === 0) return '';
+
+        const itens = filaPreliminares
+            .map(item => formatarNoEditorialMarkdown(item.no, item.refContexto))
+            .filter(Boolean);
+
+        if (itens.length === 0) return '';
+
+        return [
+            '<barreiras_de_admissibilidade_dos_embargos>',
+            'Analise e desenvolva as barreiras de admissibilidade / prejudiciais abaixo antes do exame do vício alegado:',
+            ...itens,
+            '</barreiras_de_admissibilidade_dos_embargos>\n'
+        ].join('\n');
+    }
+
+    /**
+     * Preâmbulo condicional para Embargos de Declaração (JN-ED-5.0):
+     * Emite <decisao_embargada> ANTES de <vicio_alegado> (padrão TRT-23), seguido de <veredito_e_conclusao>.
+     */
+    function _compilarPreambuloCondicional(topico, filaVereditosLocais = []) {
+        const limpar = (txt) => _stripInternalTags(String(txt || '')).trim();
+
+        const campos = [
+            {
+                chave: 'fundamentos',
+                tag: 'decisao_embargada',
+                posicao: 'ABERTURA_RELATORIO',
+                notaFixo: 'Redação já revisada pelo assistente para síntese da decisão embargada. Reproduza o texto fielmente como relato do julgado sob auditoria (não vincula o desfecho dos embargos).',
+                notaAberto: 'Campo não preenchido: sintetize objetivamente o ponto da decisão embargada a partir dos cartões de contexto correspondentes.'
+            },
+            {
+                chave: 'alegacoes',
+                tag: 'vicio_alegado',
+                posicao: 'ABERTURA_RELATORIO',
+                notaFixo: 'Redação já revisada pelo assistente para abertura do tópico. Reproduza o texto fielmente, ciente de que expressa o vício apontado pelo EMBARGANTE (não a convicção do Relator).',
+                notaAberto: 'Campo não preenchido: sintetize objetivamente o vício apontado nos embargos a partir dos cartões de contexto correspondentes.'
+            },
+            {
+                chave: 'veredito',
+                tag: 'veredito_e_conclusao',
+                posicao: 'FECHO_DISPOSITIVO',
+                notaFixo: 'Dispositivo/conclusão dos embargos já definido e revisado pelo assistente (acolher/rejeitar, com ou sem efeito modificativo). Reproduza fielmente no fechamento do tópico. Nunca contrarie este resultado.',
+                notaAberto: 'CAMPO DELEGADO À IA: o assistente deixou o veredito em aberto intencionalmente. Elabore o desfecho completo dos embargos (acolhimento/rejeição, com ou sem efeito modificativo) com base nos Nós de Ideia e nos autos.'
+            }
+        ];
+
+        const out = ['<preambulo_da_minuta>'];
+
+        campos.forEach(c => {
+            const val = limpar(topico?.[c.chave]);
+            if (val) {
+                out.push(`<${c.tag} posicao="${c.posicao}" status="TEXTO_FIXO_NAO_ALTERAR">`);
+                out.push(`[ORIENTAÇÃO]: ${c.notaFixo}`);
+                out.push(val);
+                out.push(`</${c.tag}>`);
+            } else {
+                out.push(`<${c.tag} posicao="${c.posicao}" status="EM_ABERTO_LIBERDADE_DELEGADA">`);
+                out.push(`[ORIENTAÇÃO]: ${c.notaAberto}`);
+                out.push(`</${c.tag}>`);
+            }
+        });
+
+        if (Array.isArray(filaVereditosLocais) && filaVereditosLocais.length > 0) {
+            const linhasVereditos = filaVereditosLocais
+                .map(item => formatarNoEditorialMarkdown(item.no, item.refContexto))
+                .filter(Boolean);
+            if (linhasVereditos.length > 0) {
+                out.push('<vereditos_parciais_vinculantes status="OBRIGATORIO">');
+                out.push(...linhasVereditos);
+                out.push('</vereditos_parciais_vinculantes>');
+            }
+        }
+
+        out.push('</preambulo_da_minuta>\n');
+        return out.join('\n');
+    }
+
+    /**
+     * Preâmbulo neutro para modo === 'acervo' (sem ordens de minuta).
+     */
+    function _compilarPreambuloAcervo(topico, filaVereditosLocais = []) {
+        const limpar = (txt) => _stripInternalTags(String(txt || '')).trim();
+
+        const fundamentos = limpar(topico?.fundamentos);
+        const alegacoes = limpar(topico?.alegacoes);
+        const veredito = limpar(topico?.veredito);
+        const vereditosLocais = (filaVereditosLocais || [])
+            .map(item => formatarNoEditorialMarkdown(item.no, item.refContexto))
+            .filter(Boolean);
+
+        if (!fundamentos && !alegacoes && !veredito && vereditosLocais.length === 0) return '';
+
+        const out = ['<escopo_auditoria>'];
+        if (fundamentos) out.push(`<decisao_embargada>\n${fundamentos}\n</decisao_embargada>`);
+        if (alegacoes) out.push(`<vicio_alegado>\n${alegacoes}\n</vicio_alegado>`);
+        if (veredito) out.push(`<veredito_pretendido>\n${veredito}\n</veredito_pretendido>`);
+        if (vereditosLocais.length > 0) {
+            out.push('<vereditos_parciais_locais>');
+            out.push(...vereditosLocais);
+            out.push('</vereditos_parciais_locais>');
+        }
+        out.push('</escopo_auditoria>\n');
+        return out.join('\n');
+    }
+
+    function gerarLembreteFinalHierarquia(topico, opcoes = {}) {
+        const auditoriaAtiva = typeof opcoes.auditoria === 'boolean'
+            ? opcoes.auditoria
+            : isAuditoriaCriticaAtiva();
+
+        const vereditoDelegado = !(topico && topico.veredito && topico.veredito.trim() !== '');
+        const possuiCheckpointSaida = Boolean(
+            topico && Array.isArray(topico.anotacoes) && topico.anotacoes.some(a => a && a.tipo === 'checkpoint_saida')
+        );
+
+        const linhas = [
+            '\n<fechamento_editorial_e_controle>',
+            'CHECKLIST DE EXECUÇÃO (RECENCY GUARD — EMBARGOS DE DECLARAÇÃO):',
+            '1. RIGIDEZ: Preserve literalmente o Preâmbulo preenchido (1º Decisão Embargada; 2º Vício Alegado; ao fim, Veredito), [TEXTO FIXO], [JURISPRUDÊNCIA EXATA] e [DEGRAVAÇÃO CURADA] (nestes dois últimos, ordene livremente e redija transições fluidas). O Veredito (acolhimento/rejeição, com ou sem efeito modificativo) nunca pode ser contrariado.',
+            '2. LIBERDADE E ESCOPO DO ED: NÃO copie mecanicamente [PREMISSA LÓGICA], [REFUTAÇÃO] nem [FILTRO / PREJUDICIAL] — desenvolva argumentação jurídica coesa sob a lente de auditoria formal dos Embargos de Declaração (vedado rejulgamento fático), reordenando trechos se melhorar a lógica, e integre [LEI SECA] como pano de fundo.',
+            '3. CONTEXTO: Jamais adote alegações de <contexto_processual_nao_vinculante> ou inteiros teores como prova do vício ou convicção do Relator.',
+            '4. ANTI-ALUCINAÇÃO E MINUTA LIMPA: NUNCA invente ou cite de memória súmula, OJ, ementa ou precedente fora dos Nós de Ideia. NUNCA crie avisos editoriais inline ("[CONFERIR]", "[VERIFICAR]", "[ERRO PRESCRICIONAL...]"). Preserve intactos apenas colchetes originais de citações literais ("[...]", "[sic]") e o marcador "[DADO PESSOAL OCULTADO - LGPD]".'
+        ];
+
+        if (auditoriaAtiva) {
+            linhas.push(
+                '',
+                '<auditoria_critica ativa="true">',
+                `OBRIGATÓRIO — APÓS CONCLUIR A MINUTA LIMPA${possuiCheckpointSaida ? ' (E ANTES DO CHECKPOINT DE CONTINUIDADE)' : ''}:`,
+                `Crie uma seção final isolada (após linha divisória ---) com o título exato: "${TITULO_SECAO_AUDITORIA}" (uso interno — não integrar ao acórdão/decisão).`,
+                'Atue como revisor jurídico crítico independente, sempre citando o nº da Ideia (conforme a numeração acima), Id. e folha (fl.) quando aplicável:',
+                '1. LASTRO FÁTICO — Distinga expressamente entre: (a) ponto "NÃO LOCALIZADO NOS RECORTES FORNECIDOS" (pode constar em páginas não recortadas) e (b) ponto "CONTRARIADO POR ELEMENTO FORNECIDO" (contradição direta com a decisão embargada ou peça presente no contexto);',
+                '2. CONFLITOS ENTRE DIRETRIZES — Se detectou conflito entre nós ou entre nó (mesmo literal) e Veredito, reporte o conflito indicando o nº da Ideia afetada;',
+                '3. LIMITES DOS EMBARGOS E VÍCIOS PROCESSUAIS — Alerte sobre intempestividade evidente, risco de rejulgamento/reexame fático indevido sob pretexto de vício, efeito modificativo sem oitiva prévia da parte contrária (art. 897-A, § 2º, da CLT), julgamento extra/ultra/citra petita, inovação recursal, inversão de polos, preclusão ou erro material;',
+                '4. NORMAS INVOCADAS FORA DOS NÓS — Liste eventuais artigos de lei autônomos ou súmulas/OJs de fonte normativa oficial anexa citados na minuta, indicando a origem ("lei seca autônoma" ou "fonte oficial anexa") e as primeiras 6 a 8 palavras do parágrafo onde aparecem (ex.: "Art. 897-A da CLT [lei seca autônoma] — parágrafo iniciado por: \'Os embargos de declaração...\'");'
+            );
+
+            if (vereditoDelegado) {
+                linhas.push(
+                    '5. JUSTIFICATIVA DO VEREDITO DELEGADO (OBRIGATÓRIO): Como o campo Veredito/Conclusão foi deixado em aberto, declare qual desfecho adotou (acolhimento/rejeição, com ou sem efeito modificativo) e quais Nós de Ideia o fundamentaram.'
+                );
+            }
+
+            linhas.push(
+                'Se não houver anomalia, conflito, norma autônoma nem veredito delegado a justificar, escreva exatamente: "Nenhuma inconsistência material, processual ou de cabimento detectada."',
+                '</auditoria_critica>'
+            );
+        } else {
+            linhas.push(
+                '5. AUDITORIA DESATIVADA: utilize EXCLUSIVAMENTE as normas e julgados fornecidos nos Nós de Ideia; ficam vedadas citações normativas externas.',
+                '<auditoria_critica ativa="false" />'
+            );
+        }
+
+        linhas.push('</fechamento_editorial_e_controle>\n');
+        return linhas.join('\n');
+    }
+
+    function _sanitizarComLgpdSeAtivo(str) {
+        const bruto = String(str || '');
+        if (window.QuickRedactManager && typeof window.QuickRedactManager.sanitizarString === 'function') {
+            return window.QuickRedactManager.sanitizarString(bruto);
+        }
+        return bruto;
+    }
+
+    function _normalizarParaComparacaoLiteral(str) {
+        return _sanitizarComLgpdSeAtivo(str)
+            .replace(/\[\[(?:u|\/u|size:\d+|\/size)\]\]/gi, '')
+            .replace(/[*_`>]/g, '')
+            .replace(/[“”«»]/g, '"')
+            .replace(/[‘’]/g, "'")
+            .replace(/\s+/g, ' ')
+            .trim()
+            .toLowerCase();
+    }
+
+    function verificarAncorasLiteraisNoRascunho(topico, textoRascunho) {
+        // Sanitização simétrica em ambos os lados (elimina falsos alarmes com LGPD ativo)
+        const rascunhoNorm = _normalizarParaComparacaoLiteral(textoRascunho);
+        if (!topico || !rascunhoNorm) {
+            return { total: 0, encontrados: 0, ausentes: [] };
+        }
+
+        const ancoras = [];
+        const adicionar = (origem, textoBruto) => {
+            const limpo = String(textoBruto || '').trim();
+            if (limpo.length < 8) return;
+            ancoras.push({ origem, texto: limpo, norm: _normalizarParaComparacaoLiteral(limpo) });
+        };
+
+        if (topico.fundamentos) adicionar('Preâmbulo — Decisão Embargada', topico.fundamentos);
+        if (topico.alegacoes) adicionar('Preâmbulo — Vício Alegado', topico.alegacoes);
+        if (topico.veredito) adicionar('Preâmbulo — Veredito / Conclusão', topico.veredito);
+
+        const inspecionarLista = (lista, origem) => {
+            (lista || []).forEach(no => {
+                if (!no || no.intencao === 'nota') return;
+                const meta = REGIME_INTENCOES[no.intencao];
+                if (meta && (meta.regime === 'LITERAL' || meta.regime === 'LITERAL_MOVEL')) {
+                    adicionar(`${meta.tag} (${origem})`, no.texto);
+                }
+            });
+        };
+
+        inspecionarLista(topico.diretrizesGlobais, 'Diretriz Global');
+
+        const anotacoesReais = (topico.anotacoes || []).filter(an => an && !_ehCheckpoint(an));
+
+        if (topico.diretrizesPorVicio && Object.keys(topico.diretrizesPorVicio).length > 0) {
+            const viciosAncorados = new Set(
+                anotacoesReais.map(an => String(an.vicio || topico.vicio || 'omissao').trim())
+            );
+            if (anotacoesReais.length === 0 && topico.vicio) {
+                viciosAncorados.add(String(topico.vicio).trim());
+            }
+            Object.entries(topico.diretrizesPorVicio).forEach(([nomeVicio, lista]) => {
+                const chaveLimpa = String(nomeVicio).trim();
+                if (viciosAncorados.has(chaveLimpa)) {
+                    inspecionarLista(lista, `Vício: ${chaveLimpa}`);
+                }
+            });
+        }
+
+        if (topico.diretrizesPorTese && Object.keys(topico.diretrizesPorTese).length > 0) {
+            const tesesAncoradas = window.ThesisGuard
+                ? ThesisGuard.mapearTesesAncoradas(topico)
+                : new Set(
+                    anotacoesReais.map(a => (a.tese && a.tese.trim() !== '') ? a.tese.trim() : CHAVE_TESE_SEM_NOME)
+                );
+            Object.entries(topico.diretrizesPorTese).forEach(([tese, lista]) => {
+                const chaveNorm = tese.trim() || CHAVE_TESE_SEM_NOME;
+                if (tesesAncoradas.has(chaveNorm)) {
+                    inspecionarLista(lista, `Tese: ${chaveNorm}`);
+                }
+            });
+        }
+
+        const mapaVisuais = _construirMapaVisualExport(topico.anotacoes);
+        (topico.anotacoes || []).forEach((an, idx) => {
+            if (_ehCheckpoint(an)) return;
+            const numVisual = mapaVisuais.get(idx);
+            inspecionarLista(an.subAnotacoes, _montarRefContextoCard(an, numVisual));
+            (an.itensCorrelacionados || []).forEach((ic, cIdx) => {
+                inspecionarLista(ic.subAnotacoes, _montarRefContextoCard(ic, numVisual, cIdx));
+            });
+        });
+
+        const ausentes = [];
+        let encontrados = 0;
+
+        ancoras.forEach(a => {
+            if (rascunhoNorm.includes(a.norm)) encontrados++;
+            else ausentes.push({ origem: a.origem, preview: a.texto.slice(0, 90) });
+        });
+
+        return { total: ancoras.length, encontrados, ausentes };
     }
 
     // SINGLE SOURCE OF TRUTH — Rol de Peças do Extrator Inteligente
@@ -292,8 +694,7 @@ window.ExportManager = (function () {
     }
 
     /**
-     * Motor Privado de Geração de Payload (Roteiro do Diretor em XML/MD)
-     * OTIMIZADO COM BUFFERS CONDICIONAIS E MAPEAMENTO LÉXICO
+     * Motor Privado de Geração de Payload (Protocolo JN-ED-5.0 — Montagem Determinística em 2 Fases)
      */
     function _gerarMarkdown(topico, opcoes = {}) {
         const config = ESQUEMAS_CONTEXTO['ED'];
@@ -303,95 +704,28 @@ window.ExportManager = (function () {
             ? false
             : (opcoes.auditoria !== undefined ? opcoes.auditoria : isAuditoriaCriticaAtiva());
 
-        const safeFormatTime = (sec) => window.AudioManager?.formatTime ? window.AudioManager.formatTime(sec) : `${Math.floor(sec/60)}' ${Math.floor(sec%60)}''`;
+        const safeFormatTime = (sec) => window.AudioManager?.formatTime
+            ? window.AudioManager.formatTime(sec)
+            : `${Math.floor(sec / 60)}' ${Math.floor(sec % 60)}''`;
 
-        // Coleta de escopo global (Bubble-up)
-        const barreirasAdmissibilidade = [];
-        const vereditosLocaisInjetados = []; 
-        const diretrizesGlobaisGerais = [];
+        // ====================================================================
+        // FASE A — COLETA E SERIALIZAÇÃO EM PASSAGEM ÚNICA O(N)
+        // ====================================================================
+        const mapaVisuais = _construirMapaVisualExport(topico.anotacoes);
+        const filaPreliminares = [];
+        const filaVereditosLocais = [];
+        const bufferGlobais = [];
+        const bufferViciosTeses = [];
+        const bufferMatriz = [];
 
-        let md = `<!-- [ESQUEMA JN-ED v4.1 — HIERARQUIA EPISTEMOLÓGICA ESTRITA] -->\n`;
-        md += `# ${config.tituloTopico}: **${(topico.nome || 'Não Nomeado').toUpperCase()}**\n\n`;
+        // A.1 — Diretrizes Globais
+        (topico.diretrizesGlobais || []).forEach(dir => {
+            _rotearNoParaSecao(dir, 'Diretriz Global', filaPreliminares, filaVereditosLocais, bufferGlobais);
+        });
 
-        md += `<hierarquia_epistemologica_e_regras_de_auditoria>\n`;
-        md += `[REGRA DE OURO]: Este pacote separa rigorosamente CONTEXTO PROCESSUAL (não-vinculante) de NÓS DE IDEIA DO GABINETE (verdade e diretriz absoluta). Nunca presuma fatos fora destes blocos.\n\n`;
-        md += `1. TABELA DE ESTATUTOS DO <contexto_processual_nao_vinculante>:\n`;
-        md += `   - [ALEGACAO_EMBARGOS_OU_RECURSO]: Razões de embargos/recurso. Serve APENAS para delimitar o vício alegado e aferir inovação. NÃO é prova de erro ou omissão.\n`;
-        md += `   - [CONTRAMINUTA_OU_CONTRARRAZOES]: Resistência da parte contrária e preliminares. NÃO é fato provado.\n`;
-        md += `   - [LIMITES_DA_LIDE_ALEGACAO]: Inicial, contestação, impugnação ou manifestação de parte. Serve apenas para aferir limites objetivos da lide.\n`;
-        md += `   - [DECISAO_EMBARGADA_OU_ORIGEM]: Decisão sob auditoria. Prevalece no que for mantida pelos Nós de Ideia; havendo Nó de Ideia em sentido diverso, o Nó de Ideia prevalece.\n`;
-        md += `   - [ATO_JUDICIAL_OFICIAL]: Certidões, despachos e atos oficiais (interpretados segundo os Nós de Ideia).\n`;
-        md += `   - [ELEMENTO_PROBATORIO_BRUTO]: Prova documental/pericial/oral cuja valoração subordina-se estritamente aos Nós de Ideia (em ED é vedado rejulgamento fático).\n\n`;
-        md += `2. REGRA DE BLINDAGEM NORMATIVA E MARCADOR [CONFERIR]:\n`;
-        md += `   - A citação de norma ou julgado pela parte não é motivo para adotá-lo.\n`;
-        md += `   - Use primeiro as normas e julgados fornecidos nos Nós de Ideia (locais, do vício ou globais). Fora deles, você só pode citar dispositivo de lei seca de cuja redação tenha certeza ou norma aplicada na decisão (compatível com o Nó de Ideia), marcando cada citação extra-nó com [CONFERIR].\n`;
-        md += `   - Nunca cite súmula, OJ, ementa ou número de precedente que não esteja em um Nó de Ideia.\n\n`;
-        md += `3. SOBERANIA DOS NÓS DE IDEIA (<diretrizes_de_auditoria_do_assessor>, <direcionamentos_por_vicio>, <premissas_globais_da_auditoria>):\n`;
-        md += `   - Tudo o que o assistente definiu nos Nós de Ideia constitui a VERDADE FÁTICA PACIFICADA e a DIRETRIZ ABSOLUTA do gabinete (Precedência: Veredito > Global > Vício > Local).\n`;
-        md += `</hierarquia_epistemologica_e_regras_de_auditoria>\n\n`;
+        // A.2 — Diretrizes por Vício e por Tese (apenas chaves ancoradas na Matriz)
+        const anotacoesValidas = (topico.anotacoes || []).filter(an => an && !_ehCheckpoint(an));
 
-        if (auditoriaAtiva) {
-            md += `<protocolo_de_senso_critico_e_auditoria>\n`;
-            md += `[OBEDIÊNCIA INTEGRAL NA MINUTA + AUDITORIA ISOLADA AO FINAL]:\n`;
-            md += `- Na minuta, cumpra 100% do enquadramento determinado pelo assistente nos Nós de Ideia. Nunca desobedeça a um Nó de Ideia dentro do texto do voto.\n`;
-            md += `- Contudo, audite friamente os Nós de Ideia frente aos autos. Se detectar erro material grosseiro (ex: inversão de polos, efeito modificativo sem oitiva prévia quando exigível, intempestividade evidente, tentativa de rejulgamento fático sob pretexto de vício) ou contradição frontal com prova cabal dos autos:\n`;
-            md += `  1. Mantenha o cumprimento da diretriz na minuta;\n`;
-            md += `  2. Ao final da minuta (e ANTES do bloco de Checkpoint de Continuidade, se houver), crie obrigatoriamente a seção isolada:\n`;
-            md += `     "### 🛡️ [AUDITORIA DE QUALIDADE DO GABINETE]"\n`;
-            md += `  3. Caso haja inconsistência grave, descreva-a citando IDs/folhas para confirmação humana. Caso não haja nenhuma anomalia, escreva exatamente: "Nenhuma inconsistência material ou processual grave detectada."\n`;
-            md += `</protocolo_de_senso_critico_e_auditoria>\n\n`;
-        }
-
-        // 1. COMPILAÇÃO DO ROTEIRO ESTRUTURAL
-        md += `<roteiro_diretor_llm>\n`;
-        md += `  <incidente_processual>Embargos de Declaração</incidente_processual>\n`;
-        md += `  <diretriz_cognitiva_vinculante>${config.diretrizIA}</diretriz_cognitiva_vinculante>\n`;
-        md += `</roteiro_diretor_llm>\n\n`;
-
-        md += `## SEÇÃO I — ESCOPO DA AUDITORIA\n\n`;
-        md += `<escopo_auditoria>\n`;
-        md += `  <alegacao_vicio>\n${_safeMD(topico.alegacoes || 'Nenhum vício apontado.')}\n  </alegacao_vicio>\n`;
-        md += `  <decisao_embargada>\n${_safeMD(topico.fundamentos || 'Nenhum trecho da decisão embargada colado.')}\n  </decisao_embargada>\n`;
-        md += `</escopo_auditoria>\n\n`;
-
-        // [INÍCIO DA INSERÇÃO] - Injeção dos Dados do Contrato de Trabalho para a IA
-        if (window.ContratoManager) {
-            const dadosContrato = window.ContratoManager.getDados();
-            if (dadosContrato.admissao || dadosContrato.demissao || dadosContrato.funcao) {
-                md += `<contexto_fatico_vinculo_empregaticio>\n`;
-                if (dadosContrato.funcao) md += `  [Função Exercida]: ${dadosContrato.funcao}\n`;
-                if (dadosContrato.admissao) {
-                    // Formata a data (de YYYY-MM-DD para DD/MM/YYYY) para a IA ler de forma nativa
-                    const admArr = dadosContrato.admissao.split('-');
-                    md += `  [Data de Admissão]: ${admArr.length === 3 ? `${admArr[2]}/${admArr[1]}/${admArr[0]}` : dadosContrato.admissao}\n`;
-                }
-                if (dadosContrato.demissao) {
-                    const demArr = dadosContrato.demissao.split('-');
-                    md += `  [Data de Demissão]: ${demArr.length === 3 ? `${demArr[2]}/${demArr[1]}/${demArr[0]}` : dadosContrato.demissao}\n`;
-                }
-                md += `</contexto_fatico_vinculo_empregaticio>\n\n`;
-            }
-        }
-        // [FIM DA INSERÇÃO]
-
-        // 2. INJEÇÃO DAS DIRETRIZES GLOBAIS DA IA
-        if (topico.diretrizesGlobais && topico.diretrizesGlobais.length > 0) {
-            const globaisValidas = topico.diretrizesGlobais.filter(dir => dir.intencao !== 'nota');
-            if (globaisValidas.length > 0) {
-                md += `<premissas_globais_da_auditoria>\n`;
-                globaisValidas.forEach(dir => {
-                    md += `  - [REGRA GERAL]: ${_safeMD(dir.texto, '\n  ')}\n`; // Correção de blockquote
-                });
-                md += `</premissas_globais_da_auditoria>\n\n`;
-            }
-        }
-
-        // CORREÇÃO: BUFFER CONDICIONAL E MAPEAMENTO DE VÍCIO E TESE ANCORADOS
-        const anotacoesValidas = (topico.anotacoes || []).filter(
-            an => an && !(an.tipo && an.tipo.startsWith('checkpoint'))
-        );
-
-        let bufferVicios = '';
         if (topico.diretrizesPorVicio && Object.keys(topico.diretrizesPorVicio).length > 0) {
             const viciosAncorados = new Set(
                 anotacoesValidas.map(an => String(an.vicio || topico.vicio || 'omissao').trim())
@@ -405,26 +739,28 @@ window.ExportManager = (function () {
                 if (!viciosAncorados.has(chaveVicioLimpa)) return;
 
                 const diretrizes = topico.diretrizesPorVicio[nomeVicio];
-                if (diretrizes && diretrizes.length > 0) {
-                    const diretrizesValidas = diretrizes.filter(dir => dir.intencao !== 'nota');
-                    if (diretrizesValidas.length > 0) {
-                        // MAPEAMENTO ESTRUTURAL PARA A IA: Sincronia perfeita com a UI
-                        const tesesVinculadas = anotacoesValidas
-                            .filter(an => String(an.vicio || topico.vicio || 'omissao').trim() === chaveVicioLimpa && an.tese && an.tese.trim() !== '')
-                            .map(an => window.ThesisGuard ? ThesisGuard.obterChaveTese(an) : an.tese.trim());
-                        
-                        const tesesUnicas = [...new Set(tesesVinculadas)];
-                        const stringTeses = tesesUnicas.length > 0 ? tesesUnicas.join(' | ') : 'Aguardando definição do usuário na Matriz.';
+                if (!Array.isArray(diretrizes) || diretrizes.length === 0) return;
 
-                        bufferVicios += `<vicio_alvo>\n`;
-                        bufferVicios += `[NOME DO VÍCIO]: ${_escapeXmlAttr(chaveVicioLimpa)}\n`;
-                        bufferVicios += `[TESES RECURSAIS ENVOLVIDAS]: ${_escapeXmlAttr(stringTeses)}\n`;
-                        
-                        diretrizesValidas.forEach(dir => {
-                             bufferVicios += `[INSTRUÇÃO DE ANÁLISE]: ${_safeMD(dir.texto, '\n')}\n`;
-                        });
-                        bufferVicios += `</vicio_alvo>\n\n`;
-                    }
+                const bufferVicioLocal = [];
+                diretrizes.forEach(dir => {
+                    _rotearNoParaSecao(dir, `Vício: ${chaveVicioLimpa}`, filaPreliminares, filaVereditosLocais, bufferVicioLocal);
+                });
+
+                if (bufferVicioLocal.length > 0) {
+                    const tesesVinculadas = anotacoesValidas
+                        .filter(an => String(an.vicio || topico.vicio || 'omissao').trim() === chaveVicioLimpa && an.tese && an.tese.trim() !== '')
+                        .map(an => window.ThesisGuard ? ThesisGuard.obterChaveTese(an) : an.tese.trim());
+
+                    const tesesUnicas = [...new Set(tesesVinculadas)];
+                    const stringTeses = tesesUnicas.length > 0 ? tesesUnicas.join(' | ') : 'Aguardando definição do usuário na Matriz.';
+
+                    bufferViciosTeses.push(
+                        `<vicio_alvo>\n` +
+                        `[NOME DO VÍCIO]: ${_escapeXmlAttr(chaveVicioLimpa)}\n` +
+                        `[TESES RECURSAIS ENVOLVIDAS]: ${_escapeXmlAttr(stringTeses)}\n` +
+                        `${bufferVicioLocal.join('\n\n')}\n` +
+                        `</vicio_alvo>`
+                    );
                 }
             });
         }
@@ -439,50 +775,62 @@ window.ExportManager = (function () {
             for (const [nomeTese, diretrizes] of Object.entries(topico.diretrizesPorTese)) {
                 const chaveNormalizada = nomeTese.trim() || CHAVE_TESE_SEM_NOME;
                 if (!tesesAncoradas.has(chaveNormalizada)) continue;
+                if (!Array.isArray(diretrizes) || diretrizes.length === 0) continue;
 
-                if (diretrizes && diretrizes.length > 0) {
-                    const diretrizesValidas = diretrizes.filter(dir => dir.intencao !== 'nota');
-                    if (diretrizesValidas.length > 0) {
-                        bufferVicios += `<tese_alvo>\n`;
-                        bufferVicios += `[NOME DA TESE]: ${_escapeXmlAttr(chaveNormalizada)}\n`;
-                        diretrizesValidas.forEach(dir => {
-                            bufferVicios += `[${(dir.intencao || 'PREMISSA').toUpperCase()} — DIRETRIZ VINCULANTE DA TESE]: ${_safeMD(dir.texto, '\n')}\n`;
-                        });
-                        bufferVicios += `</tese_alvo>\n\n`;
-                    }
+                const bufferTeseLocal = [];
+                diretrizes.forEach(dir => {
+                    _rotearNoParaSecao(dir, `Tese: ${chaveNormalizada}`, filaPreliminares, filaVereditosLocais, bufferTeseLocal);
+                });
+
+                if (bufferTeseLocal.length > 0) {
+                    bufferViciosTeses.push(
+                        `<tese_alvo>\n` +
+                        `[NOME DA TESE]: ${_escapeXmlAttr(chaveNormalizada)}\n` +
+                        `${bufferTeseLocal.join('\n\n')}\n` +
+                        `</tese_alvo>`
+                    );
                 }
             }
         }
-        
-        if (bufferVicios.trim() !== '') {
-            md += `<direcionamentos_por_vicio>\n[ATENÇÃO IA]: Aplique estas métricas estritas ao auditar o vício correspondente.\n\n${bufferVicios}</direcionamentos_por_vicio>\n\n`;
-        }
 
-        md += `## SEÇÃO II — ${config.rotuloSeccao}\n`;
-        md += `*Atenção IA: Aqui estão as provas documentais do vício formal. É proibido reavaliar o mérito originário da causa baseando-se nestes extratos.*\n\n`;
-
+        // A.3 — Matriz de Higidez Estrutural e Evidências (com numeração visual unificada)
         if (!topico.anotacoes || topico.anotacoes.length === 0) {
-            md += `*Nenhum elemento processual foi anexado para auditoria.*\n`;
+            bufferMatriz.push('*Nenhum elemento processual foi anexado para auditoria.*\n');
         } else {
-            // [NOVO CÓDIGO: Máquina de estado para controle de tags XML]
             let ultimaTeseExportada = null;
 
-            // 3. ITERAÇÃO PROFUNDA COM ENVELOPAMENTO XML
             topico.anotacoes.forEach((an, idx) => {
-                // INTERCEPTADOR DE MÓDULOS DE CONTINUIDADE (HANDOFF RAG)
+                if (!an) return;
+
+                // Interceptador de módulos de continuidade (Handoff RAG)
                 if (an.tipo === 'checkpoint_saida') {
+                    if (ultimaTeseExportada !== null) {
+                        bufferMatriz.push('</grupo_tese>\n');
+                        ultimaTeseExportada = null;
+                    }
                     const meta = an.metaHandoff;
-                    md += `\n⛓️ PONTE DE CONTINUIDADE (SAÍDA) + COMANDO DE GERAÇÃO PARCIAL\n`;
-                    md += `→ CONTINUA NO TÓPICO: "${meta.alvo}"\n`;
-                    md += `→ COMANDO DE GERAÇÃO PARCIAL: ao auditar este vício, NÃO escreva conclusão, pedidos finais ou parágrafo de fecho; interrompa após a última seção e encerre com bloco "CHECKPOINT DE CONTINUIDADE" contendo [ID] CHK-${meta.slug}-v${meta.versao}, [STATUS], [JÁ REDIGIDO], [PREMISSAS FIXADAS], [PENDÊNCIAS].\n`;
-                    md += `→ ORDEM DE LEITURA: processe este contexto integralmente e só então abra o contexto de "${meta.alvo}", tratando-o como capítulo continuado.\n\n`;
+                    const posAuditoria = auditoriaAtiva
+                        ? ` (após a seção isolada "${TITULO_SECAO_AUDITORIA}")`
+                        : '';
+                    bufferMatriz.push(
+                        `\n⛓️ PONTE DE CONTINUIDADE (SAÍDA) + COMANDO DE GERAÇÃO PARCIAL\n` +
+                        `→ CONTINUA NO TÓPICO: "${meta.alvo}"\n` +
+                        `→ COMANDO DE GERAÇÃO PARCIAL: ao auditar este vício, NÃO escreva conclusão, pedidos finais ou parágrafo de fecho; interrompa após a última seção e encerre${posAuditoria} com bloco "CHECKPOINT DE CONTINUIDADE" contendo [ID] CHK-${meta.slug}-v${meta.versao}, [STATUS], [JÁ REDIGIDO], [PREMISSAS FIXADAS], [PENDÊNCIAS].\n` +
+                        `→ ORDEM DE LEITURA: processe este contexto integralmente e só então abra o contexto de "${meta.alvo}", tratando-o como capítulo continuado.\n`
+                    );
                     return;
                 } else if (an.tipo === 'checkpoint_entrada') {
+                    if (ultimaTeseExportada !== null) {
+                        bufferMatriz.push('</grupo_tese>\n');
+                        ultimaTeseExportada = null;
+                    }
                     const meta = an.metaHandoff;
-                    md += `\n⛓️ PONTE DE CONTINUIDADE (CHEGADA) + COMANDO DE RETOMADA\n`;
-                    md += `← ORIGEM: continuação direta da auditoria "${meta.origem}" via checkpoint CHK-${meta.slug}-v${meta.versao}.\n`;
-                    md += `← VEDAÇÃO: não re-provar nem reescrever itens de [JÁ REDIGIDO] do checkpoint; remeta-os como "conforme estabelecido na etapa anterior".\n`;
-                    md += `← WORKFLOW: antes de redigir, localizar o checkpoint CHK-${meta.slug}-v${meta.versao} e aplicar o [COMANDO DE CONTINUAÇÃO DE MINUTA — HANDOFF].\n\n`;
+                    bufferMatriz.push(
+                        `\n⛓️ PONTE DE CONTINUIDADE (CHEGADA) + COMANDO DE RETOMADA\n` +
+                        `← ORIGEM: continuação direta da auditoria "${meta.origem}" via checkpoint CHK-${meta.slug}-v${meta.versao}.\n` +
+                        `← VEDAÇÃO: não re-provar nem reescrever itens de [JÁ REDIGIDO] do checkpoint; remeta-os como "conforme estabelecido na etapa anterior".\n` +
+                        `← WORKFLOW: antes de redigir, localizar o checkpoint CHK-${meta.slug}-v${meta.versao} e aplicar o [COMANDO DE CONTINUAÇÃO DE MINUTA — HANDOFF].\n`
+                    );
                     return;
                 }
 
@@ -491,55 +839,58 @@ window.ExportManager = (function () {
                     : ((an.tese && an.tese.trim() !== '') ? an.tese.trim() : CHAVE_TESE_SEM_NOME);
                 const vicioAtual = an.vicio || topico.vicio || 'Nao Especificado';
 
-                // Lógica Cirúrgica: Fechar grupo anterior e abrir novo grupo se houver quebra
                 if (teseAtual !== ultimaTeseExportada) {
                     if (ultimaTeseExportada !== null) {
-                        md += `</grupo_tese>\n\n`; // Fecha o cluster anterior
+                        bufferMatriz.push('</grupo_tese>\n');
                     }
-                    md += `<grupo_tese vicio_investigado="${_escapeXmlAttr(vicioAtual)}" delimitacao_faticas_da_tese="${_escapeXmlAttr(teseAtual)}">\n`;
+                    bufferMatriz.push(`<grupo_tese vicio_investigado="${_escapeXmlAttr(vicioAtual)}" delimitacao_faticas_da_tese="${_escapeXmlAttr(teseAtual)}">`);
                     ultimaTeseExportada = teseAtual;
                 }
 
-                const numIdeia = idx + 1;
+                const numIdeia = mapaVisuais.get(idx);
                 const refCitacao = _formatarCitacaoOficial(an.pjeId, an.pagina);
                 const estatutoMestre = _obterEstatutoEpistemologico(an);
-                    
-                // Avaliação OK: Utiliza o SSOT com renderHtml=false para garantir uma string limpa no payload da IA
-                const tituloVicio = window.JurisUtils.obterBadgeTeseCompleto(an.vicio || topico.vicio, an.tese, false) || 'Auditoria Geral';
+                const tituloVicio = (window.JurisUtils && typeof window.JurisUtils.obterBadgeTeseCompleto === 'function')
+                    ? (window.JurisUtils.obterBadgeTeseCompleto(an.vicio || topico.vicio, an.tese, false) || 'Auditoria Geral')
+                    : (an.vicio || topico.vicio || 'Auditoria Geral');
 
-                md += `<analise_de_evidencia>\n`;
-                md += `[IDENTIFICADOR DA EVIDÊNCIA]: ${numIdeia}\n`;
-                md += `[VÍCIO VINCULADO]: ${_escapeXmlAttr(tituloVicio)}\n`;
-                md += `[TESE VINCULADA]: ${_escapeXmlAttr(teseAtual)}\n`;
-                
-                const faseContexto  = an.fase || an.documento || 'Não especificado';
-                const poloContexto  = an.polo || 'N/A';
-                md += `<contexto_processual>\nFase: ${faseContexto} | Polo: ${poloContexto} | Ref: ${refCitacao} | Estatuto: ${estatutoMestre}\n</contexto_processual>\n\n`;
+                const faseContexto = an.fase || an.documento || 'Não especificado';
+                const poloContexto = an.polo || 'N/A';
 
-                md += `<contexto_processual_nao_vinculante>\n`;
-                md += `[INSTRUÇÃO DE LEITURA]: Capte os elementos abaixo segundo seu [ESTATUTO] na tabela do topo. Em ED é vedado reexame fático; aplique com soberania absoluta as <diretrizes_de_auditoria_do_assessor>.\n\n`;
+                const linhasCard = [
+                    '<analise_de_evidencia>',
+                    `[IDENTIFICADOR DA EVIDÊNCIA]: ${numIdeia}`,
+                    `[VÍCIO VINCULADO]: ${_escapeXmlAttr(tituloVicio)}`,
+                    `[TESE VINCULADA]: ${_escapeXmlAttr(teseAtual)}`,
+                    `<contexto_processual>`,
+                    `Fase: ${faseContexto} | Polo: ${poloContexto} | Ref: ${refCitacao} | Estatuto: ${estatutoMestre}`,
+                    `</contexto_processual>`,
+                    '',
+                    '<contexto_processual_nao_vinculante>'
+                ];
+
                 const docLabel = `**[ESTATUTO: ${estatutoMestre}] [${an.documento || 'Elemento'}] (${poloContexto}) ${refCitacao}:**`;
 
                 if (an.tipo === 'texto') {
                     const conteudoSeguro = _sanitizarContraInjecao(an.conteudo);
-                    md += `- ${docLabel} ${_safeMD(conteudoSeguro, ' ')}\n`;
+                    linhasCard.push(`- ${docLabel} ${_safeMD(conteudoSeguro, ' ')}`);
                     if (an.comentario) {
-                        md += `  [APONTAMENTO DO ASSESSOR — orientação de leitura]: ${_safeMD(_sanitizarContraInjecao(an.comentario), '\n  ')}\n`;
+                        linhasCard.push(`  [APONTAMENTO DO ASSESSOR — orientação de leitura]: ${_safeMD(_sanitizarContraInjecao(an.comentario), '\n  ')}`);
                     }
                 } else if (an.tipo === 'imagem') {
                     const imgRef = incluirNomesImagens
                         ? `(Nome: \`${_gerarNomeArquivoImagem(topico.id, numIdeia)}\`)`
                         : `[Recorte visual — ${refCitacao}]`;
-                    md += `- ${docLabel}\n  [IMAGEM FORNECIDA PARA CONFERÊNCIA]: ${imgRef}.\n  [APONTAMENTO DO ASSESSOR]: ${_safeMD(_sanitizarContraInjecao(an.comentario || 'Verifique a falha estrutural demonstrada na imagem.'), '\n  ')}\n`;
+                    linhasCard.push(`- ${docLabel}\n  [IMAGEM FORNECIDA PARA CONFERÊNCIA]: ${imgRef}.\n  [APONTAMENTO DO ASSESSOR]: ${_safeMD(_sanitizarContraInjecao(an.comentario || 'Verifique a falha estrutural demonstrada na imagem.'), '\n  ')}`);
                 } else if (an.tipo === 'audio') {
                     try {
                         const ad = JSON.parse(an.conteudo);
                         const oradorFinal = ad.role || ad.oradorStr || 'Orador não idt.';
-                        md += `- ${docLabel} [OITIVA REGISTRADA] (${oradorFinal} — ${safeFormatTime(ad.inicio)} a ${safeFormatTime(ad.fim)}).\n`;
-                        if (an.comentario) md += `  [OBSERVAÇÃO]: ${_safeMD(_sanitizarContraInjecao(an.comentario), '\n  ')}\n`;
-                        if (ad.transcricao) md += `  [DEGRAVAÇÃO LITERAL]: "${_safeMD(_sanitizarContraInjecao(ad.transcricao), '\n  ')}"\n`;
+                        linhasCard.push(`- ${docLabel} [OITIVA REGISTRADA] (${oradorFinal} — ${safeFormatTime(ad.inicio)} a ${safeFormatTime(ad.fim)}).`);
+                        if (an.comentario) linhasCard.push(`  [OBSERVAÇÃO]: ${_safeMD(_sanitizarContraInjecao(an.comentario), '\n  ')}`);
+                        if (ad.transcricao) linhasCard.push(`  [DEGRAVAÇÃO LITERAL]: "${_safeMD(_sanitizarContraInjecao(ad.transcricao), '\n  ')}"`);
                     } catch (e) {
-                        md += `- ${docLabel} [ÁUDIO] Resumo: ${_safeMD(_sanitizarContraInjecao(an.comentario || 'Sem comentário.'), '\n  ')}\n`;
+                        linhasCard.push(`- ${docLabel} [ÁUDIO] Resumo: ${_safeMD(_sanitizarContraInjecao(an.comentario || 'Sem comentário.'), '\n  ')}`);
                     }
                 }
 
@@ -553,128 +904,146 @@ window.ExportManager = (function () {
 
                         if (corr.tipo === 'texto') {
                             const corrConteudoSeguro = _sanitizarContraInjecao(corr.conteudo || '');
-                            md += `${cDocLabel} ${_safeMD(corrConteudoSeguro, ' ')}\n`;
+                            linhasCard.push(`${cDocLabel} ${_safeMD(corrConteudoSeguro, ' ')}`);
                             if (corr.comentario) {
-                                md += `    [APONTAMENTO DO ASSESSOR — orientação de leitura]: ${_safeMD(_sanitizarContraInjecao(corr.comentario), '\n    ')}\n`;
+                                linhasCard.push(`    [APONTAMENTO DO ASSESSOR — orientação de leitura]: ${_safeMD(_sanitizarContraInjecao(corr.comentario), '\n    ')}`);
                             }
                         } else if (corr.tipo === 'imagem') {
                             const cImgRef = incluirNomesImagens
                                 ? `\`${_gerarNomeArquivoImagem(topico.id, numIdeia, numSub)}\``
                                 : `[Recorte visual — ${cRefCitacao}]`;
-                            md += `${cDocLabel}\n    [IMAGEM ANEXA]: ${cImgRef}\n    [APONTAMENTO]: ${_safeMD(_sanitizarContraInjecao(corr.comentario || 'Avalie a incongruência.'), '\n    ')}\n`;
+                            linhasCard.push(`${cDocLabel}\n    [IMAGEM ANEXA]: ${cImgRef}\n    [APONTAMENTO]: ${_safeMD(_sanitizarContraInjecao(corr.comentario || 'Avalie a incongruência.'), '\n    ')}`);
                         } else if (corr.tipo === 'audio') {
                             try {
                                 const ad = JSON.parse(corr.conteudo);
                                 const oradorFinal = ad.role || ad.oradorStr || 'Orador não idt.';
-                                md += `${cDocLabel} [OITIVA] (${oradorFinal} — ${safeFormatTime(ad.inicio)} a ${safeFormatTime(ad.fim)}).\n`;
-                                if (corr.comentario) md += `    [OBSERVAÇÃO]: ${_safeMD(_sanitizarContraInjecao(corr.comentario), '\n    ')}\n`;
-                                if (ad.transcricao) md += `    [DEGRAVAÇÃO LITERAL]: "${_safeMD(_sanitizarContraInjecao(ad.transcricao), '\n    ')}"\n`;
+                                linhasCard.push(`${cDocLabel} [OITIVA] (${oradorFinal} — ${safeFormatTime(ad.inicio)} a ${safeFormatTime(ad.fim)}).`);
+                                if (corr.comentario) linhasCard.push(`    [OBSERVAÇÃO]: ${_safeMD(_sanitizarContraInjecao(corr.comentario), '\n    ')}`);
+                                if (ad.transcricao) linhasCard.push(`    [DEGRAVAÇÃO LITERAL]: "${_safeMD(_sanitizarContraInjecao(ad.transcricao), '\n    ')}"`);
                             } catch (e) {
-                                md += `${cDocLabel} [ÁUDIO] Contexto: ${_safeMD(_sanitizarContraInjecao(corr.comentario || 'Ausente.'), '\n    ')}\n`;
+                                linhasCard.push(`${cDocLabel} [ÁUDIO] Contexto: ${_safeMD(_sanitizarContraInjecao(corr.comentario || 'Ausente.'), '\n    ')}`);
                             }
                         }
                     });
                 }
-                
-                md += `</contexto_processual_nao_vinculante>\n\n`;
 
-                // CORREÇÃO: CONSOLIDAÇÃO DE DIRETRIZES LOCAIS EM UM ÚNICO BUFFER
-                let bufferDiretrizesLocais = '';
+                linhasCard.push('</contexto_processual_nao_vinculante>');
 
-                const processarNos = (listaNos, refContexto) => {
-                    if (!listaNos || listaNos.length === 0) return;
-                    
-                    const nosValidos = listaNos.filter(sub => sub.intencao !== 'nota');
-                    if (nosValidos.length === 0) return;
-
-                    nosValidos.forEach((sub) => {
-                        const intencao = sub.intencao || 'fallback';
-
-                        // Tratamento assíncrono para texto literal (Verbatim)
-                        if (intencao === 'texto') {
-                            const textoExato = _stripInternalTags(sub.texto);
-                            bufferDiretrizesLocais += `\n[INSTRUÇÃO DE CÓPIA EXATA${refContexto}]\nTranscreva o bloco de texto abaixo exatamente como ele está escrito, palavra por palavra. Não altere a formatação e não parafraseie.\n<texto_verbatim>\n${textoExato}\n</texto_verbatim>\n\n`;
-                        } else if (intencao === 'jurisprudencia') {
-                            const textoExato = _stripInternalTags(sub.texto);
-                            bufferDiretrizesLocais += `\n[INSTRUÇÃO: APLICAÇÃO DE JURISPRUDÊNCIA${refContexto}]\nTranscreva a ementa/julgado abaixo exatamente como fornecida (cópia literal). Em seguida, obrigatoriamente crie um parágrafo conectivo explicando de forma sucinta por que este julgado se amolda perfeitamente aos fatos incontroversos deste tópico.\n<texto_verbatim>\n${textoExato}\n</texto_verbatim>\n\n`;
-                        } else if (intencao === 'fundamentacao') {
-                            const textoExato = _stripInternalTags(sub.texto);
-                            bufferDiretrizesLocais += `\n[INSTRUÇÃO: APLICAÇÃO DE LEI SECA / NORMA${refContexto}]\nTranscreva a legislação abaixo exatamente como fornecida (cópia literal). Em seguida, obrigatoriamente crie um parágrafo conectivo explicando de forma sucinta como esta lei incide e se aplica aos fatos incontroversos específicos deste tópico.\n<texto_verbatim>\n${textoExato}\n</texto_verbatim>\n\n`;
-                        } else if (intencao === 'degravacao') {
-                            const textoExato = _stripInternalTags(sub.texto);
-                            bufferDiretrizesLocais += `\n[INSTRUÇÃO: ANCORAGEM DE DEPOIMENTO ORAL${refContexto}]\nATENÇÃO: O trecho abaixo é um recorte curado pelo assessor extraído da transcrição da audiência já fornecida. Utilize este trecho exato entre aspas como a "prova cabal" (bala de prata) para sustentar a tese, atribuindo a fala ao orador correspondente.\n<texto_verbatim>\n${textoExato}\n</texto_verbatim>\n\n`;
-                        } else {
-                            const textoSanitizado = _safeMD(sub.texto, '\n');
-                            
-                            if (intencao === 'premissa') {
-                                bufferDiretrizesLocais += `[CONSTATAÇÃO FORMAL INQUESTIONÁVEL${refContexto}]: ${textoSanitizado}\n`;
-                            } else if (intencao === 'refutacao') {
-                                bufferDiretrizesLocais += `[AFASTAMENTO DO VÍCIO OBRIGATÓRIO - INEXISTÊNCIA DE FALHA${refContexto}]: ${textoSanitizado}\n`;
-                            } else if (intencao === 'comando') {
-                                bufferDiretrizesLocais += `[COMANDO DE REDAÇÃO ESTRITO${refContexto}]: ${textoSanitizado}\n`;
-                            } else if (intencao === 'fallback') {
-                                bufferDiretrizesLocais += `[CONTEXTO FÁTICO COMPLEMENTAR PARA AUDITORIA${refContexto}]: ${textoSanitizado}\n`;
-                            } 
-                            // Escopo Global: Bubble-up
-                            else if (intencao === 'preliminar') {
-                                barreirasAdmissibilidade.push(`[Item ${numIdeia}${refContexto}]: ${textoSanitizado}`);
-                            } else if (intencao === 'veredito') {
-                                vereditosLocaisInjetados.push(`[Auditoria da Ideia ${numIdeia}${refContexto}]: ${textoSanitizado}`);
-                            }
-                        }
-                    });
-                };
-
-                processarNos(an.subAnotacoes, '');
+                // Roteamento uniforme dos Nós de Ideia locais (mestre + correlacionados)
+                const bufferDiretrizesLocais = [];
+                const refCardMestre = _montarRefContextoCard(an, numIdeia);
+                (an.subAnotacoes || []).forEach(sub => {
+                    _rotearNoParaSecao(sub, refCardMestre, filaPreliminares, filaVereditosLocais, bufferDiretrizesLocais);
+                });
 
                 if (an.itensCorrelacionados && an.itensCorrelacionados.length > 0) {
-                    an.itensCorrelacionados.forEach((corr) => {
-                        if (corr.subAnotacoes && corr.subAnotacoes.length > 0) {
-                            processarNos(corr.subAnotacoes, ` (Anexo: ${corr.documento || 'Documento'})`);
-                        }
+                    an.itensCorrelacionados.forEach((corr, corrIdx) => {
+                        const refCardCorr = _montarRefContextoCard(corr, numIdeia, corrIdx);
+                        (corr.subAnotacoes || []).forEach(sub => {
+                            _rotearNoParaSecao(sub, refCardCorr, filaPreliminares, filaVereditosLocais, bufferDiretrizesLocais);
+                        });
                     });
                 }
 
-                // Só abre a tag se de fato houverem regras locais (evita a maldição da tag vazia)
-                if (bufferDiretrizesLocais.trim() !== '') {
-                    md += `<diretrizes_de_auditoria_do_assessor>\n${bufferDiretrizesLocais}</diretrizes_de_auditoria_do_assessor>\n`;
+                if (bufferDiretrizesLocais.length > 0) {
+                    linhasCard.push('');
+                    linhasCard.push('<diretrizes_de_auditoria_do_assessor>');
+                    linhasCard.push(bufferDiretrizesLocais.join('\n\n'));
+                    linhasCard.push('</diretrizes_de_auditoria_do_assessor>');
                 }
 
-                md += `</analise_de_evidencia>\n\n`;
+                linhasCard.push('</analise_de_evidencia>\n');
+                bufferMatriz.push(linhasCard.join('\n'));
             });
 
-            // [NOVO CÓDIGO: Trava de segurança no final do loop]
-            // Garante o fechamento da última tag de grupo aberta
             if (ultimaTeseExportada !== null) {
-                md += `</grupo_tese>\n\n`;
+                bufferMatriz.push('</grupo_tese>\n');
             }
         }
 
-        // 4. INJEÇÃO GLOBAL (Bordas do Payload)
-        if (barreirasAdmissibilidade.length > 0) {
-            md += `<barreiras_de_admissibilidade_dos_embargos>\n`;
-            md += `*Atenção IA: Resolva estes óbices (ex: intempestividade, inovação) ANTES de auditar o mérito dos embargos.*\n`;
-            md += barreirasAdmissibilidade.map(c => `* 🛑 ${c}`).join('\n') + '\n';
-            md += `</barreiras_de_admissibilidade_dos_embargos>\n\n`;
-        }
+        // ====================================================================
+        // FASE B — CONCATENAÇÃO ORDENADA DO DOCUMENTO FINAL O(1)
+        // ====================================================================
+        const partesDoc = [
+            `<!-- [ESQUEMA ${SCHEMA_EXPORT_VERSAO} — REGIMES EDITORIAIS E AUDITORIA DE EMBARGOS] -->`,
+            `# ${config.tituloTopico}: **${(topico.nome || 'Não Nomeado').toUpperCase()}**\n`
+        ];
 
-        if ((topico.veredito && topico.veredito.trim() !== '') || vereditosLocaisInjetados.length > 0) {
-            md += `<${config.tagVeredito}>\n`;
-            md += `*Atenção IA: As instruções abaixo ditam o resultado final da auditoria deste embargo.*\n`;
-            
-            if (topico.veredito && topico.veredito.trim() !== '') {
-                md += `[CONCLUSÃO OBRIGATÓRIA GERAL]: ${topico.veredito.replace(/\n/g, ' ')}\n`;
+        if (modoPrompt !== 'acervo') {
+            partesDoc.push(gerarLegendaRegimesRedacionais({ modo: 'completo', auditoria: auditoriaAtiva }));
+
+            partesDoc.push(
+                `<roteiro_diretor_llm>\n` +
+                `  <incidente_processual>Embargos de Declaração</incidente_processual>\n` +
+                `  <diretriz_cognitiva_vinculante>${config.diretrizIA}</diretriz_cognitiva_vinculante>\n` +
+                `</roteiro_diretor_llm>\n`
+            );
+
+            // Injeção objetiva dos dados do Contrato de Trabalho (quando preenchidos no Painel ED)
+            // Consome EXCLUSIVAMENTE getDados() (Parâmetros Oficiais); jamais lê getConfronto()
+            if (window.ContratoManager) {
+                const dadosContrato = window.ContratoManager.getDados();
+                const admissao = dadosContrato ? (dadosContrato.inicio || dadosContrato.admissao || '') : '';
+                const demissao = dadosContrato ? (dadosContrato.fim || dadosContrato.demissao || '') : '';
+                const ajuizamento = dadosContrato ? (dadosContrato.ajuizamento || '') : '';
+                const funcao = dadosContrato ? (dadosContrato.funcao || '') : '';
+
+                if (admissao || demissao || ajuizamento || funcao) {
+                    const formatarIsoBr = (iso) => {
+                        const arr = String(iso).split('-');
+                        return arr.length === 3 ? `${arr[2]}/${arr[1]}/${arr[0]}` : iso;
+                    };
+                    const contratoLinhas = ['<contexto_fatico_vinculo_empregaticio>'];
+                    if (funcao) {
+                        contratoLinhas.push(`  [Função Exercida]: ${_safeMD(funcao, ' ')}`);
+                    }
+                    if (admissao) {
+                        contratoLinhas.push(`  [Data de Admissão]: ${formatarIsoBr(admissao)}`);
+                    }
+                    if (demissao) {
+                        contratoLinhas.push(`  [Data de Demissão]: ${formatarIsoBr(demissao)}`);
+                    }
+                    if (ajuizamento) {
+                        contratoLinhas.push(`  [Data de Ajuizamento da Ação]: ${formatarIsoBr(ajuizamento)}`);
+                    }
+                    contratoLinhas.push('</contexto_fatico_vinculo_empregaticio>\n');
+                    partesDoc.push(contratoLinhas.join('\n'));
+                }
             }
-            
-            vereditosLocaisInjetados.forEach(v => {
-                md += `[CONCLUSÃO PARCIAL ESPECÍFICA]: ${v}\n`;
-            });
-            
-            md += `\n*Redija o dispositivo final (Acolher/Rejeitar, com ou sem efeito modificativo) obedecendo estritamente a este veredito.*\n`;
-            md += `</${config.tagVeredito}>\n`;
+
+            partesDoc.push(`## SEÇÃO I — ESCOPO DA AUDITORIA\n`);
+            partesDoc.push(_compilarPreambuloCondicional(topico, filaVereditosLocais));
+        } else {
+            const preambuloAcervo = _compilarPreambuloAcervo(topico, filaVereditosLocais);
+            if (preambuloAcervo) partesDoc.push(preambuloAcervo);
         }
 
-        return md;
+        // Barreiras de admissibilidade / prejudiciais (promovidas de globais, vícios, teses e locais)
+        const blocoPreliminares = _compilarBlocoPreliminares(filaPreliminares);
+        if (blocoPreliminares) partesDoc.push(blocoPreliminares);
+
+        // Diretrizes Globais
+        if (bufferGlobais.length > 0) {
+            partesDoc.push(
+                `<premissas_globais_da_auditoria>\n${bufferGlobais.join('\n\n')}\n</premissas_globais_da_auditoria>\n`
+            );
+        }
+
+        // Direcionamentos por Vício e por Tese
+        if (bufferViciosTeses.length > 0) {
+            partesDoc.push(
+                `<direcionamentos_por_vicio>\n${bufferViciosTeses.join('\n\n')}\n</direcionamentos_por_vicio>\n`
+            );
+        }
+
+        // Matriz de Higidez Estrutural
+        partesDoc.push(
+            `## SEÇÃO II — ${config.rotuloSeccao}\n` +
+            `*Atenção IA: Elementos processuais de contexto para auditoria do vício formal (vedado rejulgamento do mérito originário).*\n`
+        );
+        partesDoc.push(bufferMatriz.join('\n'));
+
+        return partesDoc.join('\n');
     }
 
     /**
@@ -815,37 +1184,49 @@ window.ExportManager = (function () {
         // Injeção Única no DOM (Alta Performance)
         container.innerHTML = htmlBuffer.join('');
 
-        container.addEventListener('click', function(e) {
-            const btnBorrachaTarget = e.target.closest('.trigger-borracha');
-            if (btnBorrachaTarget) {
-                e.preventDefault();
-                const docTipo = btnBorrachaTarget.getAttribute('data-doc-tipo');
-                const docNome = btnBorrachaTarget.getAttribute('data-doc-nome');
-                abrirModalFiltro(docTipo, docNome);
-            }
-        });
+        const chkExport = document.getElementById('chk-export-auditoria-critica');
+        if (chkExport) chkExport.checked = isAuditoriaCriticaAtiva();
+
+        if (container.dataset.exportEventsBound !== 'true') {
+            container.addEventListener('click', function(e) {
+                const btnBorrachaTarget = e.target.closest('.trigger-borracha');
+                if (btnBorrachaTarget) {
+                    e.preventDefault();
+                    const docTipo = btnBorrachaTarget.getAttribute('data-doc-tipo');
+                    const docNome = btnBorrachaTarget.getAttribute('data-doc-nome');
+                    abrirModalFiltro(docTipo, docNome);
+                }
+            });
+
+            container.addEventListener('change', function(e) {
+                if (e.target && e.target.classList.contains('export-control-checkbox')) {
+                    const btnAtual = document.getElementById('btn-gerar-arquivo-exportacao');
+                    if (!btnAtual) return;
+                    const totalChecked = container.querySelectorAll('.export-control-checkbox:checked').length;
+                    if (totalChecked === 0) {
+                        btnAtual.disabled = true;
+                        btnAtual.style.opacity = '0.4';
+                        btnAtual.style.cursor = 'not-allowed';
+                    } else {
+                        btnAtual.disabled = false;
+                        btnAtual.style.opacity = '1';
+                        btnAtual.style.cursor = 'pointer';
+                    }
+                }
+            });
+
+            container.dataset.exportEventsBound = 'true';
+        }
 
         document.getElementById('export-avancado-backdrop').style.display = 'block';
         document.getElementById('modal-exportacao-avancada').style.display = 'block';
 
         const btnExportar = document.getElementById('btn-gerar-arquivo-exportacao');
-        btnExportar.disabled = false;
-        btnExportar.style.opacity = '1';
-
-        container.addEventListener('change', function(e) {
-            if (e.target && e.target.classList.contains('export-control-checkbox')) {
-                const totalChecked = container.querySelectorAll('.export-control-checkbox:checked').length;
-                if (totalChecked === 0) {
-                    btnExportar.disabled = true;
-                    btnExportar.style.opacity = '0.4';
-                    btnExportar.style.cursor = 'not-allowed';
-                } else {
-                    btnExportar.disabled = false;
-                    btnExportar.style.opacity = '1';
-                    btnExportar.style.cursor = 'pointer';
-                }
-            }
-        });
+        if (btnExportar) {
+            btnExportar.disabled = false;
+            btnExportar.style.opacity = '1';
+            btnExportar.style.cursor = 'pointer';
+        }
     }
 
     function fecharPainelExportacao() {
@@ -996,11 +1377,13 @@ window.ExportManager = (function () {
                 conteudoFinal += gerarLembreteFinalHierarquia(topico);
             }
 
-            // 3. Fila de Downloads Visuais (Restrita à Matriz)
+            // 3. Fila de Downloads Visuais (Restrita à Matriz — sincronizada com mapa visual)
             const filaDeDownloads = [];
             if (incluirMatriz) {
-                topico.anotacoes.forEach((an, idx) => {
-                    const numIdeia = idx + 1;
+                const mapaVisuais = _construirMapaVisualExport(topico.anotacoes);
+                (topico.anotacoes || []).forEach((an, idx) => {
+                    if (_ehCheckpoint(an)) return;
+                    const numIdeia = mapaVisuais.get(idx);
                     if (an.tipo === 'imagem') {
                         filaDeDownloads.push({ dados: an.conteudo, nome: _gerarNomeArquivoImagem(topico.id, numIdeia) });
                     }
@@ -1128,10 +1511,12 @@ window.ExportManager = (function () {
 
                 _deps.exibirToast('Payload de ED gerado! Preparando imagens...', 'sucesso');
 
-                // 2. Prepara e dispara fila de imagens
+                // 2. Prepara e dispara fila de imagens (sincronizada com mapa visual)
                 const filaDeDownloads = [];
-                topicoAtivo.anotacoes.forEach((an, idx) => {
-                    const numIdeia = idx + 1;
+                const mapaVisuais = _construirMapaVisualExport(topicoAtivo.anotacoes);
+                (topicoAtivo.anotacoes || []).forEach((an, idx) => {
+                    if (_ehCheckpoint(an)) return;
+                    const numIdeia = mapaVisuais.get(idx);
                     if (an.tipo === 'imagem') {
                         filaDeDownloads.push({ dados: an.conteudo, nome: _gerarNomeArquivoImagem(topicoAtivo.id, numIdeia) });
                     }
@@ -1193,9 +1578,15 @@ window.ExportManager = (function () {
                 markdown: _gerarMarkdown(topicoAtivo, opcoes)
             };
         },
+        SCHEMA_EXPORT_VERSAO,
+        TITULO_SECAO_AUDITORIA,
+        REGIME_INTENCOES,
         CHAVE_TESE_SEM_NOME,
         enveloparTeorIntegral,
+        gerarLegendaRegimesRedacionais,
+        formatarNoEditorialMarkdown,
         gerarLembreteFinalHierarquia,
+        verificarAncorasLiteraisNoRascunho,
         isAuditoriaCriticaAtiva,
         setAuditoriaCriticaAtiva,
         abrirPainelExportacao, 

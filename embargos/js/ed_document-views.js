@@ -286,7 +286,10 @@ window.OutlineViewManager = (function() {
 window.MinutaViewManager = (function() {
     'use strict';
 
-    const INTENCOES_PERMITIDAS = ['comando', 'texto', 'premissa', 'preliminar', 'refutacao', 'jurisprudencia', 'degravacao', 'fundamentacao'];
+    const INTENCOES_PERMITIDAS = [
+        'comando', 'texto', 'premissa', 'preliminar',
+        'refutacao', 'jurisprudencia', 'degravacao', 'fundamentacao', 'veredito'
+    ];
 
     function abrir() {
         const activeId = TopicsManager.getActiveTabId();
@@ -437,62 +440,98 @@ window.MinutaViewManager = (function() {
         if (!topico) return;
 
         let md = `# Vício: ${topico.nome}\n\n`;
+
+        if (window.ExportManager && typeof window.ExportManager.gerarLegendaRegimesRedacionais === 'function') {
+            md += window.ExportManager.gerarLegendaRegimesRedacionais({ modo: 'somente_nos', auditoria: false }) + '\n';
+        }
+
         let nodesEncontrados = false;
 
-        function _processarNoMd(noItem) {
+        function _processarNoMd(noItem, refContexto = '') {
+            if (!noItem) return '';
             const intencao = noItem.intencao || 'premissa';
             if (!INTENCOES_PERMITIDAS.includes(intencao)) return '';
-            
+
+            const textoSeguro = String(noItem.texto || '').trim();
+            if (!textoSeguro) return '';
+
             nodesEncontrados = true;
-            let texto = noItem.texto.trim();
-            
-            if (intencao === 'comando') return `> **COMANDO / INSTRUÇÃO:**\n> ${texto}\n\n`;
-            if (intencao === 'jurisprudencia') return `> **JURISPRUDÊNCIA:**\n> ${texto}\n\n`;
-            if (intencao === 'degravacao') return `> **DESTAQUE DE PROVA ORAL:**\n> "${texto}"\n\n`;
-            if (intencao === 'fundamentacao') return `> **LEI SECA / NORMA:**\n> "${texto}"\n\n`;
-            
-            return `${texto}\n\n`;
+
+            if (window.ExportManager && typeof window.ExportManager.formatarNoEditorialMarkdown === 'function') {
+                return window.ExportManager.formatarNoEditorialMarkdown(noItem, refContexto) + '\n\n';
+            }
+
+            const sufixo = refContexto ? ` | Origem: ${refContexto}` : '';
+            return `- **[${intencao.toUpperCase()}${sufixo}]**\n${textoSeguro}\n\n`;
         }
 
         if (topico.diretrizesGlobais?.length > 0) {
-            topico.diretrizesGlobais.forEach(dir => { md += _processarNoMd(dir); });
+            topico.diretrizesGlobais.forEach(dir => { md += _processarNoMd(dir, 'Diretriz Global'); });
         }
 
         let ultimaTese = null;
         const viciosDiretrizesEmitidos = new Set();
         const tesesDiretrizesEmitidas = new Set();
+        let numVisual = 1;
 
-        topico.anotacoes.forEach(an => {
+        (topico.anotacoes || []).forEach(an => {
             if (an && an.tipo && an.tipo.startsWith('checkpoint')) return;
+
             const teseAtual = window.ThesisGuard
                 ? ThesisGuard.obterChaveTese(an)
                 : ((an.tese && an.tese.trim() !== '') ? an.tese.trim() : 'Tese Não Nomeada');
             const vicioRaw = an.vicio || topico.vicio || 'omissao';
-            
+
             if (teseAtual !== ultimaTese) {
                 if (!viciosDiretrizesEmitidos.has(vicioRaw)) {
                     viciosDiretrizesEmitidos.add(vicioRaw);
-                    topico.diretrizesPorVicio?.[vicioRaw]?.forEach(dir => { md += _processarNoMd(dir); });
+                    topico.diretrizesPorVicio?.[vicioRaw]?.forEach(dir => {
+                        md += _processarNoMd(dir, `Vício: ${vicioRaw}`);
+                    });
                 }
                 if (!tesesDiretrizesEmitidas.has(teseAtual)) {
                     tesesDiretrizesEmitidas.add(teseAtual);
-                    topico.diretrizesPorTese?.[teseAtual]?.forEach(dir => { md += _processarNoMd(dir); });
+                    topico.diretrizesPorTese?.[teseAtual]?.forEach(dir => {
+                        md += _processarNoMd(dir, `Tese: ${teseAtual}`);
+                    });
                 }
                 ultimaTese = teseAtual;
             }
-            
-            an.subAnotacoes?.forEach(sub => { md += _processarNoMd(sub); });
-            an.itensCorrelacionados?.forEach(corr => {
-                corr.subAnotacoes?.forEach(sub => { md += _processarNoMd(sub); });
+
+            const nAtual = numVisual++;
+            const docMestre = (an.documento || an.polo || 'Documento').trim();
+            const flMestre = an.pagina ? `, fl. ${an.pagina}` : '';
+            const refMestre = `Ideia ${nAtual} — ${docMestre}${flMestre}`;
+
+            an.subAnotacoes?.forEach(sub => { md += _processarNoMd(sub, refMestre); });
+
+            an.itensCorrelacionados?.forEach((corr, cIdx) => {
+                const docCorr = (corr.documento || corr.polo || 'Documento').trim();
+                const flCorr = corr.pagina ? `, fl. ${corr.pagina}` : '';
+                const refCorr = `Ideia ${nAtual}.${cIdx + 1} — ${docCorr}${flCorr}`;
+                corr.subAnotacoes?.forEach(sub => { md += _processarNoMd(sub, refCorr); });
             });
         });
+
+        // Garante emissão das diretrizes do vício principal mesmo quando ainda não há cartões na matriz
+        if (viciosDiretrizesEmitidos.size === 0 && topico.vicio && topico.diretrizesPorVicio?.[topico.vicio]) {
+            topico.diretrizesPorVicio[topico.vicio].forEach(dir => {
+                md += _processarNoMd(dir, `Vício: ${topico.vicio}`);
+            });
+        }
 
         if (!nodesEncontrados) {
             md += `*Nenhum nó de ideia elegível para a minuta foi encontrado neste tópico.*\n`;
         }
 
-        navigator.clipboard.writeText(md.trim()).then(() => {
-            exibirToast('Minuta copiada em Markdown para IA!', 'sucesso');
+        let payload = md.trim();
+
+        if (window.QuickRedactManager && typeof window.QuickRedactManager.sanitizarString === 'function') {
+            payload = window.QuickRedactManager.sanitizarString(payload);
+        }
+
+        navigator.clipboard.writeText(payload).then(() => {
+            exibirToast('Minuta de Embargos copiada em Markdown (com regimes editoriais e filtro LGPD)!', 'sucesso');
         });
     }
 

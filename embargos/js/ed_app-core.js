@@ -646,53 +646,8 @@ window.ShortcutManager = (function() {
 
 /* ================================================
    MÓDULO DE CONTRATO DE TRABALHO
+   Modularizado em: js/ed_contrato-manager.js (v2.2)
    ================================================ */
-window.ContratoManager = (function() {
-    let dadosContrato = {
-        admissao: '',
-        demissao: '',
-        funcao: ''
-    };
-
-    function abrirModal() {
-        const backdrop = document.getElementById('contrato-modal-backdrop');
-        const modal = document.getElementById('modal-contrato-trabalho');
-        if (!backdrop || !modal) return;
-
-        document.getElementById('input-contrato-admissao').value = dadosContrato.admissao;
-        document.getElementById('input-contrato-demissao').value = dadosContrato.demissao;
-        document.getElementById('input-contrato-funcao').value = dadosContrato.funcao;
-
-        backdrop.style.display = 'block';
-        modal.style.display = 'flex';
-    }
-
-    function fecharModal() {
-        document.getElementById('contrato-modal-backdrop').style.display = 'none';
-        document.getElementById('modal-contrato-trabalho').style.display = 'none';
-    }
-
-    function salvarContrato() {
-        dadosContrato.admissao = document.getElementById('input-contrato-admissao').value;
-        dadosContrato.demissao = document.getElementById('input-contrato-demissao').value;
-        dadosContrato.funcao = document.getElementById('input-contrato-funcao').value.trim();
-
-        const btnContrato = document.getElementById('btn-contrato-trabalho');
-        if (btnContrato) {
-            if (dadosContrato.admissao || dadosContrato.demissao || dadosContrato.funcao) {
-                btnContrato.classList.add('has-data');
-            } else {
-                btnContrato.classList.remove('has-data');
-            }
-        }
-
-        fecharModal();
-        if (typeof exibirToast === 'function') exibirToast('Parâmetros do contrato atualizados.', 'sucesso');
-        if (typeof salvarBackupAutomatico === 'function') salvarBackupAutomatico();
-    }
-
-    return { abrirModal, fecharModal, salvarContrato, getDados: () => dadosContrato };
-})();
 
 /* ================================================
    MÓDULO DE LAYOUT ERGONÔMICO (FAB LAYOUT MANAGER)
@@ -753,6 +708,24 @@ document.addEventListener("DOMContentLoaded", () => {
     
     if (window.FabLayoutManager) {
         FabLayoutManager.init();
+    }
+
+    if (window.TextCaptureManager) {
+        TextCaptureManager.init({
+            setTempHighlightState: ({ rects, paginaFisica }) => {
+                _tempHighlightState.rects = rects;
+                _tempHighlightState.paginaFisica = paginaFisica;
+            },
+            exibirToast: exibirToast,
+            abrirPopupClassificacao: (tipo, conteudo) => {
+                if (typeof exibirPopupClassificacao === 'function') {
+                    exibirPopupClassificacao(tipo, conteudo);
+                }
+            },
+            sincronizarHighlights: () => {
+                if (window.sincronizarHighlightsGerais) window.sincronizarHighlightsGerais();
+            }
+        });
     }
     
     if (window.PdfEngine) {
@@ -984,6 +957,13 @@ function trocarAba(aba) {
     const btnTexto = document.getElementById('btn-ferramenta-texto');
     if (btnTexto) btnTexto.style.display = isLeitura ? 'flex' : 'none';
 
+    const btnTextoComposto = document.getElementById('btn-ferramenta-texto-composto');
+    if (btnTextoComposto) btnTextoComposto.style.display = isLeitura ? 'flex' : 'none';
+
+    if (window.TextCaptureManager) {
+        TextCaptureManager.sincronizarVisibilidadeAba(aba);
+    }
+
     const btnRecorte = document.getElementById('btn-ferramenta-recorte');
     if (btnRecorte) btnRecorte.style.display = isLeitura ? 'flex' : 'none';
 
@@ -1067,7 +1047,7 @@ function atualizarStatusBackup(texto, ativa = false) {
 function habilitarFerramentasDeTrabalho() {
     const temPdfCarregado = Boolean(window.PdfEngine && PdfEngine.getPdfDoc());
 
-    ['btn-ferramenta-recorte', 'btn-ferramenta-texto', 'btn-novo-topico', 'btn-encerrar-sessao', 'btn-ferramenta-audio', 'btn-balanca-justica', 'btn-ferramenta-extrator', 'btn-visao-estruturada', 'btn-visao-minuta']
+    ['btn-ferramenta-recorte', 'btn-ferramenta-texto', 'btn-ferramenta-texto-composto', 'btn-novo-topico', 'btn-encerrar-sessao', 'btn-ferramenta-audio', 'btn-balanca-justica', 'btn-ferramenta-extrator', 'btn-visao-estruturada', 'btn-visao-minuta']
         .forEach(id => {
             const btn = document.getElementById(id);
             if (btn) btn.disabled = false;
@@ -1114,6 +1094,7 @@ function encerrarSessao() {
     if (window.AudioManager) window.AudioManager.encerrar();
     if (window.TimeTrackerManager) window.TimeTrackerManager.parar();
     if (window.TaskManager) window.TaskManager.setTarefasState([]);
+    if (window.TextCaptureManager) TextCaptureManager.limpar(true, true);
 
     topicos      = [];
     modoRetomada = false;
@@ -1125,6 +1106,11 @@ function encerrarSessao() {
     
     if (window.PdfEngine) window.PdfEngine.encerrar();
     BackupManager.encerrar();
+    if (window.ContratoManager) {
+        if (typeof window.ContratoManager.fecharModal === 'function') window.ContratoManager.fecharModal({ silencioso: true });
+        if (typeof window.ContratoManager.setDados === 'function') window.ContratoManager.setDados(null);
+        if (typeof window.ContratoManager.setConfronto === 'function') window.ContratoManager.setConfronto(null);
+    }
     if (window.ShortcutManager) window.ShortcutManager.reset();
 
     if (window.BalancaManager) {
@@ -1150,7 +1136,7 @@ function encerrarSessao() {
     }
     window._nomeArquivoSugerido = null; // Reseta nome do backup
 
-    ['btn-ferramenta-recorte', 'btn-ferramenta-texto', 'btn-novo-topico', 'btn-encerrar-sessao', 'btn-ferramenta-audio', 'btn-ferramenta-extrator', 'btn-visao-estruturada', 'btn-visao-minuta', 'btn-atualizar-pdf', 'btn-dividir-topico', 'btn-transitar-volumes']
+    ['btn-ferramenta-recorte', 'btn-ferramenta-texto', 'btn-ferramenta-texto-composto', 'btn-novo-topico', 'btn-encerrar-sessao', 'btn-ferramenta-audio', 'btn-ferramenta-extrator', 'btn-visao-estruturada', 'btn-visao-minuta', 'btn-atualizar-pdf', 'btn-dividir-topico', 'btn-transitar-volumes']
         .forEach(id => {
             const el = document.getElementById(id);
             if (el) {
@@ -1187,6 +1173,8 @@ async function retomarProcesso() {
         }
 
         const permissao = await handle.requestPermission({ mode: 'readwrite' });
+
+        if (window.TextCaptureManager) TextCaptureManager.limpar(true, true);
 
         topicos      = pacote.dados;
         modoRetomada = true;
@@ -1237,8 +1225,14 @@ async function novoProcesso(event) {
             return;
         }
         if (window.AudioManager) window.AudioManager.encerrar();
+        if (window.TextCaptureManager) TextCaptureManager.limpar(true, true);
         topicos = [];
-        BackupManager.encerrar(); 
+        BackupManager.encerrar();
+        if (window.ContratoManager) {
+            if (typeof window.ContratoManager.fecharModal === 'function') window.ContratoManager.fecharModal({ silencioso: true });
+            if (typeof window.ContratoManager.setDados === 'function') window.ContratoManager.setDados(null);
+            if (typeof window.ContratoManager.setConfronto === 'function') window.ContratoManager.setConfronto(null);
+        }
         if (window.ShortcutManager) window.ShortcutManager.reset();
         renderizarTopicos();
         atualizarStatusBackup('Aguardando...');
@@ -1426,95 +1420,15 @@ function renderizarTopicos() {
 }
 
 async function capturarTrechoSelecionado() {
-    const selection = window.getSelection();
-
-    // 1. Pipeline de Higienização de Texto
-    let selecaoTexto = selection.toString().trim();
-    selecaoTexto = window.JurisUtils.limparTextoPDF(selecaoTexto);
-
-    if (selecaoTexto.length <= 5) {
-        exibirToast('Selecione um trecho válido no documento.', 'aviso');
-        return;
-    }
-
-    const anchorNode = selection.anchorNode;
-    const focusNode = selection.focusNode;
-    if (!anchorNode || !focusNode) return;
-
-    const anchorContainer = (anchorNode.nodeType === 3 ? anchorNode.parentNode : anchorNode).closest('.pdf-page-container');
-    const focusContainer = (focusNode.nodeType === 3 ? focusNode.parentNode : focusNode).closest('.pdf-page-container');
-
-    if (!anchorContainer || !focusContainer) {
-        exibirToast('A seleção deve estar dentro do PDF.', 'aviso');
-        return;
-    }
-
-    const anchorPageNum = parseInt(anchorContainer.dataset.pageNumber, 10);
-    const focusPageNum = parseInt(focusContainer.dataset.pageNumber, 10);
-
-    const minPage = Math.min(anchorPageNum, focusPageNum);
-    const maxPage = Math.max(anchorPageNum, focusPageNum);
-
-    // 2. DOM Read Phase
-    const cachedPages = [];
-    for (let i = minPage; i <= maxPage; i++) {
-        const pageEl = document.querySelector(`.pdf-page-container[data-page-number="${i}"]`);
-        if (pageEl) {
-            cachedPages.push({ page: i, rect: pageEl.getBoundingClientRect() });
-        }
-    }
-
-    // [NOVO] Busca o limite de rodapé por conteúdo (não percentual fixo) para cada página envolvida
-    if (window.PdfEngine && typeof window.PdfEngine.obterLimiteRodape === 'function') {
-        await Promise.all(cachedPages.map(async (p) => {
-            p.limiteRodape = await window.PdfEngine.obterLimiteRodape(p.page);
-        }));
-    }
-
-    const range = selection.getRangeAt(0);
-    const rawRects = Array.from(range.getClientRects());
-    const mappedRects = [];
-
-    // 3. Compute Phase — descarta rects que caem na zona de assinatura
-    rawRects.forEach(rect => {
-        const midY = rect.top + (rect.height / 2);
-        const matchedPage = cachedPages.find(p => midY >= p.rect.top && midY <= p.rect.bottom);
-
-        if (matchedPage) {
-            const localTop = rect.top - matchedPage.rect.top;
-
-            // [NOVO] Se a linha estiver na zona de assinatura desta página específica, ignora o grifo
-            if (matchedPage.limiteRodape != null && localTop >= matchedPage.limiteRodape) {
-                return;
-            }
-
-            mappedRects.push({
-                page: matchedPage.page,
-                top: localTop,
-                left: rect.left - matchedPage.rect.left,
-                width: rect.width,
-                height: rect.height
-            });
-        }
-    });
-
-    if (mappedRects.length === 0) {
-        exibirToast('Seleção restrita à área de assinatura do documento.', 'aviso');
-        window.getSelection().removeAllRanges();
-        return;
-    }
-
-    // 4. Update de Estado
-    _tempHighlightState.rects = mappedRects;
-    _tempHighlightState.paginaFisica = anchorPageNum;
-
-    // 5. Restauração de UX
-    if (typeof exibirPopupClassificacao === 'function') {
-        const popupAnchorX = rawRects[rawRects.length - 1].left;
-        const popupAnchorY = rawRects[rawRects.length - 1].bottom + 10;
-        exibirPopupClassificacao('texto', selecaoTexto, popupAnchorX, popupAnchorY, anchorPageNum);
+    if (window.TextCaptureManager) {
+        return window.TextCaptureManager.capturarSimplesOuConcluir();
     }
 }
+
+window.acumularTrechoSelecionado = () => window.TextCaptureManager?.acumular();
+window.concluirCapturaComposta = () => window.TextCaptureManager?.concluir(false);
+window.desfazerUltimoTrechoComposto = () => window.TextCaptureManager?.desfazerUltimo();
+window.cancelarCapturaComposta = () => window.TextCaptureManager?.limpar(false);
 
 /* ================================================
    UTILITÁRIO DE INDEXAÇÃO FÍSICA VS VISUAL (CHECKPOINT-SAFE)
@@ -1633,13 +1547,31 @@ async function salvarAnotacao(tipo, conteudo, documento, polo, topicoId, comenta
     if (window.PdfEngine) {
         metaDaPagina = await PdfEngine.extrairMetadadosDaPagina(pageTarget);
     }
+
+    let rotuloPaginaFinal = window.PdfEngine ? PdfEngine.obterRotuloPagina(pageTarget) : pageTarget;
+
+    if (tipo === 'texto' && window.PdfEngine && Array.isArray(capturedHighlights) && capturedHighlights.length > 0) {
+        const paginasFisicasUnicas = [...new Set(capturedHighlights.map(r => r.page).filter(p => Number.isInteger(p)))];
+        if (paginasFisicasUnicas.length > 1) {
+            const saoConsecutivas = paginasFisicasUnicas.every((p, idx) => idx === 0 || p === paginasFisicasUnicas[idx - 1] + 1);
+            const rotulosUnicos = [...new Set(paginasFisicasUnicas.map(p => String(PdfEngine.obterRotuloPagina(p))))];
+
+            if (rotulosUnicos.length === 2 && saoConsecutivas) {
+                rotuloPaginaFinal = `${rotulosUnicos[0]}/${rotulosUnicos[1]}`;
+            } else if (rotulosUnicos.length > 2 && saoConsecutivas) {
+                rotuloPaginaFinal = `${rotulosUnicos[0]}-${rotulosUnicos[rotulosUnicos.length - 1]}`;
+            } else if (rotulosUnicos.length > 1) {
+                rotuloPaginaFinal = rotulosUnicos.join(', ');
+            }
+        }
+    }
     
     const novaExtracao = {
         uuid: 'id-' + Math.random().toString(36).substr(2, 9) + '-' + Date.now().toString(36),
         tipo,
         documento,
         polo,
-        pagina: window.PdfEngine ? PdfEngine.obterRotuloPagina(pageTarget) : pageTarget, 
+        pagina: rotuloPaginaFinal, 
         paginaFisica: pageTarget, 
         timestamp: Date.now(),
         conteudo: conteudo,
@@ -1714,6 +1646,10 @@ async function salvarAnotacao(tipo, conteudo, documento, polo, topicoId, comenta
 
     if (capturedHighlights && capturedPagina) {
         if (window.getSelection) window.getSelection().removeAllRanges();
+    }
+
+    if (tipo === 'texto' && window.TextCaptureManager && TextCaptureManager.temTrechos()) {
+        TextCaptureManager.limpar(true, true); // pularSync = true evita dupla renderização
     }
     
     if (window.sincronizarHighlightsGerais) window.sincronizarHighlightsGerais();
@@ -1815,6 +1751,7 @@ document.addEventListener('keydown', function (e) {
                 if (modal.id === 'modal-tarefas' && window.TaskManager) TaskManager.fecharModal();
                 if (modal.id === 'modal-notas-ocultas' && window.TopicsManager) TopicsManager.fecharModalNotasOcultas();
                 if (modal.id === 'modal-editar-tese' && typeof fecharModalTese === 'function') fecharModalTese();
+                if (modal.id === 'modal-contrato-config' && window.ContratoManager) ContratoManager.fecharModal();
                 
                 // NOVO: Delegar o fechamento ao TopicsManager (Tesoura e Trânsito entre Volumes)
                 if (modal.id === 'modal-predivisao' && window.TopicsManager) TopicsManager.fecharModalPreDivisao();
@@ -1835,8 +1772,9 @@ document.addEventListener('click', function (e) {
     // ARQUITETURA SSOT: Identifica se o clique nasceu dentro de um menu suspenso (portal)
     // O(log n) na subida da árvore DOM.
     const isClickInsidePortal = e.target.closest('.jcs-options-portal');
+    const isIgnoredOutside = e.target.closest('[data-ignore-outside="true"]');
     
-    if (popup && popup.style.display === 'flex' && !popup.contains(e.target) && !e.target.closest('.icon-btn') && !isClickInsidePortal) {
+    if (popup && popup.style.display === 'flex' && !popup.contains(e.target) && !e.target.closest('.icon-btn') && !isClickInsidePortal && !isIgnoredOutside) {
         if (typeof fecharPopupClassificacao === 'function') fecharPopupClassificacao();
     }
     
@@ -2991,6 +2929,7 @@ window.substituirPdfSessaoAtiva = async function(event) {
         const resultado = await PdfEngine.carregarPDF(file, { modo: 'substituicao' });
 
         if (resultado && resultado.ok) {
+            if (window.TextCaptureManager) TextCaptureManager.limpar(true, false);
             if (!document.getElementById('tab-leitura').classList.contains('active')) {
                 trocarAba('leitura');
             }

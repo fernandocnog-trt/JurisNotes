@@ -14,6 +14,25 @@ window.BackupManager = (function () {
     let _historicoPdf     = [];
     let _pendingUpdate    = null;
     let _fileHandle       = null;
+    let _sessaoSeq        = 0;      // Token monotônico de isolamento entre sessões
+    let _gravandoAgora    = false;  // Flag de serialização da fila de escrita
+    let _topicosPendentes = null;   // Último estado coalescido aguardando gravação
+    let _sessaoPendente   = null;   // Sessão dona do snapshot pendente
+    let _promessaProxima  = null;
+    let _resolverProxima  = null;
+    let _rejeitarProxima  = null;
+
+    function _limparFilaPendente() {
+        _topicosPendentes = null;
+        _sessaoPendente   = null;
+        if (_resolverProxima) {
+            const resolver = _resolverProxima;
+            _promessaProxima = null;
+            _resolverProxima = null;
+            _rejeitarProxima = null;
+            resolver();
+        }
+    }
 
     /* ── Utilitários Privados ────────────────────────── */
     async function _calcularHash(buffer) {
@@ -52,6 +71,10 @@ window.BackupManager = (function () {
                 versaoApp:         '7.2',
                 ultimaAtualizacao: Date.now(),
                 atalhosPdf:        atalhosCapturados,
+                contrato:          window.ContratoManager ? window.ContratoManager.getDados() : null,
+                contratoConfronto: window.ContratoManager && typeof window.ContratoManager.getConfronto === 'function'
+                                       ? window.ContratoManager.getConfronto()
+                                       : null,
                 tarefas:           window.TaskManager ? window.TaskManager.getTarefasState() : []
             },
             dados: topicos
@@ -282,6 +305,8 @@ window.BackupManager = (function () {
      * quanto a assinatura legada iniciarSessao(nomeArquivo, arrayBuffer).
      */
     async function iniciarSessao(nomeArquivo, opcoesOuBuffer) {
+        _sessaoSeq++;
+        _limparFilaPendente();
         _processoId = _extrairId(nomeArquivo);
 
         if (opcoesOuBuffer && typeof opcoesOuBuffer === 'object' && !(opcoesOuBuffer instanceof ArrayBuffer) && !ArrayBuffer.isView(opcoesOuBuffer)) {
@@ -307,6 +332,8 @@ window.BackupManager = (function () {
         const texto   = await arquivo.text();
         const pacote  = _desempacotar(texto);
 
+        _sessaoSeq++;
+        _limparFilaPendente();
         _processoId       = pacote.metadata.processoId || null;
         _processoCnj      = pacote.metadata.processoCnj || null;
         _pdfHash          = pacote.metadata.pdfHash || null;
@@ -326,6 +353,15 @@ window.BackupManager = (function () {
         
         if (window.BalancaManager) {
             window.BalancaManager.restoreHtmlState(pacote.metadata.balancaHtml || null);
+        }
+
+        if (window.ContratoManager) {
+            if (typeof window.ContratoManager.setDados === 'function') {
+                window.ContratoManager.setDados(pacote.metadata.contrato || null);
+            }
+            if (typeof window.ContratoManager.setConfronto === 'function') {
+                window.ContratoManager.setConfronto(pacote.metadata.contratoConfronto || null);
+            }
         }
 
         if (window.TaskManager) {
@@ -429,17 +465,68 @@ window.BackupManager = (function () {
         confirmarAtualizacaoPdf({ numPaginas, processoCnj, ultimaPaginaHash });
     }
 
-    async function salvar(topicos) {
-        if (!_fileHandle) {
-            console.warn('BackupManager.salvar(): nenhum arquivo de backup ativo.');
-            return;
-        }
-        const writable = await _fileHandle.createWritable();
-        await writable.write(_empacotar(topicos));
+    async function _escreverNoDisco(handle, payload) {
+        if (!handle) return;
+        const writable = await handle.createWritable();
+        await writable.write(payload);
         await writable.close();
     }
 
+    async function salvar(topicos) {
+        const handleAtual = _fileHandle;
+        if (!handleAtual) {
+            console.warn('BackupManager.salvar(): nenhum arquivo de backup ativo.');
+            return;
+        }
+
+        const sessaoSnapshot = _sessaoSeq;
+
+        // Se já há escrita em andamento, coalesce o estado mais recente desta mesma sessão
+        if (_gravandoAgora) {
+            _topicosPendentes = topicos;
+            _sessaoPendente   = sessaoSnapshot;
+            if (!_promessaProxima) {
+                _promessaProxima = new Promise((resolve, reject) => {
+                    _resolverProxima = resolve;
+                    _rejeitarProxima = reject;
+                });
+            }
+            return _promessaProxima;
+        }
+
+        // Fotografa o JSON sincronamente ANTES de qualquer await (imune a encerrar() concorrente)
+        const payloadInicial = _empacotar(topicos);
+        _gravandoAgora = true;
+
+        try {
+            await _escreverNoDisco(handleAtual, payloadInicial);
+        } finally {
+            while (_topicosPendentes && _fileHandle && _sessaoPendente === _sessaoSeq) {
+                const proximoHandle  = _fileHandle;
+                const proximoPayload = _empacotar(_topicosPendentes);
+                const resolver       = _resolverProxima;
+                const rejeitar       = _rejeitarProxima;
+
+                _topicosPendentes = null;
+                _sessaoPendente   = null;
+                _promessaProxima  = null;
+                _resolverProxima  = null;
+                _rejeitarProxima  = null;
+
+                try {
+                    await _escreverNoDisco(proximoHandle, proximoPayload);
+                    if (resolver) resolver();
+                } catch (err) {
+                    if (rejeitar) rejeitar(err);
+                }
+            }
+            _gravandoAgora = false;
+        }
+    }
+
     function encerrar() {
+        _sessaoSeq++;
+        _limparFilaPendente();
         _processoId       = null;
         _processoCnj      = null;
         _pdfHash          = null;
@@ -448,6 +535,14 @@ window.BackupManager = (function () {
         _historicoPdf     = [];
         _pendingUpdate    = null;
         _fileHandle       = null;
+        if (window.ContratoManager) {
+            if (typeof window.ContratoManager.setDados === 'function') {
+                window.ContratoManager.setDados(null);
+            }
+            if (typeof window.ContratoManager.setConfronto === 'function') {
+                window.ContratoManager.setConfronto(null);
+            }
+        }
     }
 
     function getProcessoId()   { return _processoId; }
