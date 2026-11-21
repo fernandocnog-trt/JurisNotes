@@ -10,9 +10,28 @@ window.BackupManager = (function () {
     'use strict';
 
     /* ── Estado Privado ──────────────────────────────── */
-    let _processoId  = null;   // Nome-base canônico do arquivo (sem extensão, minúsculas)
-    let _pdfHash     = null;   // Hash SHA-256 hex do binário do PDF (o "cadeado")
-    let _fileHandle  = null;   // FileSystemFileHandle do .json de backup ativo
+    let _processoId       = null;   // Nome-base canônico do arquivo (sem extensão, minúsculas)
+    let _pdfHash          = null;   // Hash SHA-256 hex do binário do PDF (o "cadeado")
+    let _fileHandle       = null;   // FileSystemFileHandle do .json de backup ativo
+    let _sessaoSeq        = 0;      // Token monotônico de isolamento entre sessões
+    let _gravandoAgora    = false;  // Flag de serialização da fila de escrita
+    let _topicosPendentes = null;   // Último estado coalescido aguardando gravação
+    let _sessaoPendente   = null;   // Sessão dona do snapshot pendente
+    let _promessaProxima  = null;
+    let _resolverProxima  = null;
+    let _rejeitarProxima  = null;
+
+    function _limparFilaPendente() {
+        _topicosPendentes = null;
+        _sessaoPendente   = null;
+        if (_resolverProxima) {
+            const resolver = _resolverProxima;
+            _promessaProxima = null;
+            _resolverProxima = null;
+            _rejeitarProxima = null;
+            resolver();
+        }
+    }
 
     /* ── Utilitários Privados ────────────────────────── */
 
@@ -69,6 +88,9 @@ window.BackupManager = (function () {
                 ultimaAtualizacao: Date.now(),
                 atalhosPdf:        atalhosCapturados,
                 contrato:          window.ContratoManager ? window.ContratoManager.getDados() : null,
+                contratoConfronto: window.ContratoManager && typeof window.ContratoManager.getConfronto === 'function'
+                                       ? window.ContratoManager.getConfronto()
+                                       : null,
                 tarefas:           window.TaskManager ? window.TaskManager.getTarefasState() : []
             },
             dados: topicos
@@ -308,6 +330,8 @@ window.BackupManager = (function () {
      * @param {ArrayBuffer} arrayBuffer  Binário completo do PDF (do FileReader)
      */
     async function iniciarSessao(nomeArquivo, arrayBuffer) {
+        _sessaoSeq++;
+        _limparFilaPendente();
         _processoId = _extrairId(nomeArquivo);
         _pdfHash    = await _calcularHash(arrayBuffer);
         _fileHandle = null; // Preenchido por setFileHandle() após showSaveFilePicker()
@@ -326,7 +350,9 @@ window.BackupManager = (function () {
         const texto   = await arquivo.text();
         const pacote  = _desempacotar(texto); // Lança erro se estrutura inválida
 
-        // Restaura metadados no estado privado
+        // Restaura metadados no estado privado com isolamento de sessão
+        _sessaoSeq++;
+        _limparFilaPendente();
         _processoId  = pacote.metadata.processoId;
         _pdfHash     = pacote.metadata.pdfHash;
         _fileHandle  = handle;
@@ -345,6 +371,9 @@ window.BackupManager = (function () {
 
         if (window.ContratoManager) {
             window.ContratoManager.setDados(pacote.metadata.contrato || null);
+            if (typeof window.ContratoManager.setConfronto === 'function') {
+                window.ContratoManager.setConfronto(pacote.metadata.contratoConfronto || null);
+            }
         }
 
         // Restaura as tarefas na interface (Lida com backups legados via fallback para [])
@@ -373,19 +402,74 @@ window.BackupManager = (function () {
     }
 
     /**
-     * Serializa topicos[] e grava no arquivo de backup ativo.
+     * Executa a escrita física em disco usando handle e payload já fotografados.
+     * @param {FileSystemFileHandle} handle
+     * @param {string} payload
+     */
+    async function _escreverNoDisco(handle, payload) {
+        if (!handle) return;
+        const writable = await handle.createWritable();
+        await writable.write(payload);
+        await writable.close();
+    }
+
+    /**
+     * Serializa topicos[] sincronamente e grava no arquivo de backup ativo
+     * através de fila coalescente blindada contra TOCTOU e out-of-order commits.
      * Silencioso em caso de sucesso; lança erro para a UI tratar falhas.
      *
      * @param {Array} topicos  Array topicos[] do estado global de app.js
      */
     async function salvar(topicos) {
-        if (!_fileHandle) {
+        const handleAtual = _fileHandle;
+        if (!handleAtual) {
             console.warn('BackupManager.salvar(): nenhum arquivo de backup ativo.');
             return;
         }
-        const writable = await _fileHandle.createWritable();
-        await writable.write(_empacotar(topicos));
-        await writable.close();
+
+        const sessaoSnapshot = _sessaoSeq;
+
+        // Se já há escrita em andamento, coalesce o estado mais recente desta mesma sessão
+        if (_gravandoAgora) {
+            _topicosPendentes = topicos;
+            _sessaoPendente   = sessaoSnapshot;
+            if (!_promessaProxima) {
+                _promessaProxima = new Promise((resolve, reject) => {
+                    _resolverProxima = resolve;
+                    _rejeitarProxima = reject;
+                });
+            }
+            return _promessaProxima;
+        }
+
+        // Fotografa o JSON sincronamente ANTES de qualquer await (imune a encerrar() concorrente)
+        const payloadInicial = _empacotar(topicos);
+        _gravandoAgora = true;
+
+        try {
+            await _escreverNoDisco(handleAtual, payloadInicial);
+        } finally {
+            while (_topicosPendentes && _fileHandle && _sessaoPendente === _sessaoSeq) {
+                const proximoHandle  = _fileHandle;
+                const proximoPayload = _empacotar(_topicosPendentes);
+                const resolver       = _resolverProxima;
+                const rejeitar       = _rejeitarProxima;
+
+                _topicosPendentes = null;
+                _sessaoPendente   = null;
+                _promessaProxima  = null;
+                _resolverProxima  = null;
+                _rejeitarProxima  = null;
+
+                try {
+                    await _escreverNoDisco(proximoHandle, proximoPayload);
+                    if (resolver) resolver();
+                } catch (err) {
+                    if (rejeitar) rejeitar(err);
+                }
+            }
+            _gravandoAgora = false;
+        }
     }
 
     /**
@@ -393,10 +477,17 @@ window.BackupManager = (function () {
      * Chamado por encerrarSessao() e novoProcesso() em app.js.
      */
     function encerrar() {
+        _sessaoSeq++;
+        _limparFilaPendente();
         _processoId = null;
         _pdfHash    = null;
         _fileHandle = null;
-        if (window.ContratoManager) window.ContratoManager.setDados(null);
+        if (window.ContratoManager) {
+            window.ContratoManager.setDados(null);
+            if (typeof window.ContratoManager.setConfronto === 'function') {
+                window.ContratoManager.setConfronto(null);
+            }
+        }
     }
 
     /* ── Getters e Setter ────────────────────────────── */

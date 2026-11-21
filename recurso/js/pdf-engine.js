@@ -188,8 +188,9 @@ window.PdfEngine = (function () {
             for (const item of textContent.items) {
                 if (REGEX_RODAPE_ASSINATURA.test(item.str)) {
                     const [, vy] = viewport.convertToViewportPoint(item.transform[4], item.transform[5]);
-                    // Pequena margem de segurança para não cortar a última linha de conteúdo legítimo
-                    const topoDoItem = vy - 4;
+                    // Converte a altura real do glifo (pts PDF) para a escala 1.5 do viewport para obter o topo da linha
+                    const alturaPts = Math.abs(item.height || item.transform[3] || 10);
+                    const topoDoItem = vy - (alturaPts * 1.5) - 2;
                     if (limiteY === null || topoDoItem < limiteY) limiteY = topoDoItem;
                 }
             }
@@ -310,6 +311,8 @@ window.PdfEngine = (function () {
             pdfjsLib.getDocument(typedarray).promise
                 .then(async pdf => {
                     _pdfDoc = pdf;
+                    _pageMetadataCache.clear();
+                    _footerBoundaryCache.clear();
                     document.getElementById('total-page-display').textContent = pdf.numPages;
 
                     try {
@@ -686,6 +689,33 @@ window.PdfEngine = (function () {
             });
         }
     });
+
+    // Renderização de trechos provisórios da Captura Composta (TextCaptureManager)
+    if (window.TextCaptureManager && typeof window.TextCaptureManager.obterHighlightsProvisoriosParaPagina === 'function') {
+        const blocosProvisorios = window.TextCaptureManager.obterHighlightsProvisoriosParaPagina(pageNum);
+        blocosProvisorios.forEach(bloco => {
+            bloco.rects.forEach(rect => {
+                const marker = document.createElement('div');
+                marker.className = 'pdf-highlight-rect is-draft-capture';
+                marker.style.top = rect.top + 'px';
+                marker.style.left = rect.left + 'px';
+                marker.style.width = rect.width + 'px';
+                marker.style.height = rect.height + 'px';
+                highlightLayerDiv.appendChild(marker);
+            });
+
+            if (bloco.mostrarBadge && bloco.rects.length > 0) {
+                const firstRect = bloco.rects[0];
+                const draftBadge = document.createElement('div');
+                draftBadge.className = 'pdf-annotation-badge is-draft-badge';
+                draftBadge.style.top = (firstRect.top + (firstRect.height / 2)) + 'px';
+                draftBadge.style.transform = 'translateY(-50%)';
+                draftBadge.title = `Trecho ${bloco.ordem} acumulado (aguardando conclusão)`;
+                draftBadge.textContent = `+${bloco.ordem}`;
+                highlightLayerDiv.appendChild(draftBadge);
+            }
+        });
+    }
 }
 
     function sincronizarHighlightsGerais() {
@@ -749,6 +779,7 @@ window.PdfEngine = (function () {
         _pdfDoc = null;
         _pageLabelsGlobais = null;
         _pageMetadataCache.clear();
+        _footerBoundaryCache.clear();
         _currentPage = 1;
     }
 

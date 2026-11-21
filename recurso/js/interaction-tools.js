@@ -732,10 +732,11 @@ function fecharPopupClassificacao() {
 }
 
 function exibirPopupClassificacao(tipo, conteudo) {
-    window.toggleModoFoco(true);
     if (topicos.length === 0) {
-        exibirToast('Crie pelo menos um Tópico Recursal.', 'aviso'); return;
+        exibirToast('Crie pelo menos um Tópico Recursal.', 'aviso');
+        return;
     }
+    window.toggleModoFoco(true);
     pendingTipo = tipo;
     pendingConteudo = conteudo;
 
@@ -1633,74 +1634,152 @@ window.salvarRascunhoContextoDebounced = _debounce(function() {
     }
 }, 800);
 
-/* --- CONTROLES DE HIERARQUIA EPISTEMOLÓGICA E AUDITORIA CRÍTICA IA --- */
+/* --- CONTROLES DE HIERARQUIA EPISTEMOLÓGICA E AUDITORIA CRÍTICA IA (JN-5.0) --- */
+const _FALLBACK_CATEGORIA_INTENCAO = Object.freeze({
+    texto: 'literal',
+    jurisprudencia: 'literal',
+    degravacao: 'literal',
+    comando: 'ordem',
+    veredito: 'ordem',
+    premissa: 'livre',
+    refutacao: 'livre',
+    preliminar: 'livre',
+    fundamentacao: 'livre',
+    fallback: 'livre',
+    nota: 'excluido'
+});
+
+function _resolverCategoriaEditorial(intencao) {
+    const chave = intencao || 'premissa';
+    const tabelaSSOT = window.ExportManager?.REGIME_INTENCOES;
+    if (tabelaSSOT && tabelaSSOT[chave]) return tabelaSSOT[chave].categoriaUI;
+    return _FALLBACK_CATEGORIA_INTENCAO[chave] || 'livre';
+}
+
 function _atualizarBadgeDiagnosticoEpistemologico(topico) {
     const badge = document.getElementById('epistemic-stats-badge');
     if (!badge || !topico) return;
 
-    const chaveSemNome = (window.ExportManager && window.ExportManager.CHAVE_TESE_SEM_NOME) || 'Tese Não Nomeada';
     const anotacoesReais = (topico.anotacoes || []).filter(a => a && !(a.tipo && a.tipo.startsWith('checkpoint')));
 
     let totalCartoesContexto = 0;
-    let totalNosIdeia = 0;
-    let ideiasSemDiretriz = 0;
+    let totalLiterais = 0;
+    let totalOrdens = 0;
+    let totalLivres = 0;
 
-    const globaisValidas = (topico.diretrizesGlobais || []).filter(d => d && d.intencao !== 'nota');
-    totalNosIdeia += globaisValidas.length;
+    const contabilizarNo = (no) => {
+        if (!no || no.intencao === 'nota') return;
+        const categoria = _resolverCategoriaEditorial(no.intencao);
+        if (categoria === 'literal') totalLiterais++;
+        else if (categoria === 'ordem') totalOrdens++;
+        else if (categoria === 'livre') totalLivres++;
+    };
 
+    (topico.diretrizesGlobais || []).forEach(contabilizarNo);
     if (topico.diretrizesPorTese) {
         Object.values(topico.diretrizesPorTese).forEach(lista => {
-            if (Array.isArray(lista)) {
-                totalNosIdeia += lista.filter(d => d && d.intencao !== 'nota').length;
-            }
+            if (Array.isArray(lista)) lista.forEach(contabilizarNo);
         });
     }
 
     anotacoesReais.forEach(an => {
         totalCartoesContexto += 1;
+        (an.subAnotacoes || []).forEach(contabilizarNo);
         const corrList = Array.isArray(an.itensCorrelacionados) ? an.itensCorrelacionados : [];
         totalCartoesContexto += corrList.length;
-
-        const nosLocaisMestre = (an.subAnotacoes || []).filter(s => s && s.intencao !== 'nota').length;
-        let nosLocaisCorr = 0;
-        corrList.forEach(c => {
-            nosLocaisCorr += (c.subAnotacoes || []).filter(s => s && s.intencao !== 'nota').length;
-        });
-
-        totalNosIdeia += nosLocaisMestre + nosLocaisCorr;
-
-        const chaveTese = (an.tese && an.tese.trim() !== '') ? an.tese : chaveSemNome;
-        const nosDaTese = (topico.diretrizesPorTese && Array.isArray(topico.diretrizesPorTese[chaveTese]))
-            ? topico.diretrizesPorTese[chaveTese].filter(d => d && d.intencao !== 'nota').length
-            : 0;
-
-        if ((nosLocaisMestre + nosLocaisCorr + nosDaTese + globaisValidas.length) === 0 && !(topico.veredito && topico.veredito.trim() !== '')) {
-            ideiasSemDiretriz += 1;
-        }
+        corrList.forEach(c => (c.subAnotacoes || []).forEach(contabilizarNo));
     });
 
-    if (totalNosIdeia === 0 && !(topico.veredito && topico.veredito.trim() !== '')) {
-        badge.classList.add('has-warning');
-        badge.textContent = `⚠️ ${totalCartoesContexto} cartão(ões) de contexto e 0 Nós de Ideia vinculantes. Adicione diretrizes para guiar a IA.`;
-    } else if (ideiasSemDiretriz > 0) {
-        badge.classList.add('has-warning');
-        badge.textContent = `🛡️ ${totalCartoesContexto} cartão(ões) (Contexto) | ${totalNosIdeia} Nó(s) de Ideia • (${ideiasSemDiretriz} ideia(s) sem nó específico)`;
-    } else {
-        badge.classList.remove('has-warning');
-        badge.textContent = `🛡️ ${totalCartoesContexto} cartão(ões) = Contexto Não-Vinculante | ${totalNosIdeia} Nó(s) de Ideia = Verdade Absoluta`;
+    const preambuloPreenchido = ['alegacoes', 'fundamentos', 'veredito']
+        .filter(k => (topico[k] || '').trim() !== '').length;
+    const preambuloEmAberto = 3 - preambuloPreenchido;
+    const vereditoAberto = !(topico.veredito && topico.veredito.trim() !== '');
+
+    const fragment = document.createDocumentFragment();
+    const grid = document.createElement('div');
+    grid.className = 'epistemic-tiers-grid';
+
+    const criarPill = (classe, texto, tooltip) => {
+        const span = document.createElement('span');
+        span.className = `epistemic-tier-pill ${classe}`;
+        span.textContent = texto;
+        span.title = tooltip;
+        return span;
+    };
+
+    grid.appendChild(criarPill(
+        'epistemic-tier-pill--literal',
+        `🔒 Literais: ${totalLiterais + preambuloPreenchido}`,
+        `Preâmbulo preenchido (${preambuloPreenchido}) + Texto Fixo, Jurisprudência e Degravação (${totalLiterais})`
+    ));
+
+    if (totalOrdens > 0) {
+        grid.appendChild(criarPill(
+            'epistemic-tier-pill--order',
+            `🎯 Ordens: ${totalOrdens}`,
+            'Comandos Diretos e Vereditos Parciais (executados sem transcrição do comando)'
+        ));
     }
+
+    grid.appendChild(criarPill(
+        'epistemic-tier-pill--flexible',
+        `✍️ Livres: ${totalLivres}`,
+        'Premissas, Refutações, Filtros e Lei Seca (IA desenvolve com fluidez e coesão)'
+    ));
+
+    if (preambuloEmAberto > 0) {
+        grid.appendChild(criarPill(
+            'epistemic-tier-pill--open',
+            `✨ Delegados: ${preambuloEmAberto}${vereditoAberto ? ' (Veredito)' : ''}`,
+            'Campos vazios do preâmbulo serão elaborados pela IA com justificativa na auditoria'
+        ));
+    }
+
+    grid.appendChild(criarPill(
+        'epistemic-tier-pill--context',
+        `📂 Contexto: ${totalCartoesContexto}`,
+        'Cartões de peças e provas dos autos (referência não-vinculante)'
+    ));
+
+    fragment.appendChild(grid);
+
+    const semDiretrizes = (totalLiterais + totalOrdens + totalLivres) === 0 && vereditoAberto;
+    badge.classList.toggle('has-warning', semDiretrizes);
+
+    if (semDiretrizes) {
+        const alerta = document.createElement('div');
+        alerta.className = 'epistemic-warning-note';
+        alerta.textContent = '⚠️ Nenhum Nó de Ideia ou Veredito definido: a IA receberá apenas os cartões de contexto.';
+        fragment.appendChild(alerta);
+    }
+
+    badge.replaceChildren(fragment);
 }
 
-window.alternarAuditoriaCriticaIA = function(ativo) {
-    if (!window.ExportManager) return;
+window.sincronizarCheckboxesAuditoria = function(estado) {
+    const valor = Boolean(estado);
+    const chkContexto = document.getElementById('chk-auditoria-critica-ia');
+    const chkExport = document.getElementById('chk-export-auditoria-critica');
+    if (chkContexto && chkContexto.checked !== valor) chkContexto.checked = valor;
+    if (chkExport && chkExport.checked !== valor) chkExport.checked = valor;
+};
 
+window.alternarAuditoriaCriticaIA = function(ativo) {
+    const estado = Boolean(ativo);
+    window.sincronizarCheckboxesAuditoria(estado);
+
+    if (!window.ExportManager) return;
     if (typeof window.ExportManager.setAuditoriaCriticaAtiva === 'function') {
-        window.ExportManager.setAuditoriaCriticaAtiva(Boolean(ativo));
+        window.ExportManager.setAuditoriaCriticaAtiva(estado);
     }
+
+    // Early exit: não recompila #ctx-diretrizes nem dispara radar LGPD com o modal oculto
+    const modalContexto = document.getElementById('modal-gerador-contexto');
+    if (!modalContexto || modalContexto.style.display !== 'flex') return;
 
     const dadosTopico = window.ExportManager.obterDadosDoTopicoAtivo({
         modo: 'minuta',
-        auditoria: Boolean(ativo)
+        auditoria: estado
     });
 
     if (dadosTopico && typeof dadosTopico.markdown === 'string') {
@@ -1711,6 +1790,53 @@ window.alternarAuditoriaCriticaIA = function(ativo) {
             if (elDir) elDir.value = dadosTopico.markdown;
         }
     }
+
+    const activeId = typeof TopicsManager !== 'undefined' ? TopicsManager.getActiveTabId() : null;
+    const topicoAtivo = activeId ? topicos.find(t => t.id === activeId) : null;
+    if (topicoAtivo) _atualizarBadgeDiagnosticoEpistemologico(topicoAtivo);
+};
+
+window.verificarFidelidadeRascunhoIA = function() {
+    const rascunho = document.getElementById('ctx-rascunho-ia')?.value || '';
+    const boxResultado = document.getElementById('ctx-resultado-verificacao-literal');
+    if (!rascunho.trim()) {
+        exibirToast('Cole o rascunho gerado pela IA no campo 4 antes de conferir.', 'aviso');
+        return;
+    }
+    if (!window.ExportManager?.verificarAncorasLiteraisNoRascunho) return;
+
+    const activeId = typeof TopicsManager !== 'undefined' ? TopicsManager.getActiveTabId() : null;
+    const topicoAtivo = activeId ? topicos.find(t => t.id === activeId) : null;
+    const res = window.ExportManager.verificarAncorasLiteraisNoRascunho(topicoAtivo, rascunho);
+
+    if (!boxResultado) return;
+    boxResultado.replaceChildren();
+    boxResultado.style.display = 'block';
+
+    if (res.total === 0) {
+        boxResultado.className = 'literal-check-result is-neutral';
+        boxResultado.textContent = 'Este tópico não possui trechos literais obrigatórios cadastrados.';
+        return;
+    }
+
+    if (res.ausentes.length === 0) {
+        boxResultado.className = 'literal-check-result is-ok';
+        boxResultado.textContent = `✔ Todos os ${res.total} trecho(s) literal(is) foram preservados integralmente no rascunho.`;
+        return;
+    }
+
+    boxResultado.className = 'literal-check-result is-alert';
+    const titulo = document.createElement('strong');
+    titulo.textContent = `⚠️ ${res.ausentes.length} de ${res.total} trecho(s) literal(is) não localizado(s) exatamente (revisar possível paráfrase):`;
+    boxResultado.appendChild(titulo);
+
+    const ul = document.createElement('ul');
+    res.ausentes.forEach(item => {
+        const li = document.createElement('li');
+        li.textContent = `${item.origem}: "${item.preview}${item.preview.length >= 90 ? '…' : ''}"`;
+        ul.appendChild(li);
+    });
+    boxResultado.appendChild(ul);
 };
 
 /* --- ABERTURA ASSÍNCRONA DO MODAL DE CONTEXTO (COM EXTRAÇÃO JIT) --- */
@@ -1720,8 +1846,13 @@ window.abrirModalGeradorContexto = async function() {
     const auditoriaAtiva = typeof ExportManager.isAuditoriaCriticaAtiva === 'function'
         ? ExportManager.isAuditoriaCriticaAtiva()
         : true;
-    const chkAuditoria = document.getElementById('chk-auditoria-critica-ia');
-    if (chkAuditoria) chkAuditoria.checked = auditoriaAtiva;
+    window.sincronizarCheckboxesAuditoria(auditoriaAtiva);
+
+    const boxVerifLiteral = document.getElementById('ctx-resultado-verificacao-literal');
+    if (boxVerifLiteral) {
+        boxVerifLiteral.style.display = 'none';
+        boxVerifLiteral.replaceChildren();
+    }
 
     const dadosTopico = ExportManager.obterDadosDoTopicoAtivo({
         modo: 'minuta',
