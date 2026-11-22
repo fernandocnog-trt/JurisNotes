@@ -106,20 +106,31 @@ window.TextCaptureManager = (function () {
             const matchedPage = cachedPages.find(p => midY >= p.rect.top && midY <= p.rect.bottom);
 
             if (matchedPage) {
-                const localTop = rect.top - matchedPage.rect.top;
-                const localMidY = localTop + (rect.height / 2);
+                const rawLocalRect = {
+                    page: matchedPage.page,
+                    top: rect.top - matchedPage.rect.top,
+                    left: rect.left - matchedPage.rect.left,
+                    width: rect.width,
+                    height: rect.height
+                };
 
-                // Descarta linhas cujo centro vertical cai na zona de assinatura eletrônica
-                if (matchedPage.limiteRodape != null && localMidY >= matchedPage.limiteRodape) {
+                const baseRect = (window.PdfEngine && typeof PdfEngine.normalizarRectParaBase === 'function')
+                    ? PdfEngine.normalizarRectParaBase(matchedPage.page, rawLocalRect)
+                    : rawLocalRect;
+
+                const baseMidY = baseRect.top + (baseRect.height / 2);
+
+                // Avalia o limite de assinatura eletrônica no espaço canônico (imune a zoom e rotação)
+                if (matchedPage.limiteRodape != null && baseMidY >= matchedPage.limiteRodape) {
                     return;
                 }
 
                 mappedRects.push({
                     page: matchedPage.page,
-                    top: localTop,
-                    left: rect.left - matchedPage.rect.left,
-                    width: rect.width,
-                    height: rect.height
+                    top: baseRect.top,
+                    left: baseRect.left,
+                    width: baseRect.width,
+                    height: baseRect.height
                 });
             }
         });

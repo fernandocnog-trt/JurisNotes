@@ -5,6 +5,11 @@
 window.PdfEngine = (function () {
     'use strict';
 
+    // Constantes do Motor de Visualização por Página
+    const BASE_SCALE = 1.5;
+    const ZOOM_STEPS = [0.6, 0.75, 0.9, 1.0, 1.25, 1.5, 1.75, 2.0, 2.5];
+    const MAX_CANVAS_PIXELS = 16777216; // Teto 4096x4096 px (proteção de VRAM em telas HiDPI/4K)
+
     // Estado Privado do Motor
     let _pdfDoc = null;
     let _currentPage = 1;
@@ -15,11 +20,23 @@ window.PdfEngine = (function () {
     let _pdfDestroyObserver = null;
     const _activePages = new Set();
 
+    const _pageViewOverrides = new Map();  // Map<pageNum, { zoom: number, rotation: number }>
+    const _pageBaseDimensions = new Map(); // Map<pageNum, { width: number, height: number }>
+    const _pendingTransforms = new Map();  // Fila coalescida por página
+    const _scrollAnchors = new Map();      // Map<pageNum, { ratioY, ratioX, baseRotation }>
+
+    let _transformRafId = null;
+    let _paginaAlvoTravada = null;
+    let _sincronizarPaginaNoScroll = false;
+    let _scrollSyncRafId = null;
+    let _navListenersBound = false;
+
     // Dependências Injetadas pelo app.js (Inversão de Controle)
     let _deps = {
         getTopicos: () => [],
         exibirToast: () => {},
         atualizarDisplayPaginador: () => {},
+        onPageViewStateChange: () => {},
         validarPdf: async () => true,
         iniciarSessaoBackup: async () => {},
         habilitarFerramentas: () => {},
@@ -71,14 +88,21 @@ window.PdfEngine = (function () {
         goTo: function(pageNum) {
             const pageContainer = document.querySelector(`.pdf-page-container[data-page-number="${pageNum}"]`);
             const scrollContainer = document.getElementById('pdf-container');
-            
+
             if (pageContainer && scrollContainer) {
+                _liberarTravaPaginaAlvo(false);
+                _currentPage = pageNum;
+
                 const containerRect = scrollContainer.getBoundingClientRect();
                 const pageRect = pageContainer.getBoundingClientRect();
                 const targetScrollTop = scrollContainer.scrollTop + (pageRect.top - containerRect.top) - 16;
-                
-                scrollContainer.scrollTo({ top: targetScrollTop, behavior: 'auto' });
-                _deps.exibirToast(`Acessando fl. ${pageNum} via sumário.`, 'sucesso');
+
+                // Zera left explicitamente para eliminar scrollLeft residual herdado de páginas ampliadas
+                scrollContainer.scrollTo({ top: Math.max(0, targetScrollTop), left: 0, behavior: 'auto' });
+
+                _deps.atualizarDisplayPaginador(pageNum);
+                _notificarEstadoVisualizacao(pageNum);
+                _deps.exibirToast(`Acessando fl. ${getDisplayLabel(pageNum)}.`, 'sucesso');
             } else {
                 _deps.exibirToast('Página alvo não encontrada no DOM.', 'erro');
             }
@@ -181,16 +205,16 @@ window.PdfEngine = (function () {
 
         try {
             const page = await _pdfDoc.getPage(pageNum);
-            const viewport = page.getViewport({ scale: 1.5 });
+            const viewport = page.getViewport({ scale: BASE_SCALE });
             const textContent = await page.getTextContent();
 
             let limiteY = null;
             for (const item of textContent.items) {
                 if (REGEX_RODAPE_ASSINATURA.test(item.str)) {
                     const [, vy] = viewport.convertToViewportPoint(item.transform[4], item.transform[5]);
-                    // Converte a altura real do glifo (pts PDF) para a escala 1.5 do viewport para obter o topo da linha
+                    // Converte a altura real do glifo (pts PDF) para a escala base do viewport para obter o topo da linha
                     const alturaPts = Math.abs(item.height || item.transform[3] || 10);
-                    const topoDoItem = vy - (alturaPts * 1.5) - 2;
+                    const topoDoItem = vy - (alturaPts * BASE_SCALE) - 2;
                     if (limiteY === null || topoDoItem < limiteY) limiteY = topoDoItem;
                 }
             }
@@ -215,7 +239,7 @@ window.PdfEngine = (function () {
         const targetPdfInstance = _pdfDoc;
         let textoExtraido = "";
         
-        const ESCALA_RENDERIZACAO_UI = 1.5; 
+        const ESCALA_RENDERIZACAO_UI = BASE_SCALE;
         const PADDING_SEGURANCA_PTS = 4;
         const TIME_BUDGET_MS = 40; 
         
@@ -283,6 +307,296 @@ window.PdfEngine = (function () {
     }
 
     /* ================================================
+       ESTADO POR PÁGINA, TRAVA DE FOCO E CONVERSÃO CANÔNICA
+       ================================================ */
+    function getPageViewState(pageNum = _currentPage) {
+        const override = _pageViewOverrides.get(pageNum);
+        return {
+            pageNum,
+            zoom: override ? override.zoom : 1.0,
+            rotation: override ? override.rotation : 0
+        };
+    }
+
+    function getOverridesCount() {
+        return _pageViewOverrides.size;
+    }
+
+    function _notificarEstadoVisualizacao(pageNum = _currentPage) {
+        if (typeof _deps.onPageViewStateChange === 'function') {
+            _deps.onPageViewStateChange(getPageViewState(pageNum));
+        }
+    }
+
+    function _liberarTravaPaginaAlvo(ressincronizarAposScroll = true) {
+        if (_paginaAlvoTravada === null) return;
+        _paginaAlvoTravada = null;
+        if (ressincronizarAposScroll) {
+            _sincronizarPaginaNoScroll = true;
+        }
+    }
+
+    function _sincronizarPaginaAtivaPelaViewport() {
+        const scrollContainer = document.getElementById('pdf-container');
+        if (!scrollContainer || _activePages.size === 0) return;
+
+        const scRect = scrollContainer.getBoundingClientRect();
+        const linhaLeituraY = scRect.top + (scRect.height * 0.18);
+
+        let candidata = null;
+        let menorDistancia = Infinity;
+
+        _activePages.forEach(container => {
+            const r = container.getBoundingClientRect();
+            if (r.top <= linhaLeituraY && r.bottom >= linhaLeituraY) {
+                candidata = container;
+                menorDistancia = 0;
+            } else if (menorDistancia > 0) {
+                const dist = Math.min(Math.abs(r.top - linhaLeituraY), Math.abs(r.bottom - linhaLeituraY));
+                if (dist < menorDistancia) {
+                    menorDistancia = dist;
+                    candidata = container;
+                }
+            }
+        });
+
+        if (candidata) {
+            const num = parseInt(candidata.dataset.pageNumber, 10);
+            if (!isNaN(num) && num !== _currentPage) {
+                _currentPage = num;
+                _deps.atualizarDisplayPaginador(num);
+                _notificarEstadoVisualizacao(num);
+            }
+        }
+    }
+
+    function _vincularListenersLiberacaoTrava() {
+        if (_navListenersBound) return;
+        const scrollContainer = document.getElementById('pdf-container');
+        if (!scrollContainer) return;
+
+        const NAV_KEYS = new Set(['PageDown', 'PageUp', 'ArrowDown', 'ArrowUp', 'Home', 'End', 'Space']);
+
+        scrollContainer.addEventListener('wheel', () => _liberarTravaPaginaAlvo(true), { passive: true });
+        scrollContainer.addEventListener('touchstart', () => _liberarTravaPaginaAlvo(true), { passive: true });
+        scrollContainer.addEventListener('pointerdown', (e) => {
+            if (e.target === scrollContainer) _liberarTravaPaginaAlvo(true);
+        }, { passive: true });
+
+        scrollContainer.addEventListener('scroll', () => {
+            if (!_sincronizarPaginaNoScroll || _paginaAlvoTravada !== null) return;
+            if (_scrollSyncRafId) return;
+            _scrollSyncRafId = requestAnimationFrame(() => {
+                _scrollSyncRafId = null;
+                _sincronizarPaginaNoScroll = false;
+                _sincronizarPaginaAtivaPelaViewport();
+            });
+        }, { passive: true });
+
+        document.addEventListener('keydown', (e) => {
+            if (_paginaAlvoTravada === null) return;
+            if (document.body.dataset.activeTab !== 'leitura') return;
+            const active = document.activeElement;
+            if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable)) return;
+            if (NAV_KEYS.has(e.code)) _liberarTravaPaginaAlvo(true);
+        }, { passive: true });
+
+        _navListenersBound = true;
+    }
+
+    /**
+     * Converte retângulo do espaço canônico (BASE_SCALE, rotação extra 0°)
+     * para a geometria atual (zoom, rotação) da página renderizada.
+     */
+    function _transformarRectParaViewportAtual(pageNum, rect) {
+        const { zoom, rotation } = getPageViewState(pageNum);
+        if (zoom === 1.0 && rotation === 0) return rect;
+
+        let x = rect.left;
+        let y = rect.top;
+        let w = rect.width;
+        let h = rect.height;
+
+        if (rotation !== 0) {
+            const baseDim = _pageBaseDimensions.get(pageNum);
+            if (baseDim) {
+                const W = baseDim.width;
+                const H = baseDim.height;
+                if (rotation === 90)       [x, y, w, h] = [H - (y + h), x, h, w];
+                else if (rotation === 180) [x, y, w, h] = [W - (x + w), H - (y + h), w, h];
+                else if (rotation === 270) [x, y, w, h] = [y, W - (x + w), h, w];
+            }
+        }
+
+        return {
+            ...rect,
+            left: x * zoom,
+            top: y * zoom,
+            width: w * zoom,
+            height: h * zoom
+        };
+    }
+
+    /**
+     * Inversa exata: converte retângulo do DOM atual para o espaço canônico
+     * antes de validar limiteRodape ou persistir no backup.
+     */
+    function normalizarRectParaBase(pageNum, rect) {
+        const { zoom, rotation } = getPageViewState(pageNum);
+        if (zoom === 1.0 && rotation === 0) return rect;
+
+        let rx = rect.left / zoom;
+        let ry = rect.top / zoom;
+        let rw = rect.width / zoom;
+        let rh = rect.height / zoom;
+
+        if (rotation !== 0) {
+            const baseDim = _pageBaseDimensions.get(pageNum);
+            if (baseDim) {
+                const W = baseDim.width;
+                const H = baseDim.height;
+                if (rotation === 90)       [rx, ry, rw, rh] = [ry, H - rx - rw, rh, rw];
+                else if (rotation === 180) [rx, ry, rw, rh] = [W - rx - rw, H - ry - rh, rw, rh];
+                else if (rotation === 270) [rx, ry, rw, rh] = [W - ry - rh, rx, rh, rw];
+            }
+        }
+
+        return {
+            ...rect,
+            left: rx,
+            top: ry,
+            width: rw,
+            height: rh
+        };
+    }
+
+    function _agendarTransformacaoPagina(pageNum, novoZoom, novaRotacao) {
+        if (!_pdfDoc) return;
+        const container = document.querySelector(`.pdf-page-container[data-page-number="${pageNum}"]`);
+        if (!container) return;
+
+        const estadoAnterior = getPageViewState(pageNum);
+        const rotNormalizada = ((novaRotacao % 360) + 360) % 360;
+        const zoomNormalizado = Number(novoZoom.toFixed(2));
+
+        if (zoomNormalizado === 1.0 && rotNormalizada === 0) {
+            _pageViewOverrides.delete(pageNum);
+        } else {
+            _pageViewOverrides.set(pageNum, { zoom: zoomNormalizado, rotation: rotNormalizada });
+        }
+
+        // Trava a página-alvo para impedir que o observer troque _currentPage durante ajustes
+        _paginaAlvoTravada = pageNum;
+        _currentPage = pageNum;
+        _deps.atualizarDisplayPaginador(pageNum);
+        _notificarEstadoVisualizacao(pageNum);
+
+        // Captura âncora 2D (ratioY e ratioX) apenas uma vez no início da rajada
+        if (!_scrollAnchors.has(pageNum)) {
+            const scrollContainer = document.getElementById('pdf-container');
+            if (scrollContainer) {
+                const scRect = scrollContainer.getBoundingClientRect();
+                const pgRect = container.getBoundingClientRect();
+                const centerYInPage = (scRect.height / 2) - (pgRect.top - scRect.top);
+                const centerXInPage = (scRect.width / 2) - (pgRect.left - scRect.left);
+                const ratioY = Math.max(0, Math.min(1, centerYInPage / (pgRect.height || 1)));
+                const ratioX = Math.max(0, Math.min(1, centerXInPage / (pgRect.width || 1)));
+                _scrollAnchors.set(pageNum, { ratioY, ratioX, baseRotation: estadoAnterior.rotation });
+            }
+        }
+
+        _pendingTransforms.set(pageNum, { zoom: zoomNormalizado, rotation: rotNormalizada });
+
+        if (_transformRafId === null) {
+            _transformRafId = requestAnimationFrame(() => {
+                _transformRafId = null;
+                const fila = Array.from(_pendingTransforms.keys());
+                _pendingTransforms.clear();
+
+                fila.forEach(pNum => {
+                    const targetEl = document.querySelector(`.pdf-page-container[data-page-number="${pNum}"]`);
+                    if (targetEl) {
+                        renderizarPaginaElemento(pNum, targetEl, { isTransformUpdate: true });
+                    }
+                });
+            });
+        }
+    }
+
+    function _paginaPossuiAlfinetes(pageNum) {
+        const listaTopicos = _deps.getTopicos() || [];
+        return listaTopicos.some(t =>
+            Array.isArray(t.marcosExtracao) && t.marcosExtracao.some(m => m.pagina === pageNum)
+        );
+    }
+
+    function alterarZoomPaginaAtual(direcao) {
+        if (!_pdfDoc) return;
+        const pageAlvo = _paginaAlvoTravada ?? _currentPage;
+        const { zoom, rotation } = getPageViewState(pageAlvo);
+        let idx = ZOOM_STEPS.findIndex(s => Math.abs(s - zoom) < 0.01);
+        if (idx === -1) idx = ZOOM_STEPS.indexOf(1.0);
+
+        const novoIdx = Math.max(0, Math.min(ZOOM_STEPS.length - 1, idx + direcao));
+        if (novoIdx === idx) return;
+
+        _agendarTransformacaoPagina(pageAlvo, ZOOM_STEPS[novoIdx], rotation);
+    }
+
+    function resetarZoomPaginaAtual() {
+        if (!_pdfDoc) return;
+        const pageAlvo = _paginaAlvoTravada ?? _currentPage;
+        const { zoom, rotation } = getPageViewState(pageAlvo);
+        if (zoom === 1.0) return;
+        _agendarTransformacaoPagina(pageAlvo, 1.0, rotation);
+    }
+
+    function girarPaginaAtual(deltaGraus = 90) {
+        if (!_pdfDoc) return;
+        const pageAlvo = _paginaAlvoTravada ?? _currentPage;
+        const { zoom, rotation } = getPageViewState(pageAlvo);
+        const novaRot = ((rotation + deltaGraus) % 360 + 360) % 360;
+
+        if (rotation === 0 && novaRot !== 0 && _paginaPossuiAlfinetes(pageAlvo)) {
+            _deps.exibirToast('Alfinetes do extrator ficam ocultos enquanto esta página estiver girada.', 'info');
+        }
+
+        _agendarTransformacaoPagina(pageAlvo, zoom, novaRot);
+    }
+
+    function resetarVisualizacaoPaginaAtual() {
+        if (!_pdfDoc) return;
+        const pageAlvo = _paginaAlvoTravada ?? _currentPage;
+        const { zoom, rotation } = getPageViewState(pageAlvo);
+        if (zoom === 1.0 && rotation === 0) return;
+        _agendarTransformacaoPagina(pageAlvo, 1.0, 0);
+    }
+
+    function limparEstadoVisualizacao() {
+        _pageViewOverrides.clear();
+        _pendingTransforms.clear();
+        _scrollAnchors.clear();
+        _paginaAlvoTravada = null;
+        _sincronizarPaginaNoScroll = false;
+        _notificarEstadoVisualizacao(_currentPage);
+    }
+
+    function restaurarOverridesVisualizacao(mapaOverrides) {
+        _pageViewOverrides.clear();
+        if (!mapaOverrides || typeof mapaOverrides !== 'object') return;
+        Object.entries(mapaOverrides).forEach(([pageKey, val]) => {
+            const pageNum = parseInt(pageKey, 10);
+            if (isNaN(pageNum) || pageNum < 1) return;
+            const zoom = typeof val === 'number' ? 1.0 : (val.zoom ?? 1.0);
+            const rotation = typeof val === 'number' ? val : (val.rotation ?? 0);
+            const rotNorm = ((rotation % 360) + 360) % 360;
+            if (zoom !== 1.0 || rotNorm !== 0) {
+                _pageViewOverrides.set(pageNum, { zoom, rotation: rotNorm });
+            }
+        });
+    }
+
+    /* ================================================
        CARREGAMENTO DE ARQUIVO E RENDERIZAÇÃO
        ================================================ */
     async function carregarPDF(file, isRetomada) {
@@ -315,6 +629,21 @@ window.PdfEngine = (function () {
                     _pdfDoc = pdf;
                     _pageMetadataCache.clear();
                     _footerBoundaryCache.clear();
+                    _pageBaseDimensions.clear();
+                    _pendingTransforms.clear();
+                    _scrollAnchors.clear();
+                    _paginaAlvoTravada = null;
+                    _sincronizarPaginaNoScroll = false;
+
+                    if (!isRetomada) {
+                        _pageViewOverrides.clear();
+                    } else {
+                        for (const key of _pageViewOverrides.keys()) {
+                            if (key > pdf.numPages) _pageViewOverrides.delete(key);
+                        }
+                    }
+
+                    _vincularListenersLiberacaoTrava();
                     document.getElementById('total-page-display').textContent = pdf.numPages;
 
                     try {
@@ -335,18 +664,29 @@ window.PdfEngine = (function () {
                     if (_pdfDestroyObserver) _pdfDestroyObserver.disconnect();
                     _activePages.clear();
 
-                    // Observer 1: Renderiza cedo (800px)
+                    // Observer 1: Renderiza cedo (800px) com Micro-Task Filtering e estado 'loading'
                     _pdfRenderObserver = new IntersectionObserver((entries) => {
                         entries.forEach(entry => {
-                            if (entry.isIntersecting && entry.target.dataset.loaded === 'false') {
-                                const pageNum = parseInt(entry.target.dataset.pageNumber);
-                                renderizarPaginaElemento(pageNum, entry.target);
-                                entry.target.dataset.loaded = 'true';
+                            const container = entry.target;
+
+                            if (entry.isIntersecting) {
+                                if (container.dataset.loaded === 'false') {
+                                    container.dataset.loaded = 'loading';
+                                    container._scrollRaf = requestAnimationFrame(() => {
+                                        renderizarPaginaElemento(parseInt(container.dataset.pageNumber, 10), container);
+                                    });
+                                }
+                            } else {
+                                if (container._scrollRaf && container.dataset.loaded === 'loading') {
+                                    cancelAnimationFrame(container._scrollRaf);
+                                    container._scrollRaf = null;
+                                    container.dataset.loaded = 'false';
+                                }
                             }
                         });
                     }, { root: document.getElementById('pdf-container'), rootMargin: '800px 0px', threshold: 0 });
 
-                    // Observer 2: Destrói tarde (Histerese de 3000px)
+                    // Observer 2: Destrói tarde (Histerese de 3000px — cobre 'true' e 'loading' contra vazamento de VRAM)
                     _pdfDestroyObserver = new IntersectionObserver((entries) => {
                         entries.forEach(entry => {
                             const container = entry.target;
@@ -354,7 +694,7 @@ window.PdfEngine = (function () {
                                 _activePages.add(container);
                             } else {
                                 _activePages.delete(container);
-                                if (container.dataset.loaded === 'true') {
+                                if (container.dataset.loaded !== 'false') {
                                     descarregarPaginaElemento(container);
                                     container.dataset.loaded = 'false';
                                 }
@@ -364,17 +704,19 @@ window.PdfEngine = (function () {
 
                     if (_pdfReadTracker) _pdfReadTracker.disconnect();
                     _pdfReadTracker = new IntersectionObserver((entries) => {
+                        if (_paginaAlvoTravada !== null) return;
                         entries.forEach(entry => {
                             if (entry.isIntersecting) {
-                                const pageNum = parseInt(entry.target.dataset.pageNumber);
+                                const pageNum = parseInt(entry.target.dataset.pageNumber, 10);
                                 _currentPage = pageNum;
                                 _deps.atualizarDisplayPaginador(pageNum);
+                                _notificarEstadoVisualizacao(pageNum);
                             }
                         });
                     }, { root: document.getElementById('pdf-container'), rootMargin: '-15% 0px -80% 0px', threshold: 0 });
 
                     const firstPage = await pdf.getPage(1);
-                    const viewportCSS = firstPage.getViewport({ scale: 1.5 });
+                    const viewportCSS = firstPage.getViewport({ scale: BASE_SCALE });
 
                     try {
                         const textContentFirstPage = await firstPage.getTextContent();
@@ -422,6 +764,7 @@ window.PdfEngine = (function () {
                         _pdfReadTracker.observe(pageContainer);
                     }
 
+                    _notificarEstadoVisualizacao(_currentPage);
                     await _deps.onPdfCarregado(isRetomada);
                 })
                 .catch(err => {
@@ -433,35 +776,49 @@ window.PdfEngine = (function () {
         fileReader.readAsArrayBuffer(file);
     }
 
-    async function renderizarPaginaElemento(num, container) {
+    async function renderizarPaginaElemento(num, container, options = {}) {
         if (!_pdfDoc) return;
 
+        const { isTransformUpdate = false } = options;
+        const isReRenderSemFlash = isTransformUpdate && container.dataset.loaded === 'true';
+
+        const renderSeq = (container._renderSeq = (container._renderSeq || 0) + 1);
         if (container._renderTask) container._renderTask.cancel();
-        container.innerHTML = '';
+
+        if (isReRenderSemFlash) {
+            container.classList.add('is-page-updating');
+        } else {
+            container.innerHTML = '';
+        }
 
         const page = await _pdfDoc.getPage(num);
+        if (container._renderSeq !== renderSeq) return;
+
         container._pdfPageRef = page; // Salva referência para GC granular
-        const dpr = window.devicePixelRatio || 1;
-        const scale = 1.5;
-        const viewport = page.getViewport({ scale: scale });
 
-        container.style.width = Math.floor(viewport.width) + 'px';
-        container.style.height = Math.floor(viewport.height) + 'px';
+        const baseViewport = page.getViewport({ scale: BASE_SCALE });
+        _pageBaseDimensions.set(num, { width: baseViewport.width, height: baseViewport.height });
 
+        const { zoom, rotation } = getPageViewState(num);
+        const finalScale = BASE_SCALE * zoom;
+        const finalRotation = ((page.rotate || 0) + rotation) % 360;
+        const viewport = page.getViewport({ scale: finalScale, rotation: finalRotation });
+
+        // Teto de VRAM em telas Retina + zoom 250%
+        const rawDpr = window.devicePixelRatio || 1;
+        const rawPixelArea = viewport.width * viewport.height * rawDpr * rawDpr;
+        const effectiveDpr = rawPixelArea > MAX_CANVAS_PIXELS
+            ? Math.max(1, Math.sqrt(MAX_CANVAS_PIXELS / Math.max(1, viewport.width * viewport.height)))
+            : rawDpr;
+
+        // 1. Renderização pesada do <canvas> 100% OFF-DOM (folha atual segue visível sem flash)
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
-        canvas.width = Math.floor(viewport.width * dpr);
-        canvas.height = Math.floor(viewport.height * dpr);
+        canvas.width = Math.floor(viewport.width * effectiveDpr);
+        canvas.height = Math.floor(viewport.height * effectiveDpr);
         canvas.style.cssText = 'position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: block;';
-        container.appendChild(canvas);
 
-        const transform = dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : null;
-
-        const textLayer = document.createElement('div');
-        textLayer.className = 'textLayer';
-        textLayer.style.setProperty('--scale-factor', viewport.scale);
-        container.appendChild(textLayer);
-
+        const transform = effectiveDpr !== 1 ? [effectiveDpr, 0, 0, effectiveDpr, 0, 0] : null;
         container._renderTask = page.render({
             canvasContext: ctx,
             transform: transform,
@@ -470,21 +827,70 @@ window.PdfEngine = (function () {
 
         try {
             await container._renderTask.promise;
-            
+            if (container._renderSeq !== renderSeq) return;
+
+            // 2. Commit Atômico: redimensiona e substitui os filhos num único frame
+            const textLayer = document.createElement('div');
+            textLayer.className = 'textLayer';
+            textLayer.style.setProperty('--scale-factor', viewport.scale);
+
+            const highlightLayerDiv = document.createElement('div');
+            highlightLayerDiv.className = 'highlightLayer';
+            highlightLayerDiv.style.setProperty('--scale-factor', viewport.scale);
+
+            container.style.width = Math.floor(viewport.width) + 'px';
+            container.style.height = Math.floor(viewport.height) + 'px';
+            container.classList.toggle('is-page-transformed', zoom !== 1.0 || rotation !== 0);
+            container.replaceChildren(canvas, textLayer, highlightLayerDiv);
+            container.classList.remove('is-page-updating');
+            container.dataset.loaded = 'true';
+
+            // 3. Compensa o scroll em 2D usando a âncora preservada
+            const anchor = _scrollAnchors.get(num);
+            if (anchor) {
+                _scrollAnchors.delete(num);
+                const scrollContainer = document.getElementById('pdf-container');
+                if (scrollContainer) {
+                    const scRect = scrollContainer.getBoundingClientRect();
+                    const newPgRect = container.getBoundingClientRect();
+
+                    const targetTop =
+                        scrollContainer.scrollTop +
+                        (newPgRect.top - scRect.top) +
+                        (newPgRect.height * anchor.ratioY) -
+                        (scRect.height / 2);
+
+                    const effectiveRatioX = (rotation === anchor.baseRotation) ? anchor.ratioX : 0.5;
+                    const maxLeft = Math.max(0, scrollContainer.scrollWidth - scrollContainer.clientWidth);
+                    const rawTargetLeft = newPgRect.width > scRect.width
+                        ? scrollContainer.scrollLeft +
+                          (newPgRect.left - scRect.left) +
+                          (newPgRect.width * effectiveRatioX) -
+                          (scRect.width / 2)
+                        : 0;
+
+                    scrollContainer.scrollTo({
+                        top: Math.max(0, targetTop),
+                        left: Math.max(0, Math.min(maxLeft, rawTargetLeft)),
+                        behavior: 'auto'
+                    });
+                }
+            }
+
+            // 4. Desenha highlights sincronamente
+            _renderizarHighlightsDaPagina(num, highlightLayerDiv);
+
+            // 5. Renderiza TextLayer e AnnotationLayer já conectados ao DOM
             const textContent = await page.getTextContent();
+            if (container._renderSeq !== renderSeq) return;
+
             const tl = new pdfjsLib.TextLayer({
                 textContentSource: textContent,
                 container: textLayer,
                 viewport: viewport
             });
             await tl.render();
-
-            const highlightLayerDiv = document.createElement('div');
-            highlightLayerDiv.className = 'highlightLayer';
-            highlightLayerDiv.style.setProperty('--scale-factor', viewport.scale);
-            container.appendChild(highlightLayerDiv);
-
-            _renderizarHighlightsDaPagina(num, highlightLayerDiv);
+            if (container._renderSeq !== renderSeq) return;
 
             if (!_pageMetadataCache.has(num)) {
                 extrairMetadadosDaPagina(num, textContent).then(() => {
@@ -493,7 +899,7 @@ window.PdfEngine = (function () {
             }
 
             const annotationData = await page.getAnnotations();
-            if (annotationData && annotationData.length > 0 && container.contains(textLayer)) {
+            if (annotationData && annotationData.length > 0 && container._renderSeq === renderSeq && container.contains(textLayer)) {
                 const annotationLayerDiv = document.createElement('div');
                 annotationLayerDiv.className = 'annotationLayer';
                 annotationLayerDiv.style.setProperty('--scale-factor', viewport.scale);
@@ -504,22 +910,28 @@ window.PdfEngine = (function () {
                     viewport: viewport,
                     div: annotationLayerDiv,
                     linkService: jurisLinkService,
-                    renderInteractiveForms: false 
+                    renderInteractiveForms: false
                 });
 
-                await annotationLayer.render({ 
+                await annotationLayer.render({
                     annotations: annotationData,
-                    viewport: viewport, 
+                    viewport: viewport,
                     intent: 'display',
-                    linkService: jurisLinkService 
+                    linkService: jurisLinkService
                 });
             }
         } catch (err) {
             if (err.name !== 'RenderingCancelledException') {
                 console.error('Erro ao renderizar página PDF:', err);
             }
+            if (container._renderSeq === renderSeq) {
+                container.classList.remove('is-page-updating');
+                if (!isReRenderSemFlash) container.dataset.loaded = 'false';
+            }
         } finally {
-            container._renderTask = null;
+            if (container._renderSeq === renderSeq) {
+                container._renderTask = null;
+            }
         }
     }
 
@@ -539,9 +951,9 @@ window.PdfEngine = (function () {
                     const numIdeia = (parentIndex !== undefined ? parentIndex : idx) + 1;
 
                     if ((item.tipo === 'texto' || item.tipo === 'imagem') && item.highlightRects && item.highlightRects.length > 0) {
-                        const rectsNestaPagina = item.highlightRects.filter(r =>
-                            r.page !== undefined ? r.page === pageNum : item.paginaFisica === pageNum
-                        );
+                        const rectsNestaPagina = item.highlightRects
+                            .filter(r => r.page !== undefined ? r.page === pageNum : item.paginaFisica === pageNum)
+                            .map(r => _transformarRectParaViewportAtual(pageNum, r));
 
                         if (rectsNestaPagina.length > 0) {
                             // 1. Renderiza grifos/bordas pertencentes a esta página (suporta captura multi-página)
@@ -640,12 +1052,13 @@ window.PdfEngine = (function () {
             desenharMarcacoes(topico.anotacoes);
 
             // [NOVO] Renderização dos Alfinetes de Extração (Dumb Components)
-            if (topico.marcosExtracao && topico.marcosExtracao.length > 0) {
+            const { zoom: pageZoom, rotation: pageRot } = getPageViewState(pageNum);
+            if (pageRot === 0 && topico.marcosExtracao && topico.marcosExtracao.length > 0) {
                 topico.marcosExtracao.forEach(marco => {
                     if (marco.pagina === pageNum) {
                         const pin = document.createElement('div');
                         pin.className = 'pdf-extrator-pin'; 
-                        pin.style.top = marco.offsetY + 'px';
+                        pin.style.top = (marco.offsetY * pageZoom) + 'px';
                         pin.style.borderColor = topico.cor; 
                         pin.style.color = topico.cor; 
                         
@@ -666,7 +1079,8 @@ window.PdfEngine = (function () {
         if (window.TextCaptureManager && typeof window.TextCaptureManager.obterHighlightsProvisoriosParaPagina === 'function') {
             const blocosProvisorios = window.TextCaptureManager.obterHighlightsProvisoriosParaPagina(pageNum);
             blocosProvisorios.forEach(bloco => {
-                bloco.rects.forEach(rect => {
+                const rectsProjetados = bloco.rects.map(r => _transformarRectParaViewportAtual(pageNum, r));
+                rectsProjetados.forEach(rect => {
                     const marker = document.createElement('div');
                     marker.className = 'pdf-highlight-rect is-draft-capture';
                     marker.style.top = rect.top + 'px';
@@ -676,8 +1090,8 @@ window.PdfEngine = (function () {
                     highlightLayerDiv.appendChild(marker);
                 });
 
-                if (bloco.mostrarBadge && bloco.rects.length > 0) {
-                    const firstRect = bloco.rects[0];
+                if (bloco.mostrarBadge && rectsProjetados.length > 0) {
+                    const firstRect = rectsProjetados[0];
                     const draftBadge = document.createElement('div');
                     draftBadge.className = 'pdf-annotation-badge is-draft-badge';
                     draftBadge.style.top = (firstRect.top + (firstRect.height / 2)) + 'px';
@@ -706,16 +1120,31 @@ window.PdfEngine = (function () {
        OTIMIZAÇÃO DE MEMÓRIA (GARBAGE COLLECTION) E RECUPERAÇÃO
        ================================================ */
     function descarregarPaginaElemento(container) {
+        // Invalida imediatamente qualquer await em voo (getPage / render / textContent / annotations)
+        container._renderSeq = (container._renderSeq || 0) + 1;
+
+        if (container._scrollRaf) {
+            cancelAnimationFrame(container._scrollRaf);
+            container._scrollRaf = null;
+        }
         if (container._renderTask) {
             container._renderTask.cancel();
             container._renderTask = null;
         }
+
+        const pageNum = parseInt(container.dataset.pageNumber, 10);
+        if (!isNaN(pageNum)) {
+            _pendingTransforms.delete(pageNum);
+            _scrollAnchors.delete(pageNum);
+        }
+
+        container.classList.remove('is-page-updating');
         container.innerHTML = '';
-        
+
         // Limpeza granular O(1) de cache na API do PDF.js 
         // (Libera Memória VRAM e Bitmap sem destruir o Parser Global)
         if (container._pdfPageRef && typeof container._pdfPageRef.cleanup === 'function') {
-            try { container._pdfPageRef.cleanup(); } catch(e){}
+            try { container._pdfPageRef.cleanup(); } catch (e) {}
             container._pdfPageRef = null;
         }
     }
@@ -728,7 +1157,7 @@ window.PdfEngine = (function () {
             // Se o navegador ceifou o contexto do Canvas na suspensão da aba
             if (!canvas || canvas.width === 0) {
                 descarregarPaginaElemento(container);
-                renderizarPaginaElemento(parseInt(container.dataset.pageNumber), container);
+                renderizarPaginaElemento(parseInt(container.dataset.pageNumber, 10), container);
                 container.dataset.loaded = 'true';
             }
         });
@@ -747,15 +1176,30 @@ window.PdfEngine = (function () {
             _pdfReadTracker.disconnect();
             _pdfReadTracker = null;
         }
+        if (_transformRafId) {
+            cancelAnimationFrame(_transformRafId);
+            _transformRafId = null;
+        }
+        if (_scrollSyncRafId) {
+            cancelAnimationFrame(_scrollSyncRafId);
+            _scrollSyncRafId = null;
+        }
         _activePages.clear();
         _pdfDoc = null;
         _pageLabelsGlobais = null;
         _pageMetadataCache.clear();
         _footerBoundaryCache.clear();
+        _pageBaseDimensions.clear();
+        _pageViewOverrides.clear();
+        _pendingTransforms.clear();
+        _scrollAnchors.clear();
+        _paginaAlvoTravada = null;
+        _sincronizarPaginaNoScroll = false;
         _currentPage = 1;
     }
 
     return {
+        BASE_SCALE,
         init,
         carregarPDF,
         sincronizarHighlightsGerais,
@@ -768,6 +1212,15 @@ window.PdfEngine = (function () {
         goToPage: jurisLinkService.goTo,
         getPdfDoc: () => _pdfDoc,
         getCurrentPage: () => _currentPage,
+        getPageViewState,
+        getOverridesCount,
+        normalizarRectParaBase,
+        alterarZoomPaginaAtual,
+        resetarZoomPaginaAtual,
+        girarPaginaAtual,
+        resetarVisualizacaoPaginaAtual,
+        limparEstadoVisualizacao,
+        restaurarOverridesVisualizacao,
         forcarReRenderizacaoVisiveis,
         encerrar
     };
