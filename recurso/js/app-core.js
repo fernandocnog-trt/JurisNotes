@@ -726,6 +726,7 @@ document.addEventListener("DOMContentLoaded", () => {
             getTopicos: () => topicos,
             exibirToast: exibirToast,
             atualizarDisplayPaginador: atualizarDisplayPaginador,
+            onPageViewStateChange: atualizarControlesVisualizacaoPagina,
             validarPdf: async (buffer) => {
                 const isValido = await BackupManager.validarPdf(buffer);
                 if (isValido) return true;
@@ -867,6 +868,64 @@ function atualizarDisplayPaginador(pageNum) {
     }
 }
 
+window.togglePainelVisualizacaoPagina = function(forcarEstado = null) {
+    const row = document.getElementById('page-view-tools-row');
+    const btn = document.getElementById('btn-toggle-page-view-tools');
+    const panel = document.getElementById('floating-page-panel');
+    if (!row || !btn) return;
+
+    const abrir = (forcarEstado !== null) ? Boolean(forcarEstado) : row.hidden;
+    row.hidden = !abrir;
+    btn.setAttribute('aria-expanded', String(abrir));
+    if (panel) panel.classList.toggle('is-expanded', abrir);
+};
+
+function atualizarControlesVisualizacaoPagina(state) {
+    const zoom = state?.zoom ?? 1.0;
+    const rotation = state?.rotation ?? 0;
+    const pct = Math.round(zoom * 100);
+    const isZoomMod = Math.abs(zoom - 1.0) > 0.01;
+    const isRotMod = rotation !== 0;
+    const temAlteracao = isZoomMod || isRotMod;
+
+    const panel = document.getElementById('floating-page-panel');
+    const summaryDot = document.getElementById('page-view-summary-dot');
+    const btnToggle = document.getElementById('btn-toggle-page-view-tools');
+    const zoomDisplay = document.getElementById('page-zoom-display');
+    const btnZoomReset = document.getElementById('btn-page-zoom-reset');
+    const btnZoomOut = document.getElementById('btn-page-zoom-out');
+    const btnZoomIn = document.getElementById('btn-page-zoom-in');
+    const btnRotate = document.getElementById('btn-page-rotate');
+    const rotDisplay = document.getElementById('page-rotate-display');
+    const btnResetAll = document.getElementById('btn-page-view-reset');
+
+    if (panel) panel.classList.toggle('has-active-transform', temAlteracao);
+    if (summaryDot) summaryDot.style.display = temAlteracao ? 'block' : 'none';
+    if (btnToggle) {
+        btnToggle.classList.toggle('is-modified', temAlteracao);
+        btnToggle.title = temAlteracao
+            ? `Página ajustada (${pct}%${isRotMod ? ` · ${rotation}°` : ''}) — clique para abrir/fechar controles`
+            : 'Abrir/fechar controles de Zoom e Rotação desta página';
+    }
+
+    if (zoomDisplay) zoomDisplay.textContent = `${pct}%`;
+    if (btnZoomReset) {
+        btnZoomReset.classList.toggle('is-modified', isZoomMod);
+        btnZoomReset.setAttribute('aria-label', `Zoom atual da página: ${pct}%. Clique para restaurar o zoom normal`);
+    }
+    if (btnZoomOut) btnZoomOut.disabled = zoom <= 0.6;
+    if (btnZoomIn) btnZoomIn.disabled = zoom >= 2.5;
+
+    if (btnRotate) btnRotate.classList.toggle('is-modified', isRotMod);
+    if (rotDisplay) {
+        rotDisplay.style.display = isRotMod ? 'inline' : 'none';
+        rotDisplay.textContent = `${rotation}°`;
+    }
+    if (btnResetAll) {
+        btnResetAll.style.display = temAlteracao ? 'inline-flex' : 'none';
+    }
+}
+
 window.aplicarTema = function(alvo, tema) { 
     const regex = alvo === 'processo' ? /^theme-processo-/ : /^theme-anotacoes-/;
     document.body.className = document.body.className.split(' ').filter(c => !regex.test(c)).join(' ');
@@ -901,6 +960,8 @@ window.toggleFocoModal = function(ativar) {
 function trocarAba(aba) {
     document.body.dataset.activeTab = aba;
 
+    const pdfStage = document.getElementById('pdf-stage');
+    if (pdfStage) pdfStage.style.display                       = aba === 'leitura'   ? 'flex'  : 'none';
     document.getElementById('pdf-container').style.display     = aba === 'leitura'   ? 'flex'  : 'none';
     document.getElementById('history-container').style.display = aba === 'historico' ? 'block' : 'none';
     document.getElementById('tab-leitura').classList.toggle('active',   aba === 'leitura');
@@ -1092,6 +1153,8 @@ function encerrarSessao() {
     wrapper.style.display = 'none';
     document.getElementById('pdf-placeholder').style.display = 'flex';
     document.getElementById('floating-page-panel').style.display = 'none';
+    togglePainelVisualizacaoPagina(false);
+    atualizarControlesVisualizacaoPagina({ zoom: 1.0, rotation: 0 });
     document.getElementById('btn-exportar-topico').style.display = 'none';
     document.getElementById('current-page-display').textContent  = '1';
     document.getElementById('pdf-upload').value = '';
@@ -2662,9 +2725,13 @@ window.substituirPdfSessaoAtiva = async function(event) {
         await BackupManager.atualizarHashPdf(arrayBuffer);
         
         if (window.PdfEngine) {
-            await PdfEngine.carregarPDF(file, true); // true evita apagar o fichário
+            await PdfEngine.carregarPDF(file, true); // true preserva fichário e overrides
             if (typeof salvarBackupAutomatico === 'function') await salvarBackupAutomatico();
-            exibirToast("Processo atualizado com sucesso. Sessão mantida!", "sucesso");
+            const overridesAtivos = typeof PdfEngine.getOverridesCount === 'function' ? PdfEngine.getOverridesCount() : 0;
+            const msgAtualizacao = overridesAtivos > 0
+                ? 'Processo atualizado! Ajustes de zoom/rotação mantidos por número de página.'
+                : 'Processo atualizado com sucesso. Sessão mantida!';
+            exibirToast(msgAtualizacao, 'sucesso');
         }
         window.SplashScreenManager.hide();
         event.target.value = '';

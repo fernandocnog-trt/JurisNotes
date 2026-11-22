@@ -909,12 +909,22 @@ overlay.addEventListener('mousedown', function (e) {
         });
 
         if (!targetContainer) return;
-        
-        extratorTempState = { 
-            pagina: parseInt(targetContainer.dataset.pageNumber), 
-            offsetY: localY 
+
+        const paginaAlvo = parseInt(targetContainer.dataset.pageNumber, 10);
+        const viewState = (window.PdfEngine && typeof PdfEngine.getPageViewState === 'function')
+            ? PdfEngine.getPageViewState(paginaAlvo)
+            : { zoom: 1.0, rotation: 0 };
+
+        if (viewState.rotation !== 0) {
+            exibirToast('Restaure a rotação desta página para 0° antes de marcar o alfinete de extração.', 'aviso');
+            return;
+        }
+
+        extratorTempState = {
+            pagina: paginaAlvo,
+            offsetY: localY / viewState.zoom
         };
-        
+
         modoExtratorAtivo = false;
         document.body.classList.remove('modo-extrator-ativo');
         overlay.style.display = 'none';
@@ -1010,31 +1020,48 @@ overlay.addEventListener('mouseup', function (e) {
         return;
     }
 
-    // --- CAPTURA DE COORDENADAS PARA O CRACHÁ ---
+    // --- CAPTURA DE COORDENADAS PARA O CRACHÁ (ESPAÇO CANÔNICO) ---
     const containerRect = targetContainer.getBoundingClientRect();
-    _tempHighlightState.rects = [{
+    const paginaRecorte = parseInt(targetContainer.dataset.pageNumber, 10);
+    const rawCropRect = {
         top: cropTop - containerRect.top,
         left: cropLeft - containerRect.left,
         width: cropW,
         height: cropH
-    }];
-    _tempHighlightState.paginaFisica = parseInt(targetContainer.dataset.pageNumber);
-    // ------------------------------------------------
+    };
+    const normalizedCropRect = (window.PdfEngine && typeof PdfEngine.normalizarRectParaBase === 'function')
+        ? PdfEngine.normalizarRectParaBase(paginaRecorte, rawCropRect)
+        : rawCropRect;
 
+    _tempHighlightState.rects = [normalizedCropRect];
+    _tempHighlightState.paginaFisica = paginaRecorte;
+    // --------------------------------------------------------------
+
+    // Normaliza a resolução de saída do recorte para impedir inflação do JSON em zoom alto
+    const MAX_CROP_SIDE = 1600;
     const scaleX = canvas.width  / canvasRect.width;
     const scaleY = canvas.height / canvasRect.height;
 
+    const srcPxX = Math.round(srcX * scaleX);
+    const srcPxY = Math.round(srcY * scaleY);
+    const srcPxW = Math.max(1, Math.round(srcW * scaleX));
+    const srcPxH = Math.max(1, Math.round(srcH * scaleY));
+
+    const maxSide = Math.max(srcPxW, srcPxH);
+    const downscale = maxSide > MAX_CROP_SIDE ? (MAX_CROP_SIDE / maxSide) : 1;
+
     const recorteCanvas = document.createElement('canvas');
-    recorteCanvas.width  = Math.round(srcW * scaleX);
-    recorteCanvas.height = Math.round(srcH * scaleY);
+    recorteCanvas.width  = Math.max(1, Math.round(srcPxW * downscale));
+    recorteCanvas.height = Math.max(1, Math.round(srcPxH * downscale));
 
     try {
-        recorteCanvas.getContext('2d').drawImage(
+        const recorteCtx = recorteCanvas.getContext('2d');
+        recorteCtx.imageSmoothingEnabled = true;
+        recorteCtx.imageSmoothingQuality = 'high';
+        recorteCtx.drawImage(
             canvas,
-            Math.round(srcX * scaleX), Math.round(srcY * scaleY),
-            recorteCanvas.width,       recorteCanvas.height,
-            0, 0,
-            recorteCanvas.width,       recorteCanvas.height
+            srcPxX, srcPxY, srcPxW, srcPxH,
+            0, 0, recorteCanvas.width, recorteCanvas.height
         );
         const imageDataUrl = recorteCanvas.toDataURL('image/png');
 
