@@ -6,13 +6,50 @@
 /* ================================================
    1. LEITOR DE PDF E PAGINAÇÃO FLUTUANTE
    ================================================ */
-#pdf-container { flex: 1; overflow: auto; padding: 24px; display: flex; flex-direction: column; align-items: center; position: relative; }
+.pdf-stage {
+    flex: 1;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    min-width: 0;
+    overflow: hidden;
+}
+
+#pdf-container {
+    flex: 1;
+    overflow: auto;
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    position: relative;
+}
 #pdf-placeholder { color: #aab; text-align: center; margin-top: 60px; font-size: 0.95rem; line-height: 1.7; }
 #pdf-placeholder svg { display: block; margin: 0 auto 16px; opacity: 0.3; }
-#pdf-wrapper { position: relative; display: none; flex-shrink: 0; width: 100%; flex-direction: column; align-items: center; }
+
+/* safe center: páginas normais ficam centralizadas; páginas ampliadas expandem só à direita sem cortar a margem esquerda */
+#pdf-wrapper {
+    position: relative;
+    display: none;
+    flex-shrink: 0;
+    width: 100%;
+    flex-direction: column;
+    align-items: center;
+    align-items: safe center;
+}
 
 .pdf-page-container { background-color: var(--pdf-bg-color) !important; transition: background-color 0.3s ease; }
 .pdf-page-container canvas { mix-blend-mode: multiply; }
+
+/* Indicação visual discreta para páginas com zoom/rotação ativos e estado de atualização off-DOM */
+.pdf-page-container.is-page-transformed {
+    outline: 2px solid rgba(26, 58, 92, 0.32);
+    outline-offset: 2px;
+}
+.pdf-page-container.is-page-updating {
+    cursor: progress;
+}
 
 .textLayer { position: absolute; top: 0; left: 0; right: 0; bottom: 0; overflow: hidden; line-height: 1; pointer-events: auto; user-select: text; transform-origin: 0% 0%; }
 .textLayer span { color: transparent; position: absolute; white-space: pre; cursor: text; transform-origin: 0% 0%; }
@@ -23,7 +60,71 @@
 .annotationLayer .linkAnnotation > a { position: absolute; font-size: 1em; top: 0; left: 0; width: 100%; height: 100%; background: transparent; transition: background 0.15s ease, box-shadow 0.15s ease; cursor: pointer; }
 .annotationLayer .linkAnnotation > a:hover { background: rgba(26, 58, 92, 0.15); box-shadow: 0 0 0 2px rgba(26, 58, 92, 0.3) inset; border-radius: 4px; }
 
-.floating-page-panel { position: sticky; top: 16px; align-self: flex-end; margin-right: 8px; z-index: var(--z-floating-panel); display: flex; gap: 8px; align-items: center; background: rgba(255, 255, 255, 0.92); padding: 6px 8px; border-radius: 10px; box-shadow: var(--shadow-md); border: 1px solid var(--border-color); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }
+/* Regras oficiais de rotação do PDF.js v4 escopadas no container de página */
+.pdf-page-container .textLayer[data-main-rotation="90"],
+.pdf-page-container .annotationLayer[data-main-rotation="90"] {
+    transform: rotate(90deg) translateY(-100%);
+}
+.pdf-page-container .textLayer[data-main-rotation="180"],
+.pdf-page-container .annotationLayer[data-main-rotation="180"] {
+    transform: rotate(180deg) translate(-100%, -100%);
+}
+.pdf-page-container .textLayer[data-main-rotation="270"],
+.pdf-page-container .annotationLayer[data-main-rotation="270"] {
+    transform: rotate(270deg) translateX(-100%);
+}
+
+/* Painel flutuante ancorado em #pdf-stage (imune ao scroll horizontal/vertical; right: 24px evita cobrir scrollbar) */
+.floating-page-panel {
+    position: absolute;
+    top: 16px;
+    right: 24px;
+    z-index: var(--z-floating-panel);
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+    background: rgba(255, 255, 255, 0.94);
+    padding: 6px 8px;
+    border-radius: 10px;
+    box-shadow: var(--shadow-md);
+    border: 1px solid var(--border-color);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    opacity: 0.58;
+    transition: opacity 0.18s ease, box-shadow 0.18s ease;
+}
+
+.floating-page-panel:hover,
+.floating-page-panel:focus-within,
+.floating-page-panel.is-expanded,
+.floating-page-panel.has-active-transform {
+    opacity: 1;
+}
+
+.floating-panel-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.floating-panel-row--tools {
+    justify-content: space-between;
+    padding-top: 6px;
+    border-top: 1px solid var(--border-color);
+}
+
+.floating-panel-row--tools[hidden] {
+    display: none;
+}
+
+.floating-panel-divider {
+    width: 1px;
+    height: 20px;
+    background-color: var(--border-color);
+    flex-shrink: 0;
+}
+
 .current-page-badge { background: var(--trt-blue); color: white; font-size: 0.82rem; font-weight: 700; padding: 7px 12px; border-radius: 6px; display: flex; align-items: center; justify-content: center; min-width: 72px; white-space: nowrap; user-select: none; }
 .page-nav-box.floating-nav { background: transparent; border: 1px solid var(--border-color); margin-bottom: 0; }
 .page-nav-box.floating-nav:focus-within { border-color: var(--trt-blue-mid); background: white; }
@@ -31,6 +132,103 @@
 .page-nav-box.floating-nav .nav-icon:hover { color: var(--trt-blue); }
 .page-nav-box.floating-nav #goto-page-input { color: var(--text-dark); width: 62px; }
 .page-nav-box.floating-nav #goto-page-input::placeholder { color: #bbb; font-weight: 400; }
+
+.page-view-btn {
+    position: relative;
+    height: 28px;
+    min-width: 28px;
+    padding: 0 6px;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+    background: #ffffff;
+    color: var(--trt-blue);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 0.74rem;
+    font-weight: 700;
+    transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.1s ease;
+    user-select: none;
+}
+
+.page-view-btn svg {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+}
+
+.page-view-btn:hover:not(:disabled) {
+    background: var(--trt-light-bg);
+    border-color: var(--trt-blue-mid);
+}
+
+.page-view-btn:active:not(:disabled) {
+    transform: scale(0.95);
+}
+
+.page-view-btn:focus-visible {
+    outline: 2px solid var(--trt-blue-mid);
+    outline-offset: 1px;
+}
+
+.page-view-btn:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+}
+
+.page-view-btn--toggle[aria-expanded="true"] {
+    background: #e3f2fd;
+    border-color: var(--trt-blue-mid);
+}
+
+.page-view-summary-dot {
+    position: absolute;
+    top: -3px;
+    right: -3px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #fbc02d;
+    border: 1.5px solid var(--trt-blue);
+}
+
+.page-view-btn--label {
+    min-width: 48px;
+    padding: 0 6px;
+    font-variant-numeric: tabular-nums;
+}
+
+.page-view-btn.is-modified {
+    background: var(--trt-blue);
+    border-color: var(--trt-blue);
+    color: #ffffff;
+}
+
+.page-view-btn.is-modified:hover:not(:disabled) {
+    background: var(--trt-blue-mid);
+    border-color: var(--trt-blue-mid);
+}
+
+.page-rotate-badge {
+    font-size: 0.68rem;
+    font-weight: 800;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+}
+
+.page-view-btn--reset {
+    color: #c62828;
+    border-color: #ef9a9a;
+    background: #fff5f5;
+}
+
+.page-view-btn--reset:hover:not(:disabled) {
+    background: #ffebee;
+    border-color: #c62828;
+}
 
 /* ================================================
    OTIMIZAÇÃO NATIVA: CONTENT VISIBILITY

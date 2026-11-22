@@ -415,28 +415,102 @@
             </div>
         </div>
         
-        <div id="pdf-container">
-            
-            <!-- Painel flutuante sticky: paginador + indicador de página atual -->
+        <!-- Wrapper estático: ancora o painel flutuante fora do scroller, imune ao scroll X e Y -->
+        <div id="pdf-stage" class="pdf-stage">
+
+            <!-- Painel flutuante compacto (máx. ~255px de largura em 2 fileiras) -->
             <div class="floating-page-panel" id="floating-page-panel" style="display: none;">
-                <div class="current-page-badge" title="Página sendo visualizada">
-                    Pág. <span id="current-page-display">1</span>&nbsp;de&nbsp;<span id="total-page-display">?</span>
+                <!-- Fileira 1: Indicador de página + Busca + Toggle dos controles de visualização -->
+                <div class="floating-panel-row floating-panel-row--main">
+                    <div class="current-page-badge" title="Página sendo visualizada">
+                        Pág. <span id="current-page-display">1</span>&nbsp;de&nbsp;<span id="total-page-display">?</span>
+                    </div>
+                    <div class="page-nav-box floating-nav" title="Digite o número e pressione Enter">
+                        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" onclick="irParaPagina()">
+                            <circle cx="11" cy="11" r="8"></circle>
+                            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                        </svg>
+                        <input type="number" id="goto-page-input" placeholder="Ir p/" min="1">
+                    </div>
+                    <button type="button"
+                            class="page-view-btn page-view-btn--toggle"
+                            id="btn-toggle-page-view-tools"
+                            onclick="togglePainelVisualizacaoPagina()"
+                            aria-expanded="false"
+                            aria-controls="page-view-tools-row"
+                            title="Abrir/fechar controles de Zoom e Rotação desta página">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <circle cx="11" cy="11" r="8"></circle>
+                            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                            <line x1="11" y1="8" x2="11" y2="14"></line>
+                            <line x1="8" y1="11" x2="14" y2="11"></line>
+                        </svg>
+                        <span class="page-view-summary-dot" id="page-view-summary-dot" style="display: none;" aria-hidden="true"></span>
+                    </button>
                 </div>
-                <div class="page-nav-box floating-nav" title="Digite o número e pressione Enter">
-                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" onclick="irParaPagina()">
-                        <circle cx="11" cy="11" r="8"></circle>
-                        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-                    </svg>
-                    <input type="number" id="goto-page-input" placeholder="Ir p/" min="1">
+
+                <!-- Fileira 2 (expansível): Zoom, Rotação e Reset da página atual -->
+                <div class="floating-panel-row floating-panel-row--tools" id="page-view-tools-row" role="group" aria-label="Zoom e rotação da página atual" hidden>
+                    <button type="button" class="page-view-btn" id="btn-page-zoom-out"
+                            onclick="PdfEngine.alterarZoomPaginaAtual(-1)"
+                            title="Diminuir zoom desta página"
+                            aria-label="Diminuir zoom da página atual">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <line x1="5" y1="12" x2="19" y2="12"></line>
+                        </svg>
+                    </button>
+
+                    <button type="button" class="page-view-btn page-view-btn--label" id="btn-page-zoom-reset"
+                            onclick="PdfEngine.resetarZoomPaginaAtual()"
+                            title="Voltar zoom desta página para 100%"
+                            aria-label="Zoom atual da página: 100%. Clique para restaurar o zoom normal">
+                        <span id="page-zoom-display">100%</span>
+                    </button>
+
+                    <button type="button" class="page-view-btn" id="btn-page-zoom-in"
+                            onclick="PdfEngine.alterarZoomPaginaAtual(1)"
+                            title="Aumentar zoom desta página"
+                            aria-label="Aumentar zoom da página atual">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <line x1="12" y1="5" x2="12" y2="19"></line>
+                            <line x1="5" y1="12" x2="19" y2="12"></line>
+                        </svg>
+                    </button>
+
+                    <div class="floating-panel-divider" aria-hidden="true"></div>
+
+                    <button type="button" class="page-view-btn page-view-btn--rotate" id="btn-page-rotate"
+                            onclick="PdfEngine.girarPaginaAtual(event.shiftKey ? -90 : 90)"
+                            title="Girar esta página 90° (Shift + Clique gira -90°)"
+                            aria-label="Girar página atual em 90 graus">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <polyline points="23 4 23 10 17 10"></polyline>
+                            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+                        </svg>
+                        <span class="page-rotate-badge" id="page-rotate-display" style="display: none;">90°</span>
+                    </button>
+
+                    <button type="button" class="page-view-btn page-view-btn--reset" id="btn-page-view-reset"
+                            onclick="PdfEngine.resetarVisualizacaoPaginaAtual()"
+                            title="Voltar esta página ao modo normal (100% e 0°)"
+                            aria-label="Restaurar visualização normal da página atual"
+                            style="display: none;">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <polyline points="1 4 1 10 7 10"></polyline>
+                            <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
+                        </svg>
+                    </button>
                 </div>
             </div>
 
-            <p id="pdf-placeholder">
-                Carregue um arquivo PDF para iniciar a leitura.<br>
-                <span style="font-size:0.82rem; color:#ccc;">Use o painel à esquerda.</span>
-            </p>
-            <div id="pdf-wrapper"></div>
-            <div id="crop-overlay"></div>
+            <div id="pdf-container">
+                <p id="pdf-placeholder">
+                    Carregue um arquivo PDF para iniciar a leitura.<br>
+                    <span style="font-size:0.82rem; color:#ccc;">Use o painel à esquerda.</span>
+                </p>
+                <div id="pdf-wrapper"></div>
+                <div id="crop-overlay"></div>
+            </div>
         </div>
         
         <div id="history-container">
