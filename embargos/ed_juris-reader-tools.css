@@ -230,6 +230,14 @@
     border-color: #c62828;
 }
 
+/* Arquitetura Reativa (SSOT Fail-Safe):
+   Remove #pdf-stage (e o paginador, seu filho) do fluxo flex em qualquer aba diferente
+   de "leitura". Exige presença de [data-active-tab] para evitar ocultação indevida
+   caso o atributo ainda não tenha sido inicializado no <body>. */
+body[data-active-tab]:not([data-active-tab="leitura"]) #pdf-stage {
+    display: none !important;
+}
+
 /* ================================================
    OTIMIZAÇÃO NATIVA: CONTENT VISIBILITY
    ================================================ */

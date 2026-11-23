@@ -6,7 +6,13 @@
 /* ================================================
    1. FICHÁRIO E SISTEMA DE ABAS INTERNAS
    ================================================ */
-#history-container { flex: 1; overflow: auto; padding: 20px 24px; display: none; }
+#history-container {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding: 20px 24px;
+    display: none;
+}
 .topics-tab-bar { display: flex; flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; padding-top: 4px; margin-bottom: 0; scrollbar-width: none; position: relative; z-index: 10; }
 .topics-tab-bar::-webkit-scrollbar { display: none; }
 .topic-tab-btn { 

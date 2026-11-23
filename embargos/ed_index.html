@@ -39,12 +39,12 @@
 <link rel="stylesheet" href="ed_juris-core.css?v=2.0.2">
 
 <!-- 2. Ferramentas Globais, PDF, Áudio e Modais (Ferramentas de Entrada) -->
-<link rel="stylesheet" href="ed_juris-reader-tools.css?v=3.0.5">
+<link rel="stylesheet" href="ed_juris-reader-tools.css?v=3.0.6">
 
 <!-- 3. Fichário, Timeline, Fases Metodológicas e Acervo (Síntese e Saída) -->
-<link rel="stylesheet" href="ed_juris-timeline-cards.css?v=3.2.1">
+<link rel="stylesheet" href="ed_juris-timeline-cards.css?v=3.2.2">
 </head>
-<body>
+<body data-active-tab="leitura">
     
     <!-- SVG SPRITE (Ícones Vetoriais do Editor) -->
     <svg style="display: none;">
@@ -558,53 +558,59 @@
     <script>
         (async function AppBootstrapper() {
             try {
-                // PASSO 1: Injeção Idempotente de Templates e Módulos (Assets de ED e Globais)
+                const APP_VERSION = '3.2.4'; // Incremente esta única constante a cada deploy do módulo ED
+                const SHARED_TOOLS_VERSIONS = {
+                    relatorio: '1.0.0', // Versionamento independente de ../ferramentas/juris-relatorio.*
+                    prompts:   '2.2.0'  // Mantém a mesma URL entre módulos para reaproveitar cache HTTP
+                };
+                const withVersion = (path, version) => `${path.split('?')[0]}?v=${version}`;
+
+                // PASSO 1: Injeção Idempotente de Templates e Módulos (Assets de ED e Ferramentas Compartilhadas)
                 const assets = [
-                    { html: 'ed_modais.html', js: null, id: 'modal-gerador-contexto' },
-                    // ATENÇÃO: Uso de '../' para voltar à raiz a partir da pasta do módulo ED
-                    { html: '../ferramentas/juris-relatorio.template.html', js: '../ferramentas/juris-relatorio.js', id: 'modal-juris-relatorio' },
-                    { html: '../ferramentas/juris-prompts.template.html?v=2.2.0', js: '../ferramentas/juris-prompts.js?v=2.2.0', id: 'modal-juris-prompts' }
+                    { html: 'ed_modais.html', js: null, id: 'modal-gerador-contexto', version: APP_VERSION },
+                    { html: '../ferramentas/juris-relatorio.template.html', js: '../ferramentas/juris-relatorio.js', id: 'modal-juris-relatorio', version: SHARED_TOOLS_VERSIONS.relatorio },
+                    { html: '../ferramentas/juris-prompts.template.html',   js: '../ferramentas/juris-prompts.js',   id: 'modal-juris-prompts',   version: SHARED_TOOLS_VERSIONS.prompts }
                 ];
 
                 for (const asset of assets) {
                     if (!document.getElementById(asset.id)) {
-                        const res = await fetch(asset.html);
+                        const res = await fetch(withVersion(asset.html, asset.version));
                         if (res.ok) {
                             const htmlText = await res.text();
                             document.getElementById('modais-dinamicos-container').insertAdjacentHTML('beforeend', htmlText);
-                            if (asset.js) await import(asset.js);
+                            if (asset.js) await import(withVersion(asset.js, asset.version));
                         } else if (asset.html === 'ed_modais.html') {
                             throw new Error(`Falha no fetch do ed_modais.html (Status: ${res.status})`);
                         }
                     }
                 }
-                
-                // PASSO 2: Fila ordenada de scripts locais da aplicação ED
+
+                // PASSO 2: Fila ordenada de scripts locais do módulo ED (versionamento atômico único)
                 const scriptsParaCarregar = [
                     "js/ed_store.js",
-                    "js/ed_backup-manager.js?v=3.2.2",
+                    "js/ed_backup-manager.js",
                     "js/ed_thesis-guard.js",
-                    "js/ed_topics-manager.js?v=3.2.1",
+                    "js/ed_topics-manager.js",
                     "js/ed_document-views.js",
                     "js/ed_balanca-manager.js",
-                    "js/ed_contrato-manager.js?v=2.2.0",
-                    "js/ed_interaction-tools.js?v=1.0.1",
+                    "js/ed_contrato-manager.js",
+                    "js/ed_interaction-tools.js",
                     "js/ed_audio-manager.js",
                     "js/ed_annotation-actions.js",
                     "js/ed_juris-editor.js",
                     "js/ed_export-manager.js",
-                    "js/ed_pdf-engine.js?v=3.2.3",
+                    "js/ed_pdf-engine.js",
                     "js/ed_pje-parser.js",
                     "js/ed_recommendation-service.js",
-                    "js/ed_text-capture-manager.js?v=1.0.0",
-                    "js/ed_app-core.js?v=3.2.3",
+                    "js/ed_text-capture-manager.js",
+                    "js/ed_app-core.js",
                     "js/ed_acervo-controller.js"
                 ];
 
                 for (const src of scriptsParaCarregar) {
                     await new Promise((resolve, reject) => {
                         const script = document.createElement('script');
-                        script.src = src;
+                        script.src = withVersion(src, APP_VERSION);
                         script.async = false; // Garante a ordem exata do array
                         script.onload = resolve;
                         script.onerror = () => reject(new Error(`O arquivo não foi encontrado ou foi bloqueado: ${src}`));
